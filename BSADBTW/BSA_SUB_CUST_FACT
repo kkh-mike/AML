@@ -1,171 +1,163 @@
-CIF_KEY	uniqueidentifier	Checked
-OCCUP	varchar(15)	Checked
-IDENT	varchar(1)	Checked
-IDENTO	nvarchar(100)	Checked
-ISSBY	varchar(2)	Checked
-IDNUM	nvarchar(200)	Checked
-RELFI	varchar(40)	Checked
-RELFIOTH	varchar(40)	Checked
-INRLFI	varchar(1)	Checked
-INRLFISTAT	varchar(1)	Checked
-INRLDT	datetime	Checked
-EXEMPTED	char(1)	Checked
-CUST_TYPE_CDE	varchar(1)	Checked
-CTRYCD	varchar(2)	Checked
-EXEMPTDT	datetime	Checked
-EXEMPTEXPDT	datetime	Checked
-PREVEXEMPTDT	datetime	Checked
-NEWRNW_STAT	char(1)	Checked
-AMDRVK_STAT	char(1)	Checked
-EXEMPTBASIS	varchar(6)	Checked
-EXEMPTCTRL	char(1)	Checked
-APPR_OFCR	varchar(30)	Checked
-APPR_OFCR_LNME	varchar(16)	Checked
-APPR_OFCR_FNME	varchar(16)	Checked
-APPR_OFCR_MNME	varchar(1)	Checked
-APPR_OFCR_TITLE	varchar(30)	Checked
-APPRDT	datetime	Checked
-CONTACTPHN	varchar(12)	Checked
-CONTACTFNME	nvarchar(16)	Checked
-CONTACTLNME	nvarchar(16)	Checked
-CONTACTMNME	nvarchar(1)	Checked
-LUPDUID	varchar(30)	Checked
-LUPDDT	datetime	Checked
-EXEMPT_REM	varchar(255)	Checked
-EXEMPT_AMT	decimal(12, 2)	Checked
-MTRIND	char(1)	Checked
-MTREM	varchar(255)	Checked
-RNW_APPR_OFCR_LNME	varchar(16)	Checked
-RNW_APPR_OFCR_FNME	varchar(16)	Checked
-RNW_APPR_OFCR_MNME	varchar(1)	Checked
-DCCNO	char(14)	Checked
-FILEDIND	char(1)	Checked
-VERIFIED	char(1)	Checked
-SUSPICIOUS	char(1)	Checked
-HIGHRISK	char(1)	Checked
-CLASSNOTE	nvarchar(MAX)	Checked
-NXTRVDT	datetime	Checked
-HRScore	decimal(7, 2)	Checked
-WATCH_LIST_REASON	varchar(1000)	Checked
-BizOwnershipCode	varchar(10)	Checked
-APPR_OFCR_PHN	varchar(12)	Checked
-RNW_APPR_OFCR_PHN	varchar(12)	Checked
-RNW_APPR_OFCR_TITLE	varchar(30)	Checked
-ID_EXPIRY_DT	datetime	Checked
-CIPScore	decimal(7, 2)	Checked
-CHIGHRISK	char(1)	Checked
-CRScore	decimal(7, 2)	Checked
-SC01	varchar(15)	Checked
-SC02	varchar(15)	Checked
-SC03	varchar(15)	Checked
-SC04	varchar(15)	Checked
-SC05	varchar(15)	Checked
-SC06	varchar(15)	Checked
-SC07	varchar(15)	Checked
-SC08	varchar(15)	Checked
-SC09	varchar(15)	Checked
-SC10	varchar(15)	Checked
-SC11	varchar(15)	Checked
-SC12	varchar(15)	Checked
-SC13	varchar(15)	Checked
-SC14	varchar(15)	Checked
-SC15	varchar(15)	Checked
-SC16	varchar(15)	Checked
-SC17	varchar(15)	Checked
-SC18	varchar(15)	Checked
-SC19	varchar(15)	Checked
-IsPEPHit	char(1)	Checked
-IsOtherListHit	char(1)	Checked
-CIPRiskRanking	char(1)	Checked
-CustomerNo	varchar(50)	Checked
-HR_LastReviewedBy	nvarchar(30)	Checked
-HR_LastReviewedDt	datetime	Checked
-HR_LastReviewedUTCDt	datetime	Checked
-Legal_ID	varchar(50)	Checked
-HRSRiskRanking	char(1)	Checked
-CIP_LastReviewedBy	nvarchar(30)	Checked
-CIP_LastReviewedDt	datetime	Checked
-CIP_LastReviewedUTCDt	datetime	Checked
-RiskScore	decimal(7, 2)	Checked
-Risk_LastReviewedBy	nvarchar(30)	Checked
-Risk_LastReviewedDt	datetime	Checked
-Risk_LastReviewedUTCDt	datetime	Checked
-ISSBY_STATE	varchar(2)	Checked
-EmployerName	nvarchar(350)	Checked
-EmployerAddr	nvarchar(500)	Checked
-EmployerPhone	varchar(16)	Checked
-IsBelievedSuspicious	char(1)	Checked
-IsMoneyTransmitter	char(1)	Checked
-IsNevadaBranch	char(1)	Checked
-IsTransmitOwnNetwork	char(1)	Checked
-IsCashChecker	char(1)	Checked
-IsCashRedeemer	char(1)	Checked
-HasNegativeNews	char(1)	Checked
-NegativeNewsRemark	nvarchar(MAX)	Checked
-IsBelievedSuspiciousRemark	nvarchar(MAX)	Checked
-BIZ_ESTABLISH_YR	nvarchar(10)	Checked
-IsSARFiled	bit	Checked
-IsSARFiled_LastUpdatedDate	datetime	Checked
-IsSARFiled_LastUpdatedDate_UTC	datetime	Checked
-TIME_KEY	varchar(8)	Checked
-HoldMailAcct	bit	Checked
-DepositNetAsset	bit	Checked
-BankDealingPeriodCode	nvarchar(2)	Checked
-IsMultipleAcctName	bit	Checked
-IsComplexStructure	bit	Checked
-IsOtherPersonHandleBusiness	bit	Checked
-CustomerCategory	varchar(50)	Checked
-IsForeignEntity	bit	Checked
-IslkNegNewsRelatedParties	bit	Checked
-IslkAcctPositionListedCompany	bit	Checked
-IslkCustSpecLocation	bit	Checked
-lkCustWealthCtry	varchar(100)	Checked
-CoreSystem	varchar(50)	Checked
-Alias_Name	nvarchar(350)	Checked
-Place_Of_Birth	varchar(2)	Checked
-ElectricalPaymentAccount	varchar(50)	Checked
-IdentityAuthenticationMechanism1	varchar(50)	Checked
-IdentityAuthenticationMechanism2	varchar(100)	Checked
-Main_Business_Address	nvarchar(200)	Checked
-Main_Business_Country	varchar(50)	Checked
-Cust_Product_Service	varchar(MAX)	Checked
-Cust_Method_Of_Opening	varchar(50)	Checked
-Cust_Account_Purpose	varchar(MAX)	Checked
-Source_Of_Fund	varchar(50)	Checked
-Source_Of_Wealth	varchar(50)	Checked
-Business_Operation_Stat	varchar(1)	Checked
-First_Trxn_Amt	decimal(24, 2)	Checked
-Serving_Entity	nvarchar(350)	Checked
-JobTitle	int	Checked
-Cust_With_Bearer_Shares	varchar(1)	Checked
-Uncooperative_Flag	varchar(1)	Checked
-Trustee_Flag	varchar(1)	Checked
-Spec_Product_Risk_Code	varchar(100)	Checked
-OBUFlag	nchar(1)	Checked
-OBUCustomerType	int	Checked
-CustomerScale	int	Checked
-CustomerLevel	int	Checked
-AnnualIncome	decimal(24, 2)	Checked
-Education	int	Checked
-Corr_Addr_Change_Flag	varchar(1)	Checked
-MailRejectCode	int	Checked
-SARExcludeFlag	int	Checked
-Is_PEP	varchar(1)	Checked
-Is_Foreign_PEP	varchar(1)	Checked
-Is_Domestic_PEP	varchar(1)	Checked
-Is_Foreign_Org_PEP	varchar(1)	Checked
-Is_EX_PEP	varchar(1)	Checked
-Cust_RP_Is_PEP	varchar(1)	Checked
-Is_NN	varchar(1)	Checked
-Is_Blacklist	varchar(1)	Checked
-Is_High_Risk_Remark	varchar(50)	Checked
-Warn_Restrict_Account	varchar(1)	Checked
-Gender	varchar(1)	Checked
-Nationality2	varchar(2)	Checked
-Unique_ID_Issuing_Ctry	varchar(2)	Checked
-MultiAcctAdjRiskFactor	varchar(50)	Checked
-AccountOfficerEmployeeId	varchar(50)	Checked
-AccountOfficerEmployeeName	nvarchar(50)	Checked
-SAR_BranchNo	varchar(50)	Checked
-Risk_LastReviewedDt_User	datetime	Checked
-		Unchecked
+# BSA_SUB_CUST_FACT 欄位定義
+
+AML 客戶事實表（BSA_SUB_CUST_FACT）欄位清單
+
+## 欄位表格
+
+| 序號 | 欄位名稱 | 資料型別 | 狀態 | 說明 |
+|------|----------|----------|------|------|
+| 1 | CIF_KEY | uniqueidentifier | Checked | 主鍵 |
+| 2 | OCCUP | varchar(15) | Checked | 職業 |
+| 3 | IDENT | varchar(1) | Checked | 身份別 |
+| 4 | IDENTO | nvarchar(100) | Checked | 身份證字號或其他 |
+| 5 | ISSBY | varchar(2) | Checked | 發證單位 |
+| 6 | IDNUM | nvarchar(200) | Checked | 證件號碼 |
+| 7 | RELFI | varchar(40) | Checked | 關係人 |
+| 8 | RELFIOTH | varchar(40) | Checked | 關係人其他 |
+| 9 | INRLFI | varchar(1) | Checked | - |
+| 10 | INRLFISTAT | varchar(1) | Checked | - |
+| 11 | INRLDT | datetime | Checked | - |
+| 12 | EXEMPTED | char(1) | Checked | 是否豁免 |
+| 13 | CUST_TYPE_CDE | varchar(1) | Checked | 客戶類型 |
+| 14 | CTRYCD | varchar(2) | Checked | 國家代碼 |
+| 15 | EXEMPTDT | datetime | Checked | 豁免日期 |
+| 16 | EXEMPTEXPDT | datetime | Checked | 豁免到期日 |
+| 17 | PREVEXEMPTDT | datetime | Checked | 前次豁免日期 |
+| 18 | NEWRNW_STAT | char(1) | Checked | - |
+| 19 | AMDRVK_STAT | char(1) | Checked | - |
+| 20 | EXEMPTBASIS | varchar(6) | Checked | 豁免依據 |
+| 21 | EXEMPTCTRL | char(1) | Checked | - |
+| 22 | APPR_OFCR | varchar(30) | Checked | 審核人員 |
+| 23 | APPR_OFCR_LNME | varchar(16) | Checked | 審核人員姓 |
+| 24 | APPR_OFCR_FNME | varchar(16) | Checked | 審核人員名 |
+| 25 | APPR_OFCR_MNME | varchar(1) | Checked | 審核人員中間名 |
+| 26 | APPR_OFCR_TITLE | varchar(30) | Checked | 審核人員職稱 |
+| 27 | APPRDT | datetime | Checked | 審核日期 |
+| 28 | CONTACTPHN | varchar(12) | Checked | 聯絡電話 |
+| 29 | CONTACTFNME | nvarchar(16) | Checked | 聯絡人名 |
+| 30 | CONTACTLNME | nvarchar(16) | Checked | 聯絡人姓 |
+| 31 | CONTACTMNME | nvarchar(1) | Checked | 聯絡人中間名 |
+| 32 | LUPDUID | varchar(30) | Checked | 最後更新者 |
+| 33 | LUPDDT | datetime | Checked | 最後更新日期 |
+| 34 | EXEMPT_REM | varchar(255) | Checked | 豁免備註 |
+| 35 | EXEMPT_AMT | decimal(12, 2) | Checked | 豁免金額 |
+| 36 | MTRIND | char(1) | Checked | - |
+| 37 | MTREM | varchar(255) | Checked | - |
+| 38 | RNW_APPR_OFCR_LNME | varchar(16) | Checked | 續約審核人員姓 |
+| 39 | RNW_APPR_OFCR_FNME | varchar(16) | Checked | 續約審核人員名 |
+| 40 | RNW_APPR_OFCR_MNME | varchar(1) | Checked | 續約審核人員中間名 |
+| 41 | DCCNO | char(14) | Checked | - |
+| 42 | FILEDIND | char(1) | Checked | - |
+| 43 | VERIFIED | char(1) | Checked | 已驗證 |
+| 44 | SUSPICIOUS | char(1) | Checked | 可疑 |
+| 45 | HIGHRISK | char(1) | Checked | 高風險 |
+| 46 | CLASSNOTE | nvarchar(MAX) | Checked | 分類備註 |
+| 47 | NXTRVDT | datetime | Checked | 下次審核日期 |
+| 48 | HRScore | decimal(7, 2) | Checked | 高風險分數 |
+| 49 | WATCH_LIST_REASON | varchar(1000) | Checked | 監控清單原因 |
+| 50 | BizOwnershipCode | varchar(10) | Checked | 企業所有權代碼 |
+| 51 | APPR_OFCR_PHN | varchar(12) | Checked | - |
+| 52 | RNW_APPR_OFCR_PHN | varchar(12) | Checked | - |
+| 53 | RNW_APPR_OFCR_TITLE | varchar(30) | Checked | - |
+| 54 | ID_EXPIRY_DT | datetime | Checked | - |
+| 55 | CIPScore | decimal(7, 2) | Checked | - |
+| 56 | CHIGHRISK | char(1) | Checked | - |
+| 57 | CRScore | decimal(7, 2) | Checked | - |
+| 58-72 | SC01 ~ SC19 | varchar(15) | Checked | 各種 SC 欄位 |
+| 73 | IsPEPHit | char(1) | Checked | - |
+| 74 | IsOtherListHit | char(1) | Checked | - |
+| 75 | CIPRiskRanking | char(1) | Checked | - |
+| 76 | CustomerNo | varchar(50) | Checked | 客戶編號 |
+| 77 | HR_LastReviewedBy | nvarchar(30) | Checked | - |
+| 78 | HR_LastReviewedDt | datetime | Checked | - |
+| 79 | HR_LastReviewedUTCDt | datetime | Checked | - |
+| 80 | Legal_ID | varchar(50) | Checked | - |
+| 81 | HRSRiskRanking | char(1) | Checked | - |
+| 82 | CIP_LastReviewedBy | nvarchar(30) | Checked | - |
+| 83 | CIP_LastReviewedDt | datetime | Checked | - |
+| 84 | CIP_LastReviewedUTCDt | datetime | Checked | - |
+| 85 | RiskScore | decimal(7, 2) | Checked | 風險分數 |
+| 86 | Risk_LastReviewedBy | nvarchar(30) | Checked | - |
+| 87 | Risk_LastReviewedDt | datetime | Checked | - |
+| 88 | Risk_LastReviewedUTCDt | datetime | Checked | - |
+| 89 | ISSBY_STATE | varchar(2) | Checked | - |
+| 90 | EmployerName | nvarchar(350) | Checked | 雇主名稱 |
+| 91 | EmployerAddr | nvarchar(500) | Checked | 雇主地址 |
+| 92 | EmployerPhone | varchar(16) | Checked | 雇主電話 |
+| 93 | IsBelievedSuspicious | char(1) | Checked | - |
+| 94 | IsMoneyTransmitter | char(1) | Checked | - |
+| 95 | IsNevadaBranch | char(1) | Checked | - |
+| 96 | IsTransmitOwnNetwork | char(1) | Checked | - |
+| 97 | IsCashChecker | char(1) | Checked | - |
+| 98 | IsCashRedeemer | char(1) | Checked | - |
+| 99 | HasNegativeNews | char(1) | Checked | - |
+| 100 | NegativeNewsRemark | nvarchar(MAX) | Checked | - |
+| 101 | IsBelievedSuspiciousRemark | nvarchar(MAX) | Checked | - |
+| 102 | BIZ_ESTABLISH_YR | nvarchar(10) | Checked | - |
+| 103 | IsSARFiled | bit | Checked | - |
+| 104 | IsSARFiled_LastUpdatedDate | datetime | Checked | - |
+| 105 | IsSARFiled_LastUpdatedDate_UTC | datetime | Checked | - |
+| 106 | TIME_KEY | varchar(8) | Checked | - |
+| 107 | HoldMailAcct | bit | Checked | - |
+| 108 | DepositNetAsset | bit | Checked | - |
+| 109 | BankDealingPeriodCode | nvarchar(2) | Checked | - |
+| 110 | IsMultipleAcctName | bit | Checked | - |
+| 111 | IsComplexStructure | bit | Checked | - |
+| 112 | IsOtherPersonHandleBusiness | bit | Checked | - |
+| 113 | CustomerCategory | varchar(50) | Checked | - |
+| 114 | IsForeignEntity | bit | Checked | - |
+| 115 | IslkNegNewsRelatedParties | bit | Checked | - |
+| 116 | IslkAcctPositionListedCompany | bit | Checked | - |
+| 117 | IslkCustSpecLocation | bit | Checked | - |
+| 118 | lkCustWealthCtry | varchar(100) | Checked | - |
+| 119 | CoreSystem | varchar(50) | Checked | - |
+| 120 | Alias_Name | nvarchar(350) | Checked | - |
+| 121 | Place_Of_Birth | varchar(2) | Checked | - |
+| 122 | ElectricalPaymentAccount | varchar(50) | Checked | - |
+| 123 | IdentityAuthenticationMechanism1 | varchar(50) | Checked | - |
+| 124 | IdentityAuthenticationMechanism2 | varchar(100) | Checked | - |
+| 125 | Main_Business_Address | nvarchar(200) | Checked | - |
+| 126 | Main_Business_Country | varchar(50) | Checked | - |
+| 127 | Cust_Product_Service | varchar(MAX) | Checked | 產品服務 |
+| 128 | Cust_Method_Of_Opening | varchar(50) | Checked | - |
+| 129 | Cust_Account_Purpose | varchar(MAX) | Checked | - |
+| 130 | Source_Of_Fund | varchar(50) | Checked | 資金來源 |
+| 131 | Source_Of_Wealth | varchar(50) | Checked | - |
+| 132 | Business_Operation_Stat | varchar(1) | Checked | - |
+| 133 | First_Trxn_Amt | decimal(24, 2) | Checked | - |
+| 134 | Serving_Entity | nvarchar(350) | Checked | - |
+| 135 | JobTitle | int | Checked | - |
+| 136 | Cust_With_Bearer_Shares | varchar(1) | Checked | - |
+| 137 | Uncooperative_Flag | varchar(1) | Checked | - |
+| 138 | Trustee_Flag | varchar(1) | Checked | - |
+| 139 | Spec_Product_Risk_Code | varchar(100) | Checked | - |
+| 140 | OBUFlag | nchar(1) | Checked | - |
+| 141 | OBUCustomerType | int | Checked | - |
+| 142 | CustomerScale | int | Checked | - |
+| 143 | CustomerLevel | int | Checked | - |
+| 144 | AnnualIncome | decimal(24, 2) | Checked | 年收入 |
+| 145 | Education | int | Checked | - |
+| 146 | Corr_Addr_Change_Flag | varchar(1) | Checked | - |
+| 147 | MailRejectCode | int | Checked | - |
+| 148 | SARExcludeFlag | int | Checked | - |
+| 149 | Is_PEP | varchar(1) | Checked | 是否 PEP |
+| 150 | Is_Foreign_PEP | varchar(1) | Checked | - |
+| 151 | Is_Domestic_PEP | varchar(1) | Checked | - |
+| 152 | Is_Foreign_Org_PEP | varchar(1) | Checked | - |
+| 153 | Is_EX_PEP | varchar(1) | Checked | - |
+| 154 | Cust_RP_Is_PEP | varchar(1) | Checked | - |
+| 155 | Is_NN | varchar(1) | Checked | - |
+| 156 | Is_Blacklist | varchar(1) | Checked | - |
+| 157 | Is_High_Risk_Remark | varchar(50) | Checked | - |
+| 158 | Warn_Restrict_Account | varchar(1) | Checked | - |
+| 159 | Gender | varchar(1) | Checked | - |
+| 160 | Nationality2 | varchar(2) | Checked | - |
+| 161 | Unique_ID_Issuing_Ctry | varchar(2) | Checked | - |
+| 162 | MultiAcctAdjRiskFactor | varchar(50) | Checked | - |
+| 163 | AccountOfficerEmployeeId | varchar(50) | Checked | - |
+| 164 | AccountOfficerEmployeeName | nvarchar(50) | Checked | - |
+| 165 | SAR_BranchNo | varchar(50) | Checked | - |
+| 166 | Risk_LastReviewedDt_User | datetime | Checked | - |
+| 167 | (空白行) |  | Unchecked | - |
+
+**總計約 167 個欄位**。表格已優化為易讀格式。
