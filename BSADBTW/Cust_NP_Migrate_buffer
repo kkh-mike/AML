@@ -1,0 +1,11 @@
+Column_name	Type	Computed	Length	Prec	Scale	Nullable	TrimTrailingBlanks	FixedLenNullInSource	Collation
+CIF_KEY	varchar	no	100	     	     	yes	yes	yes	Chinese_Taiwan_Stroke_CI_AS
+IsSARFiled	bit	no	1	     	     	yes	(n/a)	(n/a)	NULL
+PEPBitwiseCode	int	no	4	10   	0    	yes	(n/a)	(n/a)	NULL
+ReviewDt	varchar	no	50	     	     	yes	yes	yes	Chinese_Taiwan_Stroke_CI_AS
+HIGHRISK	char	no	1	     	     	yes	yes	yes	Chinese_Taiwan_Stroke_CI_AS
+RiskScore	decimal	no	9	18   	0    	yes	(n/a)	(n/a)	NULL
+Warn_Restrict_Account	bit	no	1	     	     	yes	(n/a)	(n/a)	NULL
+SDST2400001	bit	no	1	     	     	yes	(n/a)	(n/a)	NULL
+IsComplexStructure	bit	no	1	     	     	yes	(n/a)	(n/a)	NULL
+IsBearerShares	bit	no	1	     	     	yes	(n/a)	(n/a)	NULL
