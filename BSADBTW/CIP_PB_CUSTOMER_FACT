@@ -1,0 +1,17 @@
+CIF_KEY	uniqueidentifier	Checked
+C_STATE	varchar(2)	Checked
+C_CTRYCD	varchar(2)	Checked
+P_STATE	varchar(2)	Checked
+P_CTRYCD	varchar(2)	Checked
+M_STATE	varchar(2)	Checked
+M_CTRYCD	varchar(2)	Checked
+NAICS_CDE	nvarchar(50)	Checked
+BIRTHDT	datetime	Checked
+Employee_Ind	varchar(1)	Checked
+Contractor_Ind	varchar(1)	Checked
+Supplier_Ind	varchar(1)	Checked
+NATIONALITY_1	varchar(2)	Checked
+NATIONALITY_2	varchar(2)	Checked
+INCORPORATION_DATE	datetime	Checked
+Customer_Segment	varchar(10)	Checked
+		Unchecked
