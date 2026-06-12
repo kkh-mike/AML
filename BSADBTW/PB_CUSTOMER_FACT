@@ -1,101 +1,108 @@
-Column_name	Type	Computed	Length	Prec	Scale	Nullable	TrimTrailingBlanks	FixedLenNullInSource	Collation
-time_key	varchar	no	8	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-BNK_NBR	varchar	no	10	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-CIF_KEY	uniqueidentifier	no	16	     	     	yes	(n/a)	(n/a)	NULL
-CUST_TYPE_CDE	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-CUST_TAX_ID	varchar	no	30	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-BRNCH_NBR	varchar	no	50	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-BRNCH_NME	nvarchar	no	200	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-CUST_NME	nvarchar	no	700	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-NATIVE_CUST_NME	nvarchar	no	700	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-FNAME	nvarchar	no	300	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-LNAME	nvarchar	no	300	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-MNAME	nvarchar	no	100	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-CST_CNTR_NBR	varchar	no	7	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-C_ADDRESS_1	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-C_ADDRESS_2	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-C_ADDRESS_3	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-C_ADDRESS_4	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-C_ZIP_CODE	varchar	no	5	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-C_ZIP_4	varchar	no	4	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-C_STATE	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-C_CITY	nvarchar	no	50	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-C_CTRYCD	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-P_ADDRESS_1	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-P_ADDRESS_2	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-P_ADDRESS_3	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-P_ADDRESS_4	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-P_ZIP_CODE	varchar	no	5	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-P_ZIP_4	varchar	no	4	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-P_STATE	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-P_CITY	nvarchar	no	50	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-P_CTRYCD	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-M_ADDRESS_1	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-M_ADDRESS_2	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-M_ADDRESS_3	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-M_ADDRESS_4	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-M_ZIP_CODE	varchar	no	5	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-M_ZIP_4	varchar	no	4	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-M_STATE	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-M_CITY	nvarchar	no	50	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-M_CTRYCD	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-HOME_PHONE_NBR	varchar	no	14	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-HOME_PHONE_EXT	varchar	no	10	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-BUSINESS_PHONE_NBR	varchar	no	14	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-BUSINESS_PHONE_EXT	varchar	no	10	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-HANDPHONE_NBR	varchar	no	14	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-FAX_NBR	varchar	no	14	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-EMAIL	varchar	no	500	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-PRMY_OFFCR_NBR	varchar	no	50	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-PRMY_OFFCR_NME	nvarchar	no	200	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-SEC_OFFCR_NBR	varchar	no	30	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-SEC_OFFCR_NME	nvarchar	no	100	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-PRMY_LN_OFFCR_NBR	varchar	no	30	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-PRMY_LN_OFFCR_NME	nvarchar	no	100	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-SEC_LN_OFFCR_NBR	varchar	no	30	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-SEC_LN_OFFCR_NME	nvarchar	no	100	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-OPEN_DTE	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
-CLOSED_DTE	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
-PRCS_DTE	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
-HHOLD_KEY	varchar	no	20	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-PRMY_CUST_IND	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-NAICS_CDE	nvarchar	no	100	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-NOTCAL	bit	no	1	     	     	yes	(n/a)	(n/a)	NULL
-BIRTHDT	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
-TAXIDCD	char	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-TAXID	varchar	no	30	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-CDBANAM	nvarchar	no	70	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-CBUSPHN	varchar	no	14	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-CHMPHN	varchar	no	14	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-Employee_Ind	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-Employee_Cde	varchar	no	30	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-Employee_ID	varchar	no	30	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-Contractor_Ind	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-Contractor_CDE	varchar	no	15	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-Contractor_ID	varchar	no	15	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-Supplier_Ind	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-Supplier_CDE	varchar	no	15	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-Supplier_ID	varchar	no	15	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-CUSTFLAG	char	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-NATIONALITY_1	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-NATIONALITY_2	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-EMPLOYER_NAME	nvarchar	no	122	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-EMPLOYER_NAICS_CDE	nvarchar	no	100	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-TTL_ASSET	decimal	no	9	15   	2    	yes	(n/a)	(n/a)	NULL
-TTL_LIABILITY	decimal	no	9	15   	2    	yes	(n/a)	(n/a)	NULL
-ANNUAL_INCOME	decimal	no	9	15   	2    	yes	(n/a)	(n/a)	NULL
-SOURCE_OF_INCOME	varchar	no	50	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-PUBLIC_LISTED_FLAG	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-TTL_REVENUE	decimal	no	9	15   	2    	yes	(n/a)	(n/a)	NULL
-TTL_SHAREHOLDER_FUND	decimal	no	9	15   	2    	yes	(n/a)	(n/a)	NULL
-TTL_NET_REVENUE	decimal	no	9	15   	2    	yes	(n/a)	(n/a)	NULL
-TTL_UNIT_SHARE	decimal	no	9	15   	2    	yes	(n/a)	(n/a)	NULL
-CAPITAL	decimal	no	9	15   	2    	yes	(n/a)	(n/a)	NULL
-INCORPORATION_DATE	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
-PERSON_IN_CHARGED	nvarchar	no	100	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-SENSITIVE_REL	varchar	no	50	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-REM_CDE	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-REM_NME	nvarchar	no	100	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
-RecordStatus	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-IsCIPEnable	char	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-Customer_Segment	varchar	no	10	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+# PB_CUSTOMER_FACT 欄位定義
+
+PB 客戶事實表欄位清單（來自 SQL Server 欄位定義）
+
+## 欄位表格
+
+| 序號 | 欄位名稱 | 資料型別 | Computed | Length | Prec | Scale | Nullable | 說明 |
+|------|----------|----------|----------|--------|------|-------|----------|------|
+| 1 | time_key | varchar | no | 8 |  |  | yes |  |
+| 2 | BNK_NBR | varchar | no | 10 |  |  | yes |  |
+| 3 | CIF_KEY | uniqueidentifier | no | 16 |  |  | yes | 主鍵 |
+| 4 | CUST_TYPE_CDE | varchar | no | 1 |  |  | yes | 客戶類型 |
+| 5 | CUST_TAX_ID | varchar | no | 30 |  |  | yes | 稅籍編號 |
+| 6 | BRNCH_NBR | varchar | no | 50 |  |  | yes | 分行代碼 |
+| 7 | BRNCH_NME | nvarchar | no | 200 |  |  | yes | 分行名稱 |
+| 8 | CUST_NME | nvarchar | no | 700 |  |  | yes | 客戶名稱 |
+| 9 | NATIVE_CUST_NME | nvarchar | no | 700 |  |  | yes | 原生客戶名稱 |
+| 10 | FNAME | nvarchar | no | 300 |  |  | yes | 名 |
+| 11 | LNAME | nvarchar | no | 300 |  |  | yes | 姓 |
+| 12 | MNAME | nvarchar | no | 100 |  |  | yes | 中間名 |
+| 13 | CST_CNTR_NBR | varchar | no | 7 |  |  | yes |  |
+| 14 | C_ADDRESS_1 | nvarchar | no | 400 |  |  | yes | 通訊地址1 |
+| 15 | C_ADDRESS_2 | nvarchar | no | 400 |  |  | yes | 通訊地址2 |
+| 16 | C_ADDRESS_3 | nvarchar | no | 400 |  |  | yes | 通訊地址3 |
+| 17 | C_ADDRESS_4 | nvarchar | no | 400 |  |  | yes | 通訊地址4 |
+| 18 | C_ZIP_CODE | varchar | no | 5 |  |  | yes | 通訊郵遞區號 |
+| 19 | C_ZIP_4 | varchar | no | 4 |  |  | yes |  |
+| 20 | C_STATE | varchar | no | 2 |  |  | yes | 通訊州別 |
+| 21 | C_CITY | nvarchar | no | 50 |  |  | yes | 通訊城市 |
+| 22 | C_CTRYCD | varchar | no | 2 |  |  | yes | 通訊國家 |
+| 23 | P_ADDRESS_1 | nvarchar | no | 400 |  |  | yes | 主要地址1 |
+| 24 | P_ADDRESS_2 | nvarchar | no | 400 |  |  | yes | 主要地址2 |
+| 25 | P_ADDRESS_3 | nvarchar | no | 400 |  |  | yes | 主要地址3 |
+| 26 | P_ADDRESS_4 | nvarchar | no | 400 |  |  | yes | 主要地址4 |
+| 27 | P_ZIP_CODE | varchar | no | 5 |  |  | yes | 主要郵遞區號 |
+| 28 | P_ZIP_4 | varchar | no | 4 |  |  | yes |  |
+| 29 | P_STATE | varchar | no | 2 |  |  | yes | 主要州別 |
+| 30 | P_CITY | nvarchar | no | 50 |  |  | yes | 主要城市 |
+| 31 | P_CTRYCD | varchar | no | 2 |  |  | yes | 主要國家 |
+| 32 | M_ADDRESS_1 | nvarchar | no | 400 |  |  | yes | 郵寄地址1 |
+| 33 | M_ADDRESS_2 | nvarchar | no | 400 |  |  | yes | 郵寄地址2 |
+| 34 | M_ADDRESS_3 | nvarchar | no | 400 |  |  | yes | 郵寄地址3 |
+| 35 | M_ADDRESS_4 | nvarchar | no | 400 |  |  | yes | 郵寄地址4 |
+| 36 | M_ZIP_CODE | varchar | no | 5 |  |  | yes | 郵寄郵遞區號 |
+| 37 | M_ZIP_4 | varchar | no | 4 |  |  | yes |  |
+| 38 | M_STATE | varchar | no | 2 |  |  | yes | 郵寄州別 |
+| 39 | M_CITY | nvarchar | no | 50 |  |  | yes | 郵寄城市 |
+| 40 | M_CTRYCD | varchar | no | 2 |  |  | yes | 郵寄國家 |
+| 41 | HOME_PHONE_NBR | varchar | no | 14 |  |  | yes | 住家電話 |
+| 42 | HOME_PHONE_EXT | varchar | no | 10 |  |  | yes | 住家分機 |
+| 43 | BUSINESS_PHONE_NBR | varchar | no | 14 |  |  | yes | 公司電話 |
+| 44 | BUSINESS_PHONE_EXT | varchar | no | 10 |  |  | yes | 公司分機 |
+| 45 | HANDPHONE_NBR | varchar | no | 14 |  |  | yes | 手機 |
+| 46 | FAX_NBR | varchar | no | 14 |  |  | yes | 傳真 |
+| 47 | EMAIL | varchar | no | 500 |  |  | yes | 電子郵件 |
+| 48 | PRMY_OFFCR_NBR | varchar | no | 50 |  |  | yes | 主要業務員編號 |
+| 49 | PRMY_OFFCR_NME | nvarchar | no | 200 |  |  | yes | 主要業務員姓名 |
+| 50 | SEC_OFFCR_NBR | varchar | no | 30 |  |  | yes | 次要業務員編號 |
+| 51 | SEC_OFFCR_NME | nvarchar | no | 100 |  |  | yes | 次要業務員姓名 |
+| 52 | PRMY_LN_OFFCR_NBR | varchar | no | 30 |  |  | yes | 主要貸款業務員 |
+| 53 | PRMY_LN_OFFCR_NME | nvarchar | no | 100 |  |  | yes | 主要貸款業務員姓名 |
+| 54 | SEC_LN_OFFCR_NBR | varchar | no | 30 |  |  | yes | 次要貸款業務員 |
+| 55 | SEC_LN_OFFCR_NME | nvarchar | no | 100 |  |  | yes | 次要貸款業務員姓名 |
+| 56 | OPEN_DTE | datetime | no | 8 |  |  | yes | 開戶日期 |
+| 57 | CLOSED_DTE | datetime | no | 8 |  |  | yes | 關閉日期 |
+| 58 | PRCS_DTE | datetime | no | 8 |  |  | yes | 處理日期 |
+| 59 | HHOLD_KEY | varchar | no | 20 |  |  | yes | 家庭鍵值 |
+| 60 | PRMY_CUST_IND | varchar | no | 1 |  |  | yes | 主要客戶指標 |
+| 61 | NAICS_CDE | nvarchar | no | 100 |  |  | yes | NAICS 代碼 |
+| 62 | NOTCAL | bit | no | 1 |  |  | yes |  |
+| 63 | BIRTHDT | datetime | no | 8 |  |  | yes | 出生日期 |
+| 64 | TAXIDCD | char | no | 1 |  |  | yes |  |
+| 65 | TAXID | varchar | no | 30 |  |  | yes | 稅號 |
+| 66 | CDBANAM | nvarchar | no | 70 |  |  | yes |  |
+| 67 | CBUSPHN | varchar | no | 14 |  |  | yes |  |
+| 68 | CHMPHN | varchar | no | 14 |  |  | yes |  |
+| 69 | Employee_Ind | varchar | no | 1 |  |  | yes | 是否員工 |
+| 70 | Employee_Cde | varchar | no | 30 |  |  | yes | 員工代碼 |
+| 71 | Employee_ID | varchar | no | 30 |  |  | yes | 員工ID |
+| 72 | Contractor_Ind | varchar | no | 1 |  |  | yes | 是否承包商 |
+| 73 | Contractor_CDE | varchar | no | 15 |  |  | yes | 承包商代碼 |
+| 74 | Contractor_ID | varchar | no | 15 |  |  | yes | 承包商ID |
+| 75 | Supplier_Ind | varchar | no | 1 |  |  | yes | 是否供應商 |
+| 76 | Supplier_CDE | varchar | no | 15 |  |  | yes | 供應商代碼 |
+| 77 | Supplier_ID | varchar | no | 15 |  |  | yes | 供應商ID |
+| 78 | CUSTFLAG | char | no | 1 |  |  | yes |  |
+| 79 | NATIONALITY_1 | varchar | no | 2 |  |  | yes | 國籍1 |
+| 80 | NATIONALITY_2 | varchar | no | 2 |  |  | yes | 國籍2 |
+| 81 | EMPLOYER_NAME | nvarchar | no | 122 |  |  | yes | 雇主名稱 |
+| 82 | EMPLOYER_NAICS_CDE | nvarchar | no | 100 |  |  | yes | 雇主NAICS |
+| 83 | TTL_ASSET | decimal | no | 9 | 15 | 2 | yes | 總資產 |
+| 84 | TTL_LIABILITY | decimal | no | 9 | 15 | 2 | yes | 總負債 |
+| 85 | ANNUAL_INCOME | decimal | no | 9 | 15 | 2 | yes | 年收入 |
+| 86 | SOURCE_OF_INCOME | varchar | no | 50 |  |  | yes | 收入來源 |
+| 87 | PUBLIC_LISTED_FLAG | varchar | no | 1 |  |  | yes | 上市公司指標 |
+| 88 | TTL_REVENUE | decimal | no | 9 | 15 | 2 | yes | 總營收 |
+| 89 | TTL_SHAREHOLDER_FUND | decimal | no | 9 | 15 | 2 | yes | 股東權益 |
+| 90 | TTL_NET_REVENUE | decimal | no | 9 | 15 | 2 | yes | 淨營收 |
+| 91 | TTL_UNIT_SHARE | decimal | no | 9 | 15 | 2 | yes | 單位股份 |
+| 92 | CAPITAL | decimal | no | 9 | 15 | 2 | yes | 資本 |
+| 93 | INCORPORATION_DATE | datetime | no | 8 |  |  | yes | 成立日期 |
+| 94 | PERSON_IN_CHARGED | nvarchar | no | 100 |  |  | yes | 負責人 |
+| 95 | SENSITIVE_REL | varchar | no | 50 |  |  | yes | 敏感關係 |
+| 96 | REM_CDE | nvarchar | no | 400 |  |  | yes | 備註代碼 |
+| 97 | REM_NME | nvarchar | no | 100 |  |  | yes | 備註名稱 |
+| 98 | RecordStatus | varchar | no | 1 |  |  | yes | 記錄狀態 |
+| 99 | IsCIPEnable | char | no | 1 |  |  | yes | CIP 啟用 |
+| 100 | Customer_Segment | varchar | no | 10 |  |  | yes | 客戶區隔 |
