@@ -1,95 +1,122 @@
-✅ 了解 TC06 下次審查日驗證邏輯
-我已參考你的 GitHub BSADBTW 目錄下的表格結構（BSA_SUB_CUST_FACT、PB_CUSTOMER_FACT、EDD_ReviewSchedule 等）。
-核心邏輯總結
-	•	純台新：直接用台新（BSA / PB）的 NXTRVDT 或 EDD_ReviewSchedule.ReviewDt
-	•	純新光：直接用新光（VERIFY 或 BANCS_SK）的下審日
-	•	共有戶：
-	◦	如果新光風險等級 > 台新風險等級 → 取兩邊較近的日期（較早的那個）
+✅ TC06 下次審查日驗證 — 完整詳細版
+我已根據你 GitHub BSADBTW 目錄下的最新 Markdown 表格（BSA_SUB_CUST_FACT 和 PB_CUSTOMER_FACT）整理出最詳細、可直接執行的 SQL。
+1. 驗證邏輯總結（非常詳細）
+	•	純台新客戶：使用台新系統（BSA / PB）的 NXTRVDT 或 EDD_ReviewSchedule.ReviewDt
+	•	純新光客戶：使用新光系統的下審日
+	•	共有戶（同時存在台新 + 新光）：
+	◦	如果新光 RiskScore > 台新 RiskScore → 取兩邊較近的日期（即較早的那一個，MIN()）
 	◦	否則 → 取台新的下審日
 
-完整驗證 SQL（分三類）
+2. 完整驗證 SQL（推薦一次執行）
 -- =============================================
--- TC06 下次審查日驗證
+-- TC06 下次審查日驗證 - 完整詳細版
 -- =============================================
 
 WITH 
--- 1. 共有戶列表
+-- 步驟1: 找出共有戶 (台新+新光都有紀錄)
 Shared_Cust AS (
     SELECT TS_CUST_ID
     FROM BANCS_SK_CUST_INFO 
-    WHERE CUST_RE_NO_FLG = '1'
+    WHERE CUST_RE_NO_FLG = '1'                    -- 台新客戶
     EXCEPT
     SELECT TS_CUST_ID 
     FROM BANCS_SK_CUST_INFO 
-    WHERE CUST_RE_NO_FLG IN ('2','3')
+    WHERE CUST_RE_NO_FLG IN ('2','3')             -- 排除純新光
 ),
 
--- 2. 主資料彙整
+-- 步驟2: 彙整所有相關資料
 Cust_Review AS (
     SELECT 
         c.TS_CUST_ID,
+        
+        -- 台新系統資料
         b.CIF_KEY AS BSA_CIF_KEY,
+        b.CustomerNo AS BSA_CustomerNo,
+        b.NXTRVDT AS BSA_NXTRVDT,           -- 台新 下次審核日
+        b.RiskScore AS BSA_RiskScore,        -- 台新 風險分數
+        b.HIGHRISK AS BSA_HIGHRISK,
+        
+        -- 新光系統資料
         v.CIF_KEY AS VERIFY_CIF_KEY,
-        b.NXTRVDT AS BSA_NXTRVDT,           -- 台新 BSA 下次審核日
-        v.NXTRVDT AS VERIFY_NXTRVDT,         -- 新光 VERIFY 下次審核日
-        b.RiskScore AS BSA_RiskScore,        -- 台新風險分數
-        v.RiskScore AS VERIFY_RiskScore,     -- 新光風險分數
-        e.ReviewDt AS EDD_ReviewDt,          -- EDD 排程的下審日
+        v.CustomerNo AS VERIFY_CustomerNo,
+        v.NXTRVDT AS VERIFY_NXTRVDT,         -- 新光 下次審核日
+        v.RiskScore AS VERIFY_RiskScore,     -- 新光 風險分數
+        v.HIGHRISK AS VERIFY_HIGHRISK,
+        
+        -- EDD 排程表（最終應採用此表）
+        e.ReviewDt AS EDD_ReviewDt,
+        e.CIFKey AS EDD_CIFKey,
+        
+        -- 風險比較結果
         CASE 
-            WHEN b.RiskScore IS NULL OR v.RiskScore IS NULL THEN '純台新或純新光'
+            WHEN b.RiskScore IS NULL AND v.RiskScore IS NULL THEN '無風險分數'
             WHEN v.RiskScore > b.RiskScore THEN '新光風險較高'
-            ELSE '台新風險較高或相等'
+            WHEN v.RiskScore < b.RiskScore THEN '台新風險較高'
+            ELSE '風險等級相同'
         END AS Risk_Compare
+
     FROM Shared_Cust c
-    LEFT JOIN BSA_SUB_CUST_FACT b ON c.TS_CUST_ID = b.CustomerNo
-    LEFT JOIN VERIFY..BSA_SUB_CUST_FACT v ON c.TS_CUST_ID = v.CustomerNo
-    LEFT JOIN EDD_ReviewSchedule e ON b.CIF_KEY = e.CIFKey   -- 以台新 CIF_KEY 為主
+    LEFT JOIN BSA_SUB_CUST_FACT b 
+        ON c.TS_CUST_ID = b.CustomerNo
+    LEFT JOIN VERIFY..BSA_SUB_CUST_FACT v 
+        ON c.TS_CUST_ID = v.CustomerNo
+    LEFT JOIN EDD_ReviewSchedule e 
+        ON b.CIF_KEY = e.CIFKey          -- 以台新 CIF_KEY 為主關聯
 )
 
--- =============================================
--- 最終驗證結果
+-- 步驟3: 最終驗證結果
 SELECT 
     TS_CUST_ID,
+    BSA_CustomerNo,
+    VERIFY_CustomerNo,
+    
     BSA_NXTRVDT,
     VERIFY_NXTRVDT,
     EDD_ReviewDt,
+    
+    BSA_RiskScore,
+    VERIFY_RiskScore,
     Risk_Compare,
     
-    -- 預期下次審查日（根據規則計算）
+    -- 【預期正確的下次審查日】
     CASE 
-        -- 共有戶：新光風險較高 → 取較近日期
         WHEN Risk_Compare = '新光風險較高' 
-            THEN (SELECT MIN(dt) FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt))
-        
-        -- 其他共有戶 + 純台新 → 取台新日期
-        ELSE COALESCE(BSA_NXTRVDT, EDD_ReviewDt)
+            THEN (SELECT MIN(dt) 
+                  FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt))
+        ELSE COALESCE(BSA_NXTRVDT, EDD_ReviewDt)          -- 其他情況取台新
     END AS Expected_NextReviewDt,
 
-    -- 實際是否正確
+    -- 【驗證結果】
     CASE 
-        WHEN Risk_Compare = '新光風險較高' AND EDD_ReviewDt = (SELECT MIN(dt) FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt))
+        WHEN Risk_Compare = '新光風險較高' 
+             AND EDD_ReviewDt = (SELECT MIN(dt) 
+                                 FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt))
             THEN 'PASS'
         WHEN EDD_ReviewDt = COALESCE(BSA_NXTRVDT, EDD_ReviewDt)
             THEN 'PASS'
         ELSE 'FAIL'
-    END AS Validation_Result
+    END AS Validation_Result,
+
+    -- 額外診斷資訊
+    CASE WHEN BSA_NXTRVDT IS NULL THEN '台新無下審日' ELSE '' END +
+    CASE WHEN VERIFY_NXTRVDT IS NULL THEN ' 新光無下審日' ELSE '' END AS Note
 
 FROM Cust_Review
 ORDER BY Validation_Result DESC, TS_CUST_ID;
 
-分類獨立驗證（如果你想分開看）
-1. 純台新客戶
-SELECT ... 
+3. 分開查詢（方便除錯）
+純台新客戶
+SELECT b.CustomerNo, b.NXTRVDT, e.ReviewDt
 FROM BSA_SUB_CUST_FACT b
-WHERE b.CustomerNo NOT IN (SELECT TS_CUST_ID FROM Shared_Cust)
-2. 純新光客戶
-SELECT ... 
+LEFT JOIN EDD_ReviewSchedule e ON b.CIF_KEY = e.CIFKey
+WHERE b.CustomerNo NOT IN (SELECT TS_CUST_ID FROM Shared_Cust);
+純新光客戶
+SELECT v.CustomerNo, v.NXTRVDT
 FROM VERIFY..BSA_SUB_CUST_FACT v
-WHERE v.CustomerNo NOT IN (SELECT TS_CUST_ID FROM Shared_Cust)
-3. 共有戶（上面主查詢已經處理）
+WHERE v.CustomerNo NOT IN (SELECT TS_CUST_ID FROM Shared_Cust);
 
-需要調整的地方：
-	•	確認 RiskScore 欄位是否正確（BSA_SUB_CUST_FACT 裡有 RiskScore）
-	•	NXTRVDT 是下次審核日欄位
-	•	EDD_ReviewSchedule 用 CIFKey 關聯
-告訴我哪裡需要微調（例如風險等級欄位不同、日期取最大/最小、或要產生修正 UPDATE 語法），我馬上幫你修改！
+需要我再幫你加上：
+	•	產生修正用的 UPDATE 語法？
+	•	加上日期格式轉換（民國/西元）？
+	•	調整 RiskScore 比較條件？
+告訴我哪部分還需要更詳細，我立刻繼續優化！ 🚀
