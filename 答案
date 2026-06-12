@@ -1,10 +1,12 @@
-✅ 共有戶（Shared Customers）專用驗證 SQL — 詳細版
-以下 SQL 只處理共有戶，並針對你的規則進行驗證：
-共有戶的下審日：若新光（VERIFY）風險等級高於台新（BSA），則下審日必須取兩邊較近的日期（即較早的日期 = MIN(BSA_NXTRVDT, VERIFY_NXTRVDT)）
-風險等級使用 HIGHRISK 欄位。
-完整驗證 SQL（共有戶專用）
+✅ 了解！風險等級使用 H (High)、M (Medium)、L (Low)
+我已調整共有戶的驗證 SQL，使用正確的風險等級比較邏輯（而非直接字串比較）。
+調整重點
+	•	H > M > L（高風險優先）
+	•	新光 HIGHRISK 高於台新時 → 取兩邊較近（較早）的日期 = MIN(BSA_NXTRVDT, VERIFY_NXTRVDT)
+
+共有戶專用驗證 SQL（已修正風險比較）
 -- =============================================
--- TC06 共有戶 下次審查日驗證
+-- TC06 共有戶 下次審查日驗證 (H/M/L 風險等級)
 -- =============================================
 
 WITH 
@@ -12,14 +14,14 @@ WITH
 Shared_Cust AS (
     SELECT TS_CUST_ID
     FROM BANCS_SK_CUST_INFO 
-    WHERE CUST_RE_NO_FLG = '1'                    -- 台新客戶
+    WHERE CUST_RE_NO_FLG = '1'
     EXCEPT
     SELECT TS_CUST_ID 
     FROM BANCS_SK_CUST_INFO 
-    WHERE CUST_RE_NO_FLG IN ('2','3')             -- 排除純新光
+    WHERE CUST_RE_NO_FLG IN ('2','3')
 ),
 
--- 2. 資料彙整
+-- 2. 資料彙整 + 風險等級轉換
 Shared_Review AS (
     SELECT 
         c.TS_CUST_ID,
@@ -27,31 +29,41 @@ Shared_Review AS (
         -- 台新 (BSA)
         b.CIF_KEY AS BSA_CIF_KEY,
         b.CustomerNo AS BSA_CustomerNo,
-        b.NXTRVDT AS BSA_NXTRVDT,           -- 台新 下次審核日
-        b.HIGHRISK AS BSA_HIGHRISK,          -- 台新 風險等級
+        b.NXTRVDT AS BSA_NXTRVDT,
+        b.HIGHRISK AS BSA_HIGHRISK,
         
         -- 新光 (VERIFY)
         v.CIF_KEY AS VERIFY_CIF_KEY,
         v.CustomerNo AS VERIFY_CustomerNo,
-        v.NXTRVDT AS VERIFY_NXTRVDT,         -- 新光 下次審核日
-        v.HIGHRISK AS VERIFY_HIGHRISK,       -- 新光 風險等級
+        v.NXTRVDT AS VERIFY_NXTRVDT,
+        v.HIGHRISK AS VERIFY_HIGHRISK,
         
-        -- EDD 最終排程表
+        -- EDD 排程
         e.ReviewDt AS EDD_ReviewDt,
-        e.CIFKey AS EDD_CIFKey
+
+        -- 風險等級數值轉換 (H=3, M=2, L=1)
+        CASE b.HIGHRISK 
+            WHEN 'H' THEN 3 
+            WHEN 'M' THEN 2 
+            WHEN 'L' THEN 1 
+            ELSE 0 
+        END AS BSA_RiskLevel,
+
+        CASE v.HIGHRISK 
+            WHEN 'H' THEN 3 
+            WHEN 'M' THEN 2 
+            WHEN 'L' THEN 1 
+            ELSE 0 
+        END AS VERIFY_RiskLevel
 
     FROM Shared_Cust c
-    LEFT JOIN BSA_SUB_CUST_FACT b 
-        ON c.TS_CUST_ID = b.CustomerNo
-    LEFT JOIN VERIFY..BSA_SUB_CUST_FACT v 
-        ON c.TS_CUST_ID = v.CustomerNo
-    LEFT JOIN EDD_ReviewSchedule e 
-        ON b.CIF_KEY = e.CIFKey                  -- 以台新 CIF_KEY 為主
-    WHERE b.CustomerNo IS NOT NULL 
-       OR v.CustomerNo IS NOT NULL
+    LEFT JOIN BSA_SUB_CUST_FACT b ON c.TS_CUST_ID = b.CustomerNo
+    LEFT JOIN VERIFY..BSA_SUB_CUST_FACT v ON c.TS_CUST_ID = v.CustomerNo
+    LEFT JOIN EDD_ReviewSchedule e ON b.CIF_KEY = e.CIFKey
+    WHERE b.CustomerNo IS NOT NULL OR v.CustomerNo IS NOT NULL
 )
 
--- 3. 最終驗證結果
+-- 3. 最終驗證
 SELECT 
     TS_CUST_ID,
     BSA_CustomerNo,
@@ -63,49 +75,47 @@ SELECT
     
     BSA_HIGHRISK,
     VERIFY_HIGHRISK,
-    
-    -- 風險比較
+    BSA_RiskLevel,
+    VERIFY_RiskLevel,
+
+    -- 風險比較結果
     CASE 
-        WHEN VERIFY_HIGHRISK > BSA_HIGHRISK THEN '新光風險較高 → 應取較近日期'
-        WHEN VERIFY_HIGHRISK < BSA_HIGHRISK THEN '台新風險較高 → 應取台新日期'
-        WHEN VERIFY_HIGHRISK = BSA_HIGHRISK THEN '風險等級相同'
-        ELSE '風險等級有 NULL'
+        WHEN VERIFY_RiskLevel > BSA_RiskLevel THEN '新光風險較高 → 應取較近日期'
+        WHEN VERIFY_RiskLevel < BSA_RiskLevel THEN '台新風險較高 → 應取台新日期'
+        WHEN VERIFY_RiskLevel = BSA_RiskLevel THEN '風險等級相同'
+        ELSE '風險等級有 NULL 或異常'
     END AS Risk_Compare,
 
     -- 預期正確的下審日
     CASE 
-        WHEN VERIFY_HIGHRISK > BSA_HIGHRISK 
+        WHEN VERIFY_RiskLevel > BSA_RiskLevel 
             THEN (SELECT MIN(dt) 
-                  FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt))   -- 取較早日期
-        ELSE COALESCE(BSA_NXTRVDT, EDD_ReviewDt)                           -- 其他情況取台新
+                  FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt))
+        ELSE COALESCE(BSA_NXTRVDT, EDD_ReviewDt)
     END AS Expected_NextReviewDt,
 
     -- 驗證結果
     CASE 
-        WHEN VERIFY_HIGHRISK > BSA_HIGHRISK 
+        WHEN VERIFY_RiskLevel > BSA_RiskLevel 
              AND EDD_ReviewDt = (SELECT MIN(dt) 
                                  FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt))
-            THEN 'PASS'   -- 正確取較近日期
+            THEN 'PASS'
         WHEN EDD_ReviewDt = COALESCE(BSA_NXTRVDT, EDD_ReviewDt)
             THEN 'PASS'
         ELSE 'FAIL'
     END AS Validation_Result,
 
-    -- 診斷資訊
-    DATEDIFF(DAY, BSA_NXTRVDT, VERIFY_NXTRVDT) AS Date_Diff_Days,
-    CASE WHEN BSA_NXTRVDT IS NULL THEN '台新無日期' ELSE '' END +
-    CASE WHEN VERIFY_NXTRVDT IS NULL THEN ' 新光無日期' ELSE '' END AS Note
+    DATEDIFF(DAY, BSA_NXTRVDT, VERIFY_NXTRVDT) AS Date_Diff_Days
 
 FROM Shared_Review
 ORDER BY Validation_Result DESC, TS_CUST_ID;
 
-使用建議
-	1	先執行上面完整 SQL 查看所有共有戶的驗證結果。
-	2	如果想只看失敗的案例，把最後 WHERE Validation_Result = 'FAIL' 加進去。
-	3	HIGHRISK 欄位型別：如果是 'Y' / 'N' 或數值，請告訴我，我再調整比較條件（目前假設是可比較的大小）。
-
-需要我繼續幫你做：
-	•	只看 FAIL 的紀錄？
-	•	產生修正用的 UPDATE 語法？
-	•	加上純台新 / 純新光的驗證？
-告訴我下一步！ 🚀
+執行建議：
+	1	先執行上面 SQL 查看所有共有戶。
+	2	如果想只看失敗的，加上 WHERE Validation_Result = 'FAIL'。
+	3	如果 HIGHRISK 還有其他值（例如空白或 ‘High’），告訴我我再調整。
+下一步要什麼？
+	•	只看 FAIL 的紀錄
+	•	產生修正 UPDATE 語法
+	•	開始做純台新 / 純新光的驗證
+直接告訴我！ 🚀
