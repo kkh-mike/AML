@@ -1,51 +1,44 @@
-✅ 好的，我已參考你的 GitHub BSADBTW 目錄下的表格結構（主要是 PB_CUSTOMER_FACT）。
-建議的 SQL 更新語法
-根據 PB_CUSTOMER_FACT 表格結構，最適合更新的欄位是：
-	•	CLOSED_DTE（結清日期）
-	•	RecordStatus（帳戶狀態，varchar(1)）
--- 更新單一客戶帳戶狀態為 CLOSE
-UPDATE PB_CUSTOMER_FACT
-SET 
-    RecordStatus = 'C',           -- 或 'CLOSE'，請依你系統實際值確認
-    CLOSED_DTE = '2026-04-24',    -- 115/4/24 轉西元為 2026-04-24（民國115年=西元2026年）
-    PRCS_DTE = GETDATE(),         -- 處理日期（可選，記錄今天）
-    LUPDDT = GETDATE()            -- 最後更新日期（如果有這個欄位）
-WHERE CIF_KEY = '你的CIF_KEY值'   -- 最好用 CIF_KEY（uniqueidentifier）
-   OR CustomerNo = 'JENCH01SC'    -- 或用客戶編號
-   OR CUST_NME LIKE '%DOMA CHIN CO. LTD.%';  -- 用公司名稱模糊比對
-更安全的寫法（推薦先檢查）
--- 1. 先查詢確認資料
+✅ 了解了！謝謝修正。
+PB_CUSTOMER_FACT 沒有 CustomerNo，要透過 CIF_KEY 與 BSA_SUB_CUST_FACT 串接才有客戶編號（ID: JENCH01SC）。
+正確的 SQL 更新方式（推薦）
+-- 1. 先查詢確認資料（強烈建議先跑這段）
 SELECT 
-    CIF_KEY, 
-    CUST_NME, 
-    RecordStatus, 
-    CLOSED_DTE,
-    CustomerNo
-FROM PB_CUSTOMER_FACT 
-WHERE CUST_NME LIKE '%DOMA CHIN%' 
-   OR CustomerNo = 'JENCH01SC';
-
--- 2. 確認沒問題後再執行 UPDATE
+    p.CIF_KEY,
+    p.CUST_NME,
+    p.RecordStatus,
+    p.CLOSED_DTE,
+    b.CustomerNo,
+    b.IDNUM
+FROM PB_CUSTOMER_FACT p
+LEFT JOIN BSA_SUB_CUST_FACT b ON p.CIF_KEY = b.CIF_KEY
+WHERE p.CUST_NME LIKE '%DOMA CHIN%' 
+   OR b.CustomerNo = 'JENCH01SC'
+   OR b.IDNUM LIKE '%JENCH01SC%';
+更新 SQL（結清帳戶）
 BEGIN TRANSACTION;
 
-UPDATE PB_CUSTOMER_FACT
+UPDATE p
 SET 
-    RecordStatus = 'C',                    -- 請確認系統中 CLOSE 的實際代碼（可能是 'C' 或 'CLOSE'）
-    CLOSED_DTE = '2026-04-24',
-    PRCS_DTE = GETDATE()
-WHERE CustomerNo = 'JENCH01SC';            -- 用 ID 最精準
+    p.RecordStatus = 'C',           -- 請確認 CLOSE 的正確代碼（可能是 'C'、'Closed' 或 'I'）
+    p.CLOSED_DTE = '2026-04-24',    -- 民國115/4/24 = 西元2026-04-24
+    p.PRCS_DTE = GETDATE(),         -- 處理日期
+    p.LUPDDT = GETDATE()            -- 如果有這個欄位
+FROM PB_CUSTOMER_FACT p
+LEFT JOIN BSA_SUB_CUST_FACT b ON p.CIF_KEY = b.CIF_KEY
+WHERE b.CustomerNo = 'JENCH01SC'
+   OR p.CUST_NME LIKE '%DOMA CHIN CO. LTD.%';
 
-COMMIT TRANSACTION;  -- 成功後 commit
--- ROLLBACK TRANSACTION; -- 如果有問題就 rollback
+COMMIT TRANSACTION;
 
-注意事項：
-	1	RecordStatus 的值：請確認你系統中「CLOSE」的實際儲存值（可能是 'C'、'CLOSE'、'Closed' 等）。
-	2	CIF_KEY 是 uniqueidentifier，主鍵最準確。
-	3	日期格式：民國115年4月24日 → 西元 2026-04-24。
-	4	建議先 SELECT 確認再 UPDATE，並使用 Transaction 保護。
+-- 若有問題就改成 ROLLBACK TRANSACTION;
 
-需要我幫你調整嗎？
-	•	告訴我 RecordStatus 的正確 CLOSE 值
-	•	或提供更多欄位資訊（例如實際的 CIF_KEY）
-	•	我再幫你微調 SQL
-直接把你要的版本告訴我，我再優化！ 🚀
+重點提醒：
+	•	CIF_KEY 是兩個表共用的主鍵，最適合 JOIN。
+	•	RecordStatus = 'C' 請你再確認一下系統實際上是用什麼值代表 CLOSE。
+	•	如果公司名稱有全形半形差異，可以把 LIKE 改成更寬鬆：p.CUST_NME LIKE '%DOMA%'
+
+需要我幫你：
+	1	調整 RecordStatus 的值？
+	2	加上更多欄位更新？
+	3	產生完整腳本？
+告訴我實際的 CLOSE 狀態代碼，我再幫你微調！
