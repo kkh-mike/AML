@@ -1,52 +1,9 @@
--- TC06 下次審查日驗證
+我是要分開驗證
+先幫我搞共有戶好了
+1. 共有戶的下審日，若新光的客戶風險等級高於在台新的客戶風險等級，則下審日要取兩邊較近的日期
 
--- 預期結果
--- 採用兩邊較近日期。
--- 共有戶的下審日若新光的客戶風險等級高於在台新的客戶風險等級，則下審日要取兩邊較近的日期，   
--- 其餘共有戶的下審日則按照台新的下審日
+分險等級存在這裡
+ SELECT HIGHRISK FROM VERIFY..BSA_SUB_CUST_FACT  
+ SELECT HIGHRISK FROM BSA_SUB_CUST_FACT 
 
-幫我參考下面
-https://github.com/kkh-mike/AML/tree/main/BSADBTW
-看一下要怎麼分別驗證
-純台新
-純新光
-共有戶
-
-
-下次審查日
-SELECT * FROM EDD_ReviewSchedule
-
--- 純台新
-SELECT CustomerNo
-FROM VERIFY..BSA_SUB_CUST_FACT
-EXCEPT
-SELECT CustomerNo
-FROM BSA_SUB_CUST_FACT a
-JOIN CIF_Migrate_Mapping_TEMP b    ON a.cif_key = b.NEW_CIF_KEY
-
-
--- 純新光
-SELECT TS_CUST_ID FROM BANCS_SK_CUST_INFO WHERE CUST_RE_NO_FLG = '1'
-EXCEPT
-SELECT TS_CUST_ID FROM BANCS_SK_CUST_INFO WHERE CUST_RE_NO_FLG IN ('2','3')
-
-
---共有戶
-WITH CUST_LIST AS
-(
-    SELECT TS_CUST_ID
-    FROM BANCS_SK_CUST_INFO
-    WHERE CUST_RE_NO_FLG = '1'
-    EXCEPT
-    SELECT TS_CUST_ID
-    FROM BANCS_SK_CUST_INFO
-    WHERE CUST_RE_NO_FLG IN ('2','3')
-)
-SELECT
-    c.TS_CUST_ID,
-    b.CustomerNo AS BSA_CustomerNo,
-    v.CustomerNo AS VERIFY_CustomerNo
-FROM CUST_LIST c
-LEFT JOIN BSA_SUB_CUST_FACT b    ON c.TS_CUST_ID = b.CustomerNo
-LEFT JOIN VERIFY..BSA_SUB_CUST_FACT v    ON c.TS_CUST_ID = v.CustomerNo
-WHERE b.CustomerNo is not null 
+ 驗證 下審日有沒有取兩邊較近的日期
