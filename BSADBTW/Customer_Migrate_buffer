@@ -1,0 +1,20 @@
+Column_name	Type	Computed	Length	Prec	Scale	Nullable	TrimTrailingBlanks	FixedLenNullInSource	Collation
+time_key	varchar	no	8	     	     	yes	yes	yes	Chinese_Taiwan_Stroke_CI_AS
+CIF_KEY	nvarchar	no	200	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+CustomerNo	varchar	no	50	     	     	yes	yes	yes	Chinese_Taiwan_Stroke_CI_AS
+CUST_NME	nvarchar	no	700	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+NATIVE_CUST_NME	nvarchar	no	700	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+Alias_Name	nvarchar	no	700	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+C_CTRYCD	varchar	no	3	     	     	yes	yes	yes	Chinese_Taiwan_Stroke_CI_AS
+NATIONALITY_1	varchar	no	3	     	     	yes	yes	yes	Chinese_Taiwan_Stroke_CI_AS
+NATIONALITY_2	varchar	no	3	     	     	yes	yes	yes	Chinese_Taiwan_Stroke_CI_AS
+Cust_Method_Of_Opening	varchar	no	50	     	     	yes	yes	yes	Chinese_Taiwan_Stroke_CI_AS
+Cust_Product_Service	varchar	no	-1	     	     	yes	yes	yes	Chinese_Taiwan_Stroke_CI_AS
+Cust_Account_Purpose	varchar	no	-1	     	     	yes	yes	yes	Chinese_Taiwan_Stroke_CI_AS
+OPEN_DTE	nvarchar	no	100	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+CustProdAndServicesUsed	varchar	no	-1	     	     	yes	yes	yes	Chinese_Taiwan_Stroke_CI_AS
+CustPurposeOfAcc	varchar	no	-1	     	     	yes	yes	yes	Chinese_Taiwan_Stroke_CI_AS
+RecordStatus	varchar	no	2	     	     	yes	yes	yes	Chinese_Taiwan_Stroke_CI_AS
+Customer_Segment	varchar	no	10	     	     	yes	yes	yes	Chinese_Taiwan_Stroke_CI_AS
+CUST_TYPE_CDE	varchar	no	2	     	     	yes	yes	yes	Chinese_Taiwan_Stroke_CI_AS
+Cust_With_Bearer_Shares	varchar	no	2	     	     	yes	yes	yes	Chinese_Taiwan_Stroke_CI_AS
