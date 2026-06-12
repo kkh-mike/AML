@@ -1,27 +1,21 @@
-✅ 了解！風險等級使用 H (High)、M (Medium)、L (Low)
-我已調整共有戶的驗證 SQL，使用正確的風險等級比較邏輯（而非直接字串比較）。
-調整重點
-	•	H > M > L（高風險優先）
-	•	新光 HIGHRISK 高於台新時 → 取兩邊較近（較早）的日期 = MIN(BSA_NXTRVDT, VERIFY_NXTRVDT)
-
-共有戶專用驗證 SQL（已修正風險比較）
+✅ 已修正！問題在於「共有戶」的定義太鬆，導致很多只有新光（VERIFY）資料的客戶被包含進來。
+現在改成嚴格定義：必須同時存在於 BSA_SUB_CUST_FACT 和 VERIFY..BSA_SUB_CUST_FACT 才算共有戶。
+修正後的共有戶驗證 SQL（已針對 H/M/L 風險等級）
 -- =============================================
--- TC06 共有戶 下次審查日驗證 (H/M/L 風險等級)
+-- TC06 共有戶 下次審查日驗證 (修正版)
+-- 只有同時存在台新 + 新光 的客戶才算共有戶
 -- =============================================
 
 WITH 
--- 1. 共有戶列表
+-- 1. 嚴格共有戶：兩個表都要有資料
 Shared_Cust AS (
-    SELECT TS_CUST_ID
-    FROM BANCS_SK_CUST_INFO 
-    WHERE CUST_RE_NO_FLG = '1'
-    EXCEPT
-    SELECT TS_CUST_ID 
-    FROM BANCS_SK_CUST_INFO 
-    WHERE CUST_RE_NO_FLG IN ('2','3')
+    SELECT b.CustomerNo AS TS_CUST_ID
+    FROM BSA_SUB_CUST_FACT b
+    INNER JOIN VERIFY..BSA_SUB_CUST_FACT v 
+        ON b.CustomerNo = v.CustomerNo          -- 必須兩邊都有相同 CustomerNo
 ),
 
--- 2. 資料彙整 + 風險等級轉換
+-- 2. 資料彙整
 Shared_Review AS (
     SELECT 
         c.TS_CUST_ID,
@@ -38,32 +32,23 @@ Shared_Review AS (
         v.NXTRVDT AS VERIFY_NXTRVDT,
         v.HIGHRISK AS VERIFY_HIGHRISK,
         
-        -- EDD 排程
+        -- EDD 最終排程
         e.ReviewDt AS EDD_ReviewDt,
 
-        -- 風險等級數值轉換 (H=3, M=2, L=1)
-        CASE b.HIGHRISK 
-            WHEN 'H' THEN 3 
-            WHEN 'M' THEN 2 
-            WHEN 'L' THEN 1 
-            ELSE 0 
-        END AS BSA_RiskLevel,
-
-        CASE v.HIGHRISK 
-            WHEN 'H' THEN 3 
-            WHEN 'M' THEN 2 
-            WHEN 'L' THEN 1 
-            ELSE 0 
-        END AS VERIFY_RiskLevel
+        -- 風險等級轉數值 (H=3, M=2, L=1)
+        CASE b.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS BSA_RiskLevel,
+        CASE v.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS VERIFY_RiskLevel
 
     FROM Shared_Cust c
-    LEFT JOIN BSA_SUB_CUST_FACT b ON c.TS_CUST_ID = b.CustomerNo
-    LEFT JOIN VERIFY..BSA_SUB_CUST_FACT v ON c.TS_CUST_ID = v.CustomerNo
-    LEFT JOIN EDD_ReviewSchedule e ON b.CIF_KEY = e.CIFKey
-    WHERE b.CustomerNo IS NOT NULL OR v.CustomerNo IS NOT NULL
+    INNER JOIN BSA_SUB_CUST_FACT b 
+        ON c.TS_CUST_ID = b.CustomerNo
+    INNER JOIN VERIFY..BSA_SUB_CUST_FACT v 
+        ON c.TS_CUST_ID = v.CustomerNo
+    LEFT JOIN EDD_ReviewSchedule e 
+        ON b.CIF_KEY = e.CIFKey
 )
 
--- 3. 最終驗證
+-- 3. 最終驗證結果（重點比較）
 SELECT 
     TS_CUST_ID,
     BSA_CustomerNo,
@@ -78,44 +63,41 @@ SELECT
     BSA_RiskLevel,
     VERIFY_RiskLevel,
 
-    -- 風險比較結果
+    -- 風險比較（清楚顯示）
     CASE 
-        WHEN VERIFY_RiskLevel > BSA_RiskLevel THEN '新光風險較高 → 應取較近日期'
+        WHEN VERIFY_RiskLevel > BSA_RiskLevel THEN '✅ 新光風險較高 → 應取較近日期'
         WHEN VERIFY_RiskLevel < BSA_RiskLevel THEN '台新風險較高 → 應取台新日期'
-        WHEN VERIFY_RiskLevel = BSA_RiskLevel THEN '風險等級相同'
-        ELSE '風險等級有 NULL 或異常'
+        WHEN VERIFY_RiskLevel = BSA_RiskLevel AND VERIFY_RiskLevel > 0 THEN '風險等級相同'
+        ELSE '風險等級異常'
     END AS Risk_Compare,
 
     -- 預期正確的下審日
     CASE 
         WHEN VERIFY_RiskLevel > BSA_RiskLevel 
-            THEN (SELECT MIN(dt) 
-                  FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt))
+            THEN (SELECT MIN(dt) FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt))
         ELSE COALESCE(BSA_NXTRVDT, EDD_ReviewDt)
     END AS Expected_NextReviewDt,
 
     -- 驗證結果
     CASE 
         WHEN VERIFY_RiskLevel > BSA_RiskLevel 
-             AND EDD_ReviewDt = (SELECT MIN(dt) 
-                                 FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt))
-            THEN 'PASS'
+             AND EDD_ReviewDt = (SELECT MIN(dt) FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt))
+            THEN '✅ PASS (正確取較近日期)'
         WHEN EDD_ReviewDt = COALESCE(BSA_NXTRVDT, EDD_ReviewDt)
-            THEN 'PASS'
-        ELSE 'FAIL'
+            THEN '✅ PASS'
+        ELSE '❌ FAIL'
     END AS Validation_Result,
 
-    DATEDIFF(DAY, BSA_NXTRVDT, VERIFY_NXTRVDT) AS Date_Diff_Days
+    DATEDIFF(DAY, BSA_NXTRVDT, VERIFY_NXTRVDT) AS Date_Diff_Days,
+    CASE WHEN EDD_ReviewDt IS NULL THEN 'EDD無資料' ELSE '' END AS Note
 
 FROM Shared_Review
 ORDER BY Validation_Result DESC, TS_CUST_ID;
 
-執行建議：
-	1	先執行上面 SQL 查看所有共有戶。
-	2	如果想只看失敗的，加上 WHERE Validation_Result = 'FAIL'。
-	3	如果 HIGHRISK 還有其他值（例如空白或 ‘High’），告訴我我再調整。
-下一步要什麼？
-	•	只看 FAIL 的紀錄
-	•	產生修正 UPDATE 語法
-	•	開始做純台新 / 純新光的驗證
-直接告訴我！ 🚀
+主要改動：
+	•	使用 INNER JOIN 確保兩邊都有資料
+	•	從 BSA_SUB_CUST_FACT 開始取 CustomerNo 當 TS_CUST_ID
+	•	加上 ✅ ❌ 符號，讓驗證結果更清楚
+
+請直接執行上面 SQL，然後告訴我結果如何（有沒有出現共有戶？FAIL 的案例有哪些？）
+需要我再調整（例如改用 BANCS_SK_CUST_INFO 條件、只看 FAIL、或產生 UPDATE 修正語法），馬上告訴我！
