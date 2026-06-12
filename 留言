@@ -1,7 +1,91 @@
-共有戶的下審日，若新光的客戶風險等級高於在台新的客戶風險等級，則下審日要取兩邊較近的日期
+✅ 好的，我幫你把驗證寫得更清楚、更符合你的題目描述。
+驗證核心規則（你的原題目）
+共有戶的下審日，若新光的客戶風險等級高於台新，則下審日要取兩邊較近的日期（即較早的那一天）。
+
+推薦最終驗證 SQL（最清楚版）
+-- =============================================
+-- TC06 共有戶 下次審查日驗證
+-- 規則：若新光風險等級 > 台新風險等級，則必須取兩邊較近（較早）的日期
+-- =============================================
+
+WITH 
+Shared_Cust AS (
+    -- 嚴格共有戶：同時存在於台新與新光
+    SELECT b.CustomerNo AS TS_CUST_ID
+    FROM BSA_SUB_CUST_FACT b
+    INNER JOIN VERIFY..BSA_SUB_CUST_FACT v ON b.CustomerNo = v.CustomerNo
+),
+
+Shared_Review AS (
+    SELECT 
+        c.TS_CUST_ID,
+        b.HIGHRISK AS BSA_HIGHRISK,
+        v.HIGHRISK AS VERIFY_HIGHRISK,
+        b.NXTRVDT AS BSA_NXTRVDT,
+        v.NXTRVDT AS VERIFY_NXTRVDT,
+        e.ReviewDt AS EDD_ReviewDt,
+
+        -- 風險等級轉換
+        CASE b.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS BSA_RiskLevel,
+        CASE v.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS VERIFY_RiskLevel,
+
+        -- 是否需要取兩邊較近日期
+        CASE WHEN 
+            CASE v.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END 
+            > 
+            CASE b.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END 
+        THEN '是' ELSE '否' END AS Should_Take_Min_Date
+
+    FROM Shared_Cust c
+    INNER JOIN BSA_SUB_CUST_FACT b ON c.TS_CUST_ID = b.CustomerNo
+    INNER JOIN VERIFY..BSA_SUB_CUST_FACT v ON c.TS_CUST_ID = v.CustomerNo
+    LEFT JOIN EDD_ReviewSchedule e ON b.CIF_KEY = e.CIFKey
+)
+
+-- ==================== 明細資料 ====================
+SELECT 
+    TS_CUST_ID,
+    BSA_HIGHRISK,
+    VERIFY_HIGHRISK,
+    Should_Take_Min_Date,
+    BSA_NXTRVDT,
+    VERIFY_NXTRVDT,
+    EDD_ReviewDt,
+    
+    -- 兩邊較近的日期（較早）
+    (SELECT MIN(dt) FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt)) AS Min_of_Both,
+
+    -- 驗證結果
+    CASE 
+        WHEN Should_Take_Min_Date = '是' 
+             AND EDD_ReviewDt = (SELECT MIN(dt) FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt)) 
+            THEN '✅ PASS（正確取兩邊較近日期）'
+        WHEN Should_Take_Min_Date = '否' 
+             AND EDD_ReviewDt = BSA_NXTRVDT 
+            THEN '✅ PASS（正確取台新日期）'
+        ELSE '❌ FAIL'
+    END AS Validation_Result
+
+FROM Shared_Review
+ORDER BY Should_Take_Min_Date DESC, Validation_Result DESC, TS_CUST_ID;
 
 
+-- ==================== 統計摘要 ====================
+SELECT 
+    COUNT(*) AS 共有戶總筆數,
+    SUM(CASE WHEN Should_Take_Min_Date = '是' THEN 1 ELSE 0 END) AS 需要取兩邊較近日期_筆數,
+    SUM(CASE WHEN Should_Take_Min_Date = '是' 
+             AND EDD_ReviewDt = (SELECT MIN(dt) FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt)) 
+             THEN 1 ELSE 0 END) AS 實際正確取兩邊較近_筆數,
+    SUM(CASE WHEN Should_Take_Min_Date = '是' 
+             AND EDD_ReviewDt <> (SELECT MIN(dt) FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt)) 
+             THEN 1 ELSE 0 END) AS 應取但未取較近_筆數
+FROM Shared_Review;
 
-我題目是這樣
+這個版本的優點：
+	•	清楚對應你的題目：Should_Take_Min_Date 直接顯示「是否需要取兩邊較近日期」
+	•	Min_of_Both 欄位讓人一看就知道應該是哪一天
+	•	PASS/FAIL 標註很明顯
+	•	最後有統計摘要，一眼就能看出整體正確率
 
-你幫我看怎麼驗證表達比較好
+請執行後告訴我結果，尤其是統計摘要的數字，我再幫你優化或產生修正 UPDATE 語法。 有哪裡還要調整嗎？（例如欄位名稱、日期格式等）
