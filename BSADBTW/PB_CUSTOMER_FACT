@@ -1,0 +1,101 @@
+Column_name	Type	Computed	Length	Prec	Scale	Nullable	TrimTrailingBlanks	FixedLenNullInSource	Collation
+time_key	varchar	no	8	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+BNK_NBR	varchar	no	10	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+CIF_KEY	uniqueidentifier	no	16	     	     	yes	(n/a)	(n/a)	NULL
+CUST_TYPE_CDE	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+CUST_TAX_ID	varchar	no	30	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+BRNCH_NBR	varchar	no	50	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+BRNCH_NME	nvarchar	no	200	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+CUST_NME	nvarchar	no	700	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+NATIVE_CUST_NME	nvarchar	no	700	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+FNAME	nvarchar	no	300	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+LNAME	nvarchar	no	300	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+MNAME	nvarchar	no	100	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+CST_CNTR_NBR	varchar	no	7	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+C_ADDRESS_1	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+C_ADDRESS_2	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+C_ADDRESS_3	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+C_ADDRESS_4	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+C_ZIP_CODE	varchar	no	5	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+C_ZIP_4	varchar	no	4	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+C_STATE	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+C_CITY	nvarchar	no	50	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+C_CTRYCD	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+P_ADDRESS_1	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+P_ADDRESS_2	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+P_ADDRESS_3	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+P_ADDRESS_4	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+P_ZIP_CODE	varchar	no	5	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+P_ZIP_4	varchar	no	4	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+P_STATE	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+P_CITY	nvarchar	no	50	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+P_CTRYCD	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+M_ADDRESS_1	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+M_ADDRESS_2	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+M_ADDRESS_3	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+M_ADDRESS_4	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+M_ZIP_CODE	varchar	no	5	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+M_ZIP_4	varchar	no	4	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+M_STATE	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+M_CITY	nvarchar	no	50	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+M_CTRYCD	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+HOME_PHONE_NBR	varchar	no	14	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+HOME_PHONE_EXT	varchar	no	10	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+BUSINESS_PHONE_NBR	varchar	no	14	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+BUSINESS_PHONE_EXT	varchar	no	10	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+HANDPHONE_NBR	varchar	no	14	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+FAX_NBR	varchar	no	14	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+EMAIL	varchar	no	500	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+PRMY_OFFCR_NBR	varchar	no	50	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+PRMY_OFFCR_NME	nvarchar	no	200	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+SEC_OFFCR_NBR	varchar	no	30	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+SEC_OFFCR_NME	nvarchar	no	100	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+PRMY_LN_OFFCR_NBR	varchar	no	30	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+PRMY_LN_OFFCR_NME	nvarchar	no	100	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+SEC_LN_OFFCR_NBR	varchar	no	30	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+SEC_LN_OFFCR_NME	nvarchar	no	100	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+OPEN_DTE	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+CLOSED_DTE	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+PRCS_DTE	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+HHOLD_KEY	varchar	no	20	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+PRMY_CUST_IND	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+NAICS_CDE	nvarchar	no	100	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+NOTCAL	bit	no	1	     	     	yes	(n/a)	(n/a)	NULL
+BIRTHDT	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+TAXIDCD	char	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+TAXID	varchar	no	30	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+CDBANAM	nvarchar	no	70	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+CBUSPHN	varchar	no	14	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+CHMPHN	varchar	no	14	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+Employee_Ind	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+Employee_Cde	varchar	no	30	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+Employee_ID	varchar	no	30	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+Contractor_Ind	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+Contractor_CDE	varchar	no	15	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+Contractor_ID	varchar	no	15	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+Supplier_Ind	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+Supplier_CDE	varchar	no	15	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+Supplier_ID	varchar	no	15	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+CUSTFLAG	char	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+NATIONALITY_1	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+NATIONALITY_2	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+EMPLOYER_NAME	nvarchar	no	122	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+EMPLOYER_NAICS_CDE	nvarchar	no	100	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+TTL_ASSET	decimal	no	9	15   	2    	yes	(n/a)	(n/a)	NULL
+TTL_LIABILITY	decimal	no	9	15   	2    	yes	(n/a)	(n/a)	NULL
+ANNUAL_INCOME	decimal	no	9	15   	2    	yes	(n/a)	(n/a)	NULL
+SOURCE_OF_INCOME	varchar	no	50	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+PUBLIC_LISTED_FLAG	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+TTL_REVENUE	decimal	no	9	15   	2    	yes	(n/a)	(n/a)	NULL
+TTL_SHAREHOLDER_FUND	decimal	no	9	15   	2    	yes	(n/a)	(n/a)	NULL
+TTL_NET_REVENUE	decimal	no	9	15   	2    	yes	(n/a)	(n/a)	NULL
+TTL_UNIT_SHARE	decimal	no	9	15   	2    	yes	(n/a)	(n/a)	NULL
+CAPITAL	decimal	no	9	15   	2    	yes	(n/a)	(n/a)	NULL
+INCORPORATION_DATE	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+PERSON_IN_CHARGED	nvarchar	no	100	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+SENSITIVE_REL	varchar	no	50	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+REM_CDE	nvarchar	no	400	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+REM_NME	nvarchar	no	100	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+RecordStatus	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+IsCIPEnable	char	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+Customer_Segment	varchar	no	10	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
