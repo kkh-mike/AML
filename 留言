@@ -1,9 +1,17 @@
-我是要分開驗證
-先幫我搞共有戶好了
-1. 共有戶的下審日，若新光的客戶風險等級高於在台新的客戶風險等級，則下審日要取兩邊較近的日期
+客戶帳號一定要有在 VERIFY..BSA_SUB_CUST_FACT這裡面才是共有戶
 
-分險等級存在這裡
- SELECT HIGHRISK FROM VERIFY..BSA_SUB_CUST_FACT  
- SELECT HIGHRISK FROM BSA_SUB_CUST_FACT 
+你給的跑出來都沒有
+TS_CUST_ID	BSA_CustomerNo	VERIFY_CustomerNo	BSA_NXTRVDT	VERIFY_NXTRVDT	EDD_ReviewDt	BSA_HIGHRISK	VERIFY_HIGHRISK	BSA_RiskLevel	VERIFY_RiskLevel	Risk_Compare	Expected_NextReviewDt	Validation_Result	Date_Diff_Days
+T2654280870	NULL	T2654280870                                       	NULL	NULL	NULL	NULL	L	0	1	新光風險較高 → 應取較近日期	NULL	FAIL	NULL
+T2654564380	NULL	T2654564380                                       	NULL	NULL	NULL	NULL	L	0	1	新光風險較高 → 應取較近日期	NULL	FAIL	NULL
+T2655253490	NULL	T2655253490                                       	NULL	NULL	NULL	NULL	M	0	2	新光風險較高 → 應取較近日期	NULL	FAIL	NULL
+T2656975000	NULL	T2656975000                                       	NULL	NULL	NULL	NULL	L	0	1	新光風險較高 → 應取較近日期	NULL	FAIL	NULL
+T2657109370	NULL	T2657109370                                       	NULL	NULL	NULL	NULL	L	0	1	新光風險較高 → 應取較近日期	NULL	FAIL	NULL
+T2657354160	NULL	T2657354160                                       	NULL	NULL	NULL	NULL	M	0	2	新光風險較高 → 應取較近日期	NULL	FAIL	NULL
 
- 驗證 下審日有沒有取兩邊較近的日期
+你在看一下code 怎麼改
+
+我是要驗證 要
+比較 才能讓人家知道有驗證到
+
+幫我想要怎麼寫
