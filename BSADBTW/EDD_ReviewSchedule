@@ -1,0 +1,14 @@
+Column_name	Type	Computed	Length	Prec	Scale	Nullable	TrimTrailingBlanks	FixedLenNullInSource	Collation
+Id	bigint	no	8	19   	0    	no	(n/a)	(n/a)	NULL
+CIFKey	uniqueidentifier	no	16	     	     	yes	(n/a)	(n/a)	NULL
+ReviewDt	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+Status	char	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+CreatedBy	nvarchar	no	80	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+CreatedDt	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+CreatedUTCDt	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+LastUpdatedBy	nvarchar	no	80	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+LastUpdatedDt	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+LastupdatedUTCDt	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+ReviewDescription	nvarchar	no	2000	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+HRSStatus	char	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+HRSBatchID	bigint	no	8	19   	0    	yes	(n/a)	(n/a)	NULL
