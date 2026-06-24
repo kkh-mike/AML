@@ -1,1 +1,67 @@
 
+這段 SQL Code 的整理版本如下（我已盡量忠實還原畫面中的內容，並做適當排版讓它更容易閱讀）：
+ALTER VIEW [dbo].[AML_RIGHTS_VW] AS
+SELECT 
+    A.EMPCODE,
+    A.EMPNAME,
+    A.APPCODE,
+    
+    -- 消金放款及金作部人員邏輯
+    CASE 
+        WHEN CHARINDEX('_', RTRIM(A.PERMCODE)) <> 0 
+            THEN SUBSTRING(A.PERMCODE, 1, 3) 
+        ELSE A.PERMCODE 
+    END AS PERMCODE,
+
+    CASE 
+        WHEN A.EMPCODE = '1128802' THEN 'B10'
+        WHEN A.EMPCODE = '922798'  THEN 'B20'
+        WHEN CHARINDEX('_', RTRIM(A.PERMCODE)) <> 0 
+            THEN SUBSTRING(A.PERMCODE, 1, 3) 
+        ELSE A.PERMCODE 
+    END AS PERMCODE,   -- 注意：這裡原始碼有重複定義，可能為筆誤
+
+    B.EMAIL_ADDR,
+    B.DEPT_CD_FUNC,
+    B.DEPT_NM_FUNC,
+
+    CASE 
+        WHEN D.NEW_PERMCODE IS NOT NULL 
+         AND CHARINDEX('_', RTRIM(D.NEW_PERMCODE)) <> 0 
+            THEN RTRIM(SUBSTRING(RTRIM(D.NEW_PERMCODE), 
+                       CHARINDEX('_', RTRIM(D.NEW_PERMCODE)) + 1, 4))
+    END AS KD,   -- 金融市場事業總處 (KD)
+
+    -- 其他各種業務權限判斷
+    CASE 
+        WHEN CHARINDEX('_', RTRIM(A.PERMCODE)) <> 0 
+         AND SUBSTRING(RTRIM(A.PERMCODE), CHARINDEX('_', RTRIM(A.PERMCODE)) + 1, 2) = 'KD'
+            THEN 'KD'   -- 金融市場事業總處
+    END,
+
+    -- 法金產品行銷處 (CQ)
+    CASE 
+        WHEN CHARINDEX('_', RTRIM(A.PERMCODE)) <> 0 
+         AND SUBSTRING(RTRIM(A.PERMCODE), CHARINDEX('_', RTRIM(A.PERMCODE)) + 1, 3) IN ('CQ')
+            THEN '0068' + RTRIM(SUBSTRING(RTRIM(A.PERMCODE), 
+                       CHARINDEX('_', RTRIM(A.PERMCODE)) + 1, 4))
+    END,
+
+    -- 法金客戶條件分派邏輯（多個類似 CASE）
+    CASE 
+        WHEN CHARINDEX('_', RTRIM(A.PERMCODE)) <> 0 
+         AND SUBSTRING(RTRIM(A.PERMCODE), CHARINDEX('_', RTRIM(A.PERMCODE)) + 1, 4) IN ('CS1')
+            THEN '0105' + RTRIM(SUBSTRING(...))
+        -- ... 後面還有很多類似的 'CS5', 'CS3', 'CR', 'CW1'~'CW5', 'CN5' 等條件
+    END
+
+FROM ...   -- 這裡畫面沒拍到 FROM / JOIN 部分
+-- 後面應該還有更多欄位與 JOIN
+主要觀察與建議：
+	1	重複的 PERMCODE 處理： 第 374~376 行出現兩個幾乎一樣的 CASE，第二個還針對特定 EMPCODE 做硬編碼（B10、B20），這可能需要確認是否為刻意設計。
+	2	大量重複的 CHARINDEX + SUBSTRING 模式 這段 code 非常「重複勞力」，建議可以抽成 CTE 或 使用者定義函數 來簡化，例如： , dbo.fn_GetPermCodePart(A.PERMCODE, 3) AS PermPrefix
+	3	, dbo.fn_GetPermCodePart(D.NEW_PERMCODE, 4) AS NewPermSuffix
+	4	
+	5	可讀性低 建議加上更多註解，並把每個業務單位（KD、CQ、CS1、CS5…）的 CASE 拆成獨立的欄位，或使用一個 PERM_CATEGORY 欄位統一處理。
+
+需要我幫你重構整個 View（更簡潔版）、加上完整註解，還是針對特定部分優化嗎？ 把完整的 SQL（或更多畫面）貼上來，我可以幫你整理得更乾淨！
