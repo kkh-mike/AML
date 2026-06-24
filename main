@@ -1,8 +1,60 @@
-SELECT CIF_KEY , CUSTOMERNO , * FROM BSA_SUB_CUST_FACT
-SELECT CIF_KEY , CUSTOMERNO ,  * FROM VERIFY..BSA_SUB_CUST_FACT
+✅ 最佳解決方案（推薦）
+既然兩個表的欄位完全一樣，且你想把VERIFY..BSA_SUB_CUST_FACT 中與 BSA_SUB_CUST_FACT 不同的資料寫入主表，最乾淨的方式是使用 EXCEPT 或 NOT EXISTS。
+1. 最推薦寫法（使用 `EXCEPT`）
+-- 找出 VERIFY 中有，但 BSA_SUB_CUST_FACT 沒有的資料，並插入
+INSERT INTO BSA_SUB_CUST_FACT
+SELECT * 
+FROM VERIFY..BSA_SUB_CUST_FACT V
+EXCEPT
+SELECT * 
+FROM BSA_SUB_CUST_FACT;
+這是最簡單且高效的寫法，會自動比對所有欄位。
 
+2. 如果你想只以業務鍵（CIF_KEY + CUSTOMERNO）判斷差異（更常用）
+INSERT INTO BSA_SUB_CUST_FACT
+SELECT V.*
+FROM VERIFY..BSA_SUB_CUST_FACT V
+WHERE NOT EXISTS (
+    SELECT 1 
+    FROM BSA_SUB_CUST_FACT M
+    WHERE M.CIF_KEY = V.CIF_KEY
+      AND M.CUSTOMERNO = V.CUSTOMERNO
+);
 
-他們欄位都依樣
+3. 如果你想同時處理「新增」和「更新」（完整同步，推薦在正式跑前先測試）
+-- 先新增不存在的資料
+INSERT INTO BSA_SUB_CUST_FACT
+SELECT V.*
+FROM VERIFY..BSA_SUB_CUST_FACT V
+WHERE NOT EXISTS (
+    SELECT 1 
+    FROM BSA_SUB_CUST_FACT M
+    WHERE M.CIF_KEY = V.CIF_KEY 
+      AND M.CUSTOMERNO = V.CUSTOMERNO
+);
 
-我要找BSA_SUB_CUST_FACT 跟 VERIFY..BSA_SUB_CUST_FACT 出差異
-把差異的寫入BSA_SUB_CUST_FACT
+-- 再更新已存在但有差異的資料（可選）
+UPDATE M
+SET M.CUSTOMERNO = V.CUSTOMERNO,   -- 把其他欄位都更新
+    M.[欄位2] = V.[欄位2],
+    M.[欄位3] = V.[欄位3],
+    -- ... 其他欄位
+    M.LAST_UPD_DATE = GETDATE()     -- 如果有更新時間欄位
+FROM BSA_SUB_CUST_FACT M
+INNER JOIN VERIFY..BSA_SUB_CUST_FACT V
+    ON M.CIF_KEY = V.CIF_KEY 
+   AND M.CUSTOMERNO = V.CUSTOMERNO
+WHERE 
+    -- 這裡可以加上條件判斷真的有差異（避免不必要的更新）
+    (M.[欄位2] <> V.[欄位2] OR M.[欄位3] <> V.[欄位3] OR ...)
+
+建議流程（安全起見）：
+	1	先執行下面這句看差異有多少筆： SELECT COUNT(*) 
+	2	FROM VERIFY..BSA_SUB_CUST_FACT V
+	3	WHERE NOT EXISTS (
+	4	    SELECT 1 FROM BSA_SUB_CUST_FACT M 
+	5	    WHERE M.CIF_KEY = V.CIF_KEY AND M.CUSTOMERNO = V.CUSTOMERNO
+	6	);
+	7	
+	8	確認筆數沒問題後，再執行 INSERT。
+你要用哪一種方式？ 我可以根據你的需求再幫你調整（例如要不要比對所有欄位、要不要記錄 log、要不要加 transaction 等）。
