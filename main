@@ -1,60 +1,226 @@
-✅ 最佳解決方案（推薦）
-既然兩個表的欄位完全一樣，且你想把VERIFY..BSA_SUB_CUST_FACT 中與 BSA_SUB_CUST_FACT 不同的資料寫入主表，最乾淨的方式是使用 EXCEPT 或 NOT EXISTS。
-1. 最推薦寫法（使用 `EXCEPT`）
--- 找出 VERIFY 中有，但 BSA_SUB_CUST_FACT 沒有的資料，並插入
-INSERT INTO BSA_SUB_CUST_FACT
-SELECT * 
-FROM VERIFY..BSA_SUB_CUST_FACT V
-EXCEPT
-SELECT * 
-FROM BSA_SUB_CUST_FACT;
-這是最簡單且高效的寫法，會自動比對所有欄位。
+USE SOURCEDBTW
 
-2. 如果你想只以業務鍵（CIF_KEY + CUSTOMERNO）判斷差異（更常用）
-INSERT INTO BSA_SUB_CUST_FACT
-SELECT V.*
-FROM VERIFY..BSA_SUB_CUST_FACT V
-WHERE NOT EXISTS (
-    SELECT 1 
-    FROM BSA_SUB_CUST_FACT M
-    WHERE M.CIF_KEY = V.CIF_KEY
-      AND M.CUSTOMERNO = V.CUSTOMERNO
-);
+---RAW_TABLE HOUSEKEEP
+--EXEC [PRELOAD_HOUSEKEEPING]
 
-3. 如果你想同時處理「新增」和「更新」（完整同步，推薦在正式跑前先測試）
--- 先新增不存在的資料
-INSERT INTO BSA_SUB_CUST_FACT
-SELECT V.*
-FROM VERIFY..BSA_SUB_CUST_FACT V
-WHERE NOT EXISTS (
-    SELECT 1 
-    FROM BSA_SUB_CUST_FACT M
-    WHERE M.CIF_KEY = V.CIF_KEY 
-      AND M.CUSTOMERNO = V.CUSTOMERNO
-);
+---宣告暫存table
+DECLARE  @DelACCTTEMP TABLE (
+CustomerNo VARCHAR(100),
+ACCT_KEY VARCHAR(100),
+APPL VARCHAR(100),
+BRNCH_NBR VARCHAR(100),
+ACCTYP VARCHAR(100),
+ADTOPN DATETIME,
+MethodOfAcctOpn VARCHAR(100),
+ASTATCD INT
+)
 
--- 再更新已存在但有差異的資料（可選）
-UPDATE M
-SET M.CUSTOMERNO = V.CUSTOMERNO,   -- 把其他欄位都更新
-    M.[欄位2] = V.[欄位2],
-    M.[欄位3] = V.[欄位3],
-    -- ... 其他欄位
-    M.LAST_UPD_DATE = GETDATE()     -- 如果有更新時間欄位
-FROM BSA_SUB_CUST_FACT M
-INNER JOIN VERIFY..BSA_SUB_CUST_FACT V
-    ON M.CIF_KEY = V.CIF_KEY 
-   AND M.CUSTOMERNO = V.CUSTOMERNO
-WHERE 
-    -- 這裡可以加上條件判斷真的有差異（避免不必要的更新）
-    (M.[欄位2] <> V.[欄位2] OR M.[欄位3] <> V.[欄位3] OR ...)
+--Control-M
+--   1) HOLD AMLTWDC008C (Ordered date 20220114)
+--   2) 待通知 FREE AMLTWDC008C
 
-建議流程（安全起見）：
-	1	先執行下面這句看差異有多少筆： SELECT COUNT(*) 
-	2	FROM VERIFY..BSA_SUB_CUST_FACT V
-	3	WHERE NOT EXISTS (
-	4	    SELECT 1 FROM BSA_SUB_CUST_FACT M 
-	5	    WHERE M.CIF_KEY = V.CIF_KEY AND M.CUSTOMERNO = V.CUSTOMERNO
-	6	);
-	7	
-	8	確認筆數沒問題後，再執行 INSERT。
-你要用哪一種方式？ 我可以根據你的需求再幫你調整（例如要不要比對所有欄位、要不要記錄 log、要不要加 transaction 等）。
+---INSERT要關戶的客戶帳戶
+INSERT INTO @DelACCTTEMP
+SELECT B.CustomerNo,A.ACCT_KEY,A.APPL,A.BRNCH_NBR,A.ACCTYP,A.ADTOPN,A.MethodOfAcctOpn,A.ASTATCD FROM BSADBTW..ACCT_XREF_DIM A
+ INNER JOIN BSADBTW..BSA_SUB_CUST_FACT B ON A.CIF_KEY = B.CIF_KEY
+ INNER JOIN BSADBTW..PB_CUSTOMER_FACT D ON B.CIF_KEY = D.CIF_KEY
+ WHERE ASTATCD = 0 AND B.CUSTOMERNO in
+('JENCH01SC')
+
+
+--before
+select *  from RAW_CASH_ACCOUNT where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
+select *  from SG_FX_PASSBOOK_SAVING where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
+select *  from SG_FX_TD_CERTIFICATE where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
+select *  from LOAN_LIMIT where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
+select *  from RAW_CCARD_ACCOUNT where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
+
+
+---CASA ACCT
+INSERT INTO [RAW_CASH_ACCOUNT] 
+SELECT 
+	   ACCT_KEY
+      ,APPL
+      ,CustomerNo
+      ,ISNULL(BRNCH_NBR,'')
+      ,''
+      ,ISNULL(ACCTYP,'')
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,convert(varchar(10), ADTOPN, 120)
+      ,''
+      ,'1'
+      ,''
+      ,''
+      ,ISNULL(MethodOfAcctOpn,'')
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,convert(varchar(10), GETDATE()-1, 120)
+      ,''
+      ,''
+      ,''
+FROM @DelACCTTEMP WHERE APPL IN('TRD','DDA')
+
+
+---SAV ACCT
+INSERT INTO [SG_FX_PASSBOOK_SAVING]
+SELECT 
+	   ACCT_KEY
+      ,APPL
+      ,CustomerNo
+      ,ISNULL(BRNCH_NBR,'')
+      ,''
+      ,ISNULL(ACCTYP,'')
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,convert(varchar(10), ADTOPN, 120)
+      ,''
+      ,'1'
+      ,''
+      ,''
+      ,ISNULL(MethodOfAcctOpn,'')
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,convert(varchar(10), GETDATE()-1, 120)
+      ,''
+      ,''
+FROM @DelACCTTEMP WHERE APPL='SAV'
+
+
+
+---COD ACCT
+INSERT INTO [SG_FX_TD_CERTIFICATE]
+SELECT 
+	   ACCT_KEY
+      ,APPL
+      ,CustomerNo
+      ,ISNULL(BRNCH_NBR,'')
+      ,''
+      ,ISNULL(ACCTYP,'')
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,convert(varchar(10), ADTOPN, 120)
+      ,''
+      ,'1'
+      ,''
+      ,''
+	  ,''
+	  ,''
+      ,ISNULL(MethodOfAcctOpn,'')
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,convert(varchar(10), GETDATE()-1, 120)
+      ,''
+      ,''
+      ,''
+FROM @DelACCTTEMP WHERE APPL='COD'
+
+
+---LOAN ACCT
+INSERT INTO LOAN_LIMIT
+SELECT ACCT_KEY
+      ,APPL
+      ,CustomerNo
+      ,ISNULL(BRNCH_NBR,'')
+      ,''
+      ,ISNULL(ACCTYP,'')
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,convert(varchar(10), ADTOPN, 120)
+      ,''
+      ,'1'
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,ISNULL(MethodOfAcctOpn,'')
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,convert(varchar(10), GETDATE()-1, 120)
+      ,''
+      ,''
+      ,''
+FROM @DelACCTTEMP WHERE APPL='LNA'
+
+---CCARD ACCT
+INSERT INTO RAW_CCARD_ACCOUNT
+SELECT ACCT_KEY
+      ,APPL
+      ,CustomerNo
+      ,ISNULL(BRNCH_NBR,'')
+      ,''
+      ,ISNULL(ACCTYP,'')
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,convert(varchar(10), ADTOPN, 120)
+      ,''
+      ,'1'
+      ,''
+      ,''
+      ,''
+      ,''
+      ,ISNULL(MethodOfAcctOpn,'')
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,''
+      ,convert(varchar(10), GETDATE()-1, 120)
+      ,''
+      ,''
+      ,''
+FROM @DelACCTTEMP WHERE APPL ='CCD'
+
+
+--after
+select *  from RAW_CASH_ACCOUNT where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
+select *  from SG_FX_PASSBOOK_SAVING where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
+select *  from SG_FX_TD_CERTIFICATE where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
+select *  from LOAN_LIMIT where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
+select *  from RAW_CCARD_ACCOUNT where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
+
+
+
+幫我整理加上中文註解
+不要改邏輯寫法只要整理排版
