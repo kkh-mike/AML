@@ -1,24 +1,20 @@
--- 為這些員工同時給 0094 和 0028 權限
-UNION ALL
--- 2026/06/23 新增1141923 等五人 0094+0028 權限
-SELECT 
-    H.EMP_ID, 
-    H.CH_NM, 
-    T.APPCODE,
-    CASE WHEN CHARINDEX('_', RTRIM(T.PERMCODE)) > 0 
-         THEN SUBSTRING(T.PERMCODE,1,3) 
-         ELSE T.PERMCODE 
-    END PERMCODE,
-    H.EMAIL_ADDR, 
-    H.DEPT_CD_FUNC, 
-    H.DEPT_NM_FUNC, 
-    ACCT_DEPT_CD
-FROM TSAAS..TBL_CMPEMPAPP T 
-JOIN TSAAS..HREMPM_N H ON T.EMPCODE = H.EMP_ID
-CROSS JOIN (VALUES 
-    ('0094'),
-    ('0028')
-) AS DEPTS(ACCT_DEPT_CD)
-WHERE H.COMP_CD = 'TSIB' 
-  AND T.APPCODE = 'AML' 
-  AND H.EMP_ID IN ('1141923','1141924','1141925','1141926','1141927');
+RM = Risk Management
+CDC = Change Data Capture
+這兩個在銀行AML/CFT（反洗錢）系統的ETL流程裡非常常見：
+詳細解釋（以你現在做的風險管理系統為背景）
+	1	RM (Risk Management)
+	◦	就是風險管理模組。
+	◦	AMLHK_D_RM_01C / AMLHK_D_RM_02C 通常是風險評分、風險分類、客戶風險等級 (Customer Risk Rating)、交易風險監控相關的資料表或處理流程。
+	◦	這條線會把ETL處理完的資料再進一步做風險模型計算、評分、警示產生等。
+	2	CDC (Change Data Capture)
+	◦	變更資料擷取。
+	◦	在資料倉儲/ETL架構中，這是標準術語，指只擷取有異動（新增、修改、刪除）的資料，而不是每次都全量重跑。
+	◦	AMLHK_D_CDC_01C 這支Job通常負責從核心系統（主機/DB）抓取當日/即時異動資料，效率比較高，是很多銀行AML系統的基礎流程。
+整個流程簡單整理（從圖看）
+	•	AMLHK_D_ETL_01C → 主ETL處理
+	◦	分流到：
+	▪	CDC：抓異動資料
+	▪	LOD_TXN：可能是 Load Transaction（交易明細載入）
+	▪	RM：風險管理專屬處理（再往下到 RM_02C）
+
+你目前在做的AML/CFT系統維護、資料遷移、SQL優化，大部分都會圍繞這些模組在跑。 如果你有這張圖的完整上下文，或是想知道這幾支Job的具體功能/常見問題，我可以再幫你更精準解釋。
