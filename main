@@ -1,226 +1,207 @@
 USE SOURCEDBTW
+GO
 
----RAW_TABLE HOUSEKEEP
---EXEC [PRELOAD_HOUSEKEEPING]
+--- RAW_TABLE HOUSEKEEP
+-- EXEC [PRELOAD_HOUSEKEEPING]
 
----宣告暫存table
-DECLARE  @DelACCTTEMP TABLE (
-CustomerNo VARCHAR(100),
-ACCT_KEY VARCHAR(100),
-APPL VARCHAR(100),
-BRNCH_NBR VARCHAR(100),
-ACCTYP VARCHAR(100),
-ADTOPN DATETIME,
-MethodOfAcctOpn VARCHAR(100),
-ASTATCD INT
+-- =============================================
+-- 宣告暫存表，用來存放要處理關戶的帳戶資料
+-- =============================================
+DECLARE @DelACCTTEMP TABLE (
+    CustomerNo       VARCHAR(100),
+    ACCT_KEY         VARCHAR(100),
+    APPL             VARCHAR(100),
+    BRNCH_NBR        VARCHAR(100),
+    ACCTYP           VARCHAR(100),
+    ADTOPN           DATETIME,
+    MethodOfAcctOpn  VARCHAR(100),
+    ASTATCD          INT
 )
 
---Control-M
---   1) HOLD AMLTWDC008C (Ordered date 20220114)
---   2) 待通知 FREE AMLTWDC008C
+-- =============================================
+-- Control-M 作業說明
+-- 1) HOLD AMLTWDC008C (Ordered date 20220114)
+-- 2) 待通知 FREE AMLTWDC008C
+-- =============================================
 
----INSERT要關戶的客戶帳戶
+-- =============================================
+-- 找出要關戶的客戶帳戶並插入暫存表
+-- =============================================
 INSERT INTO @DelACCTTEMP
-SELECT B.CustomerNo,A.ACCT_KEY,A.APPL,A.BRNCH_NBR,A.ACCTYP,A.ADTOPN,A.MethodOfAcctOpn,A.ASTATCD FROM BSADBTW..ACCT_XREF_DIM A
- INNER JOIN BSADBTW..BSA_SUB_CUST_FACT B ON A.CIF_KEY = B.CIF_KEY
- INNER JOIN BSADBTW..PB_CUSTOMER_FACT D ON B.CIF_KEY = D.CIF_KEY
- WHERE ASTATCD = 0 AND B.CUSTOMERNO in
-('JENCH01SC')
+SELECT 
+    B.CustomerNo,
+    A.ACCT_KEY,
+    A.APPL,
+    A.BRNCH_NBR,
+    A.ACCTYP,
+    A.ADTOPN,
+    A.MethodOfAcctOpn,
+    A.ASTATCD 
+FROM BSADBTW..ACCT_XREF_DIM A
+INNER JOIN BSADBTW..BSA_SUB_CUST_FACT B 
+    ON A.CIF_KEY = B.CIF_KEY
+INNER JOIN BSADBTW..PB_CUSTOMER_FACT D 
+    ON B.CIF_KEY = D.CIF_KEY
+WHERE ASTATCD = 0 
+  AND B.CUSTOMERNO IN ('JENCH01SC');
 
 
---before
-select *  from RAW_CASH_ACCOUNT where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
-select *  from SG_FX_PASSBOOK_SAVING where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
-select *  from SG_FX_TD_CERTIFICATE where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
-select *  from LOAN_LIMIT where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
-select *  from RAW_CCARD_ACCOUNT where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
+-- =============================================
+-- BEFORE：檢查各帳戶類別目前資料
+-- =============================================
+SELECT * FROM RAW_CASH_ACCOUNT 
+WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
+
+SELECT * FROM SG_FX_PASSBOOK_SAVING 
+WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
+
+SELECT * FROM SG_FX_TD_CERTIFICATE 
+WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
+
+SELECT * FROM LOAN_LIMIT 
+WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
+
+SELECT * FROM RAW_CCARD_ACCOUNT 
+WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
 
 
----CASA ACCT
+-- =============================================
+-- CASA 帳戶 (TRD / DDA)
+-- =============================================
 INSERT INTO [RAW_CASH_ACCOUNT] 
 SELECT 
-	   ACCT_KEY
-      ,APPL
-      ,CustomerNo
-      ,ISNULL(BRNCH_NBR,'')
-      ,''
-      ,ISNULL(ACCTYP,'')
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,convert(varchar(10), ADTOPN, 120)
-      ,''
-      ,'1'
-      ,''
-      ,''
-      ,ISNULL(MethodOfAcctOpn,'')
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,convert(varchar(10), GETDATE()-1, 120)
-      ,''
-      ,''
-      ,''
-FROM @DelACCTTEMP WHERE APPL IN('TRD','DDA')
+    ACCT_KEY,
+    APPL,
+    CustomerNo,
+    ISNULL(BRNCH_NBR, ''),
+    '',
+    ISNULL(ACCTYP, ''),
+    '', '', '', '', '',
+    CONVERT(VARCHAR(10), ADTOPN, 120),
+    '',
+    '1',
+    '', '',
+    ISNULL(MethodOfAcctOpn, ''),
+    '', '', '', '', '', '',
+    CONVERT(VARCHAR(10), GETDATE()-1, 120),
+    '', '', ''
+FROM @DelACCTTEMP 
+WHERE APPL IN ('TRD', 'DDA');
 
 
----SAV ACCT
+-- =============================================
+-- SAV 存摺帳戶
+-- =============================================
 INSERT INTO [SG_FX_PASSBOOK_SAVING]
 SELECT 
-	   ACCT_KEY
-      ,APPL
-      ,CustomerNo
-      ,ISNULL(BRNCH_NBR,'')
-      ,''
-      ,ISNULL(ACCTYP,'')
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,convert(varchar(10), ADTOPN, 120)
-      ,''
-      ,'1'
-      ,''
-      ,''
-      ,ISNULL(MethodOfAcctOpn,'')
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,convert(varchar(10), GETDATE()-1, 120)
-      ,''
-      ,''
-FROM @DelACCTTEMP WHERE APPL='SAV'
+    ACCT_KEY,
+    APPL,
+    CustomerNo,
+    ISNULL(BRNCH_NBR, ''),
+    '',
+    ISNULL(ACCTYP, ''),
+    '', '', '', '', '',
+    CONVERT(VARCHAR(10), ADTOPN, 120),
+    '',
+    '1',
+    '', '',
+    ISNULL(MethodOfAcctOpn, ''),
+    '', '', '', '', '', '',
+    CONVERT(VARCHAR(10), GETDATE()-1, 120),
+    '', ''
+FROM @DelACCTTEMP 
+WHERE APPL = 'SAV';
 
 
-
----COD ACCT
+-- =============================================
+-- COD 定存帳戶
+-- =============================================
 INSERT INTO [SG_FX_TD_CERTIFICATE]
 SELECT 
-	   ACCT_KEY
-      ,APPL
-      ,CustomerNo
-      ,ISNULL(BRNCH_NBR,'')
-      ,''
-      ,ISNULL(ACCTYP,'')
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,convert(varchar(10), ADTOPN, 120)
-      ,''
-      ,'1'
-      ,''
-      ,''
-	  ,''
-	  ,''
-      ,ISNULL(MethodOfAcctOpn,'')
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,convert(varchar(10), GETDATE()-1, 120)
-      ,''
-      ,''
-      ,''
-FROM @DelACCTTEMP WHERE APPL='COD'
+    ACCT_KEY,
+    APPL,
+    CustomerNo,
+    ISNULL(BRNCH_NBR, ''),
+    '',
+    ISNULL(ACCTYP, ''),
+    '', '', '', '', '',
+    CONVERT(VARCHAR(10), ADTOPN, 120),
+    '',
+    '1',
+    '', '',
+    '',
+    '',
+    ISNULL(MethodOfAcctOpn, ''),
+    '', '', '', '', '', '',
+    CONVERT(VARCHAR(10), GETDATE()-1, 120),
+    '', '', ''
+FROM @DelACCTTEMP 
+WHERE APPL = 'COD';
 
 
----LOAN ACCT
+-- =============================================
+-- LOAN 貸款帳戶
+-- =============================================
 INSERT INTO LOAN_LIMIT
-SELECT ACCT_KEY
-      ,APPL
-      ,CustomerNo
-      ,ISNULL(BRNCH_NBR,'')
-      ,''
-      ,ISNULL(ACCTYP,'')
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,convert(varchar(10), ADTOPN, 120)
-      ,''
-      ,'1'
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,ISNULL(MethodOfAcctOpn,'')
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,convert(varchar(10), GETDATE()-1, 120)
-      ,''
-      ,''
-      ,''
-FROM @DelACCTTEMP WHERE APPL='LNA'
+SELECT 
+    ACCT_KEY,
+    APPL,
+    CustomerNo,
+    ISNULL(BRNCH_NBR, ''),
+    '',
+    ISNULL(ACCTYP, ''),
+    '', '', '', '', '',
+    CONVERT(VARCHAR(10), ADTOPN, 120),
+    '',
+    '1',
+    '', '', '', '', '', '', '', '', '', '',
+    ISNULL(MethodOfAcctOpn, ''),
+    '', '', '', '', '', '', '', '',
+    CONVERT(VARCHAR(10), GETDATE()-1, 120),
+    '', '', ''
+FROM @DelACCTTEMP 
+WHERE APPL = 'LNA';
 
----CCARD ACCT
+
+-- =============================================
+-- CCARD 信用卡帳戶
+-- =============================================
 INSERT INTO RAW_CCARD_ACCOUNT
-SELECT ACCT_KEY
-      ,APPL
-      ,CustomerNo
-      ,ISNULL(BRNCH_NBR,'')
-      ,''
-      ,ISNULL(ACCTYP,'')
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,convert(varchar(10), ADTOPN, 120)
-      ,''
-      ,'1'
-      ,''
-      ,''
-      ,''
-      ,''
-      ,ISNULL(MethodOfAcctOpn,'')
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,''
-      ,convert(varchar(10), GETDATE()-1, 120)
-      ,''
-      ,''
-      ,''
-FROM @DelACCTTEMP WHERE APPL ='CCD'
+SELECT 
+    ACCT_KEY,
+    APPL,
+    CustomerNo,
+    ISNULL(BRNCH_NBR, ''),
+    '',
+    ISNULL(ACCTYP, ''),
+    '', '', '', '', '',
+    CONVERT(VARCHAR(10), ADTOPN, 120),
+    '',
+    '1',
+    '', '',
+    '', '',
+    ISNULL(MethodOfAcctOpn, ''),
+    '', '', '', '', '', '',
+    CONVERT(VARCHAR(10), GETDATE()-1, 120),
+    '', '', ''
+FROM @DelACCTTEMP 
+WHERE APPL = 'CCD';
 
 
---after
-select *  from RAW_CASH_ACCOUNT where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
-select *  from SG_FX_PASSBOOK_SAVING where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
-select *  from SG_FX_TD_CERTIFICATE where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
-select *  from LOAN_LIMIT where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
-select *  from RAW_CCARD_ACCOUNT where CUSTOMER_ID in  (select CustomerNo from @DelACCTTEMP)
+-- =============================================
+-- AFTER：確認插入結果
+-- =============================================
+SELECT * FROM RAW_CASH_ACCOUNT 
+WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
 
+SELECT * FROM SG_FX_PASSBOOK_SAVING 
+WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
 
+SELECT * FROM SG_FX_TD_CERTIFICATE 
+WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
 
-幫我整理加上中文註解
-不要改邏輯寫法只要整理排版
+SELECT * FROM LOAN_LIMIT 
+WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
+
+SELECT * FROM RAW_CCARD_ACCOUNT 
+WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
