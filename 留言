@@ -1,53 +1,43 @@
+✅ 問題診斷與修正
+錯誤原因： SQL Server 不支援 NULLS FIRST（這是 PostgreSQL 的語法）。 你目前的資料庫是 SQL Server，所以 ORDER BY ... NULLS FIRST 會報錯。
+
+修正後的完整查詢（直接複製執行）
 WITH multi_sk AS (
-    -- 步驟1：找出所有一對多的 TS_CUST_ID
     SELECT 
         TS_CUST_ID,
         COUNT(DISTINCT SK_CUST_ID) AS sk_count
     FROM BANCS_SK_CUST_INFO
     GROUP BY TS_CUST_ID
-    HAVING COUNT(DISTINCT SK_CUST_ID) > 1     -- ← 如果你要 >=3 才算，把 >1 改成 >2
+    HAVING COUNT(DISTINCT SK_CUST_ID) > 1
 ),
 
 sar_nonzero AS (
-    -- 步驟2：找出 IsSARFiled != '0' 的客戶
     SELECT DISTINCT CUSTOMERNO AS TS_CUST_ID
     FROM BSA_SUB_CUST_FACT
     WHERE IsSARFiled != '0'
 ),
 
 problematic_ts AS (
-    -- 步驟3：兩邊交集，得到真正需要驗證的 TS_CUST_ID
     SELECT m.TS_CUST_ID
     FROM multi_sk m
-    INNER JOIN sar_nonzero s 
-        ON m.TS_CUST_ID = s.TS_CUST_ID
-)
--- 預覽結果（可先單獨跑這一段看有多少客戶）
---SELECT 
---    TS_CUST_ID,
---    (SELECT sk_count FROM multi_sk WHERE TS_CUST_ID = p.TS_CUST_ID) AS sk_count
---FROM problematic_ts p
---ORDER BY TS_CUST_ID;
+    INNER JOIN sar_nonzero s ON m.TS_CUST_ID = s.TS_CUST_ID
+),
 
-
-
-, related_sk AS (
-    -- 從 BANCS_SK_CUST_INFO 拿出所有相關的 SK_CUST_ID
+related_sk AS (
     SELECT DISTINCT 
         s.TS_CUST_ID,
-        s.SK_CUST_ID AS customer_identifier   -- 這通常就是你要帶去 Customer_Migrate_buffer 的 customerNo
+        s.SK_CUST_ID AS customer_identifier
     FROM BANCS_SK_CUST_INFO s
-    INNER JOIN problematic_ts p 
-        ON s.TS_CUST_ID = p.TS_CUST_ID
-)
-   --找出對應的 CIF_KEY
-, related_cif AS (
+    INNER JOIN problematic_ts p ON s.TS_CUST_ID = p.TS_CUST_ID
+),
+
+related_cif AS (
     SELECT DISTINCT CIF_KEY
     FROM Customer_Migrate_buffer
-    WHERE customerNo IN (
-        SELECT customer_identifier FROM related_sk
-    )
+    WHERE customerNo IN (SELECT customer_identifier FROM related_sk)
 )
+
+-- ====================== 最終查詢：IsSARFiled 分布 ======================
 SELECT 
     IsSARFiled,
     COUNT(*) AS record_count,
@@ -55,10 +45,24 @@ SELECT
 FROM Cust_NP_Migrate_buffer
 WHERE CIF_KEY IN (SELECT CIF_KEY FROM related_cif)
 GROUP BY IsSARFiled
-ORDER BY IsSARFiled NULLS FIRST;
+ORDER BY 
+    CASE WHEN IsSARFiled IS NULL THEN 0 ELSE 1 END,   -- NULL 排最前面
+    IsSARFiled;
 
+如果想先看問題客戶清單（建議先跑這段確認有沒有資料）
+把上面 WITH ... related_cif 的部分保留，然後改用下面這段：
+-- 先看有多少問題的 TS_CUST_ID
+SELECT 
+    p.TS_CUST_ID,
+    m.sk_count
+FROM problematic_ts p
+INNER JOIN multi_sk m ON p.TS_CUST_ID = m.TS_CUST_ID
+ORDER BY m.sk_count DESC, p.TS_CUST_ID;
 
+其他小建議
+	1	如果還是報錯，請把完整錯誤訊息貼給我（包含行號）。
+	2	如果資料量很大，可以先測試 related_cif 有多少筆： SELECT COUNT(*) FROM related_cif;
+	3	
+	4	想把 NULL 排最後，就把 CASE WHEN IsSARFiled IS NULL THEN 0 ELSE 1 END 改成 1 跟 0 對調即可。
 
-訊息 102，層級 15，狀態 1，行 58
-接近 'NULLS' 之處的語法不正確。
-
+直接複製上面第一個修正後的完整查詢去執行試試看。 執行完後告訴我結果（例如出現哪些 IsSARFiled 值），我再幫你寫違規明細的查詢。
