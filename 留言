@@ -1,50 +1,38 @@
-WITH multi_sk AS (
-    SELECT TS_CUST_ID, COUNT(DISTINCT SK_CUST_ID) AS sk_count
+
+SELECT * FROM BSA_SUB_CUST_FACT WHERE CUSTOMERNO in
+(
+
+SELECT DISTINCT s.TS_CUST_ID
+FROM (
+    SELECT 
+        TS_CUST_ID,
+        COUNT(DISTINCT SK_CUST_ID) AS SK_COUNT
     FROM BANCS_SK_CUST_INFO
     GROUP BY TS_CUST_ID
     HAVING COUNT(DISTINCT SK_CUST_ID) > 1
-),
-sar_nonzero AS (
-    SELECT DISTINCT CUSTOMERNO AS TS_CUST_ID
-    FROM BSA_SUB_CUST_FACT
-    WHERE IsSARFiled != '0'
-),
-problematic_ts AS (
-    SELECT m.TS_CUST_ID FROM multi_sk m
-    INNER JOIN sar_nonzero s ON m.TS_CUST_ID = s.TS_CUST_ID
-),
-related_sk AS (
-    SELECT DISTINCT s.TS_CUST_ID, s.SK_CUST_ID AS customer_identifier
-    FROM BANCS_SK_CUST_INFO s
-    INNER JOIN problematic_ts p ON s.TS_CUST_ID = p.TS_CUST_ID
-),
-related_cif AS (
-    SELECT DISTINCT CIF_KEY
-    FROM Customer_Migrate_buffer
-    WHERE customerNo IN (SELECT customer_identifier FROM related_sk)
+) t
+JOIN BANCS_SK_CUST_INFO s ON t.TS_CUST_ID = s.TS_CUST_ID
+WHERE SK_COUNT > '6'
+) AND IsSARFiled != '0'
+
+
+SELECT * FROM BANCS_SK_CUST_INFO WHERE TS_CUST_ID = 'L2876734180'
+
+SELECT * FROM Cust_NP_Migrate_buffer WHERE CIF_KEY in
+(
+	SELECT CIF_KEY FROM Customer_Migrate_buffer WHERE customerNo in
+	(
+	'L287673418',
+	'L287673418C',
+	'L287673418D',
+	'L287673418E',
+	'L287673418F',
+	'L287673418G',
+	'L287673418H'
+	)
 )
--- ====================== 分布 + 總檢查數量 ======================
-SELECT 
-    IsSARFiled                  AS [IsSARFiled 值],
-    COUNT(*)                    AS [筆數],
-    COUNT(DISTINCT CIF_KEY)     AS [受影響 CIF 數量]
-FROM Cust_NP_Migrate_buffer
-WHERE CIF_KEY IN (SELECT CIF_KEY FROM related_cif)
-GROUP BY IsSARFiled
 
-UNION ALL
-
-SELECT 
-    '=== 總檢查數量 ==='        AS [IsSARFiled 值],
-    COUNT(*)                    AS [筆數],
-    COUNT(DISTINCT CIF_KEY)     AS [受影響 CIF 數量]
-FROM Cust_NP_Migrate_buffer
-WHERE CIF_KEY IN (SELECT CIF_KEY FROM related_cif)
-ORDER BY [IsSARFiled 值];
+SELECT IsSARFiled ,customerNo  FROM BSA_SUB_CUST_FACT  WHERE customerNo = 'L2876734180'
 
 
-
-
-訊息 245，層級 16，狀態 1，行 1
-將 varchar 值 '=== 總檢查數量 ===' 轉換成資料類型 bit 時，轉換失敗。
-
+幫我寫好一點
