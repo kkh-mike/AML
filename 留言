@@ -1,38 +1,85 @@
-
-SELECT * FROM BSA_SUB_CUST_FACT WHERE CUSTOMERNO in
-(
-
-SELECT DISTINCT s.TS_CUST_ID
-FROM (
-    SELECT 
-        TS_CUST_ID,
-        COUNT(DISTINCT SK_CUST_ID) AS SK_COUNT
-    FROM BANCS_SK_CUST_INFO
-    GROUP BY TS_CUST_ID
-    HAVING COUNT(DISTINCT SK_CUST_ID) > 1
-) t
-JOIN BANCS_SK_CUST_INFO s ON t.TS_CUST_ID = s.TS_CUST_ID
-WHERE SK_COUNT > '6'
-) AND IsSARFiled != '0'
-
-
-SELECT * FROM BANCS_SK_CUST_INFO WHERE TS_CUST_ID = 'L2876734180'
-
-SELECT * FROM Cust_NP_Migrate_buffer WHERE CIF_KEY in
-(
-	SELECT CIF_KEY FROM Customer_Migrate_buffer WHERE customerNo in
-	(
-	'L287673418',
-	'L287673418C',
-	'L287673418D',
-	'L287673418E',
-	'L287673418F',
-	'L287673418G',
-	'L287673418H'
-	)
+以下是優化後、結構更清晰、可讀性更好且更適合調查用途的版本：
+1. 主查詢（找出 TS_CUST_ID 有超過 6 個 SK_CUST_ID 的客戶）
+-- 找出有多重 SK_CUST_ID 的 TS_CUST_ID（重點關注 >6 個的情況）
+SELECT 
+    bscf.* 
+FROM BSA_SUB_CUST_FACT bscf
+WHERE bscf.CUSTOMERNO IN (
+    SELECT DISTINCT s.TS_CUST_ID
+    FROM (
+        SELECT 
+            TS_CUST_ID,
+            COUNT(DISTINCT SK_CUST_ID) AS SK_COUNT
+        FROM BANCS_SK_CUST_INFO
+        GROUP BY TS_CUST_ID
+        HAVING COUNT(DISTINCT SK_CUST_ID) > 6          -- 可依需求調整為 >= 2 或其他門檻
+    ) t
+    JOIN BANCS_SK_CUST_INFO s ON t.TS_CUST_ID = s.TS_CUST_ID
 )
+AND bscf.IsSARFiled != '0'
+ORDER BY bscf.CUSTOMERNO;
+2. 單筆客戶詳細資訊（建議一起看）
+-- 查詢特定 TS_CUST_ID 的所有 SK 對應資料
+SELECT 
+    TS_CUST_ID,
+    SK_CUST_ID,
+    COUNT(*) OVER (PARTITION BY TS_CUST_ID) AS SK_COUNT_PER_TS,
+    * 
+FROM BANCS_SK_CUST_INFO 
+WHERE TS_CUST_ID = 'L2876734180'
+ORDER BY SK_CUST_ID;
+3. Migrate Buffer 關聯查詢（優化後）
+-- 查看 Migrate Buffer 中的相關資料
+SELECT 
+    c.*,
+    np.* 
+FROM Customer_Migrate_buffer c
+LEFT JOIN Cust_NP_Migrate_buffer np 
+    ON c.CIF_KEY = np.CIF_KEY
+WHERE c.customerNo IN (
+    'L287673418',
+    'L287673418C',
+    'L287673418D',
+    'L287673418E',
+    'L287673418F',
+    'L287673418G',
+    'L287673418H'
+)
+ORDER BY c.customerNo, c.CIF_KEY;
+4. SAR 狀態確認
+-- 確認 SAR 申報狀態
+SELECT 
+    customerNo,
+    IsSARFiled,
+    COUNT(*) OVER (PARTITION BY customerNo) AS duplicate_count
+FROM BSA_SUB_CUST_FACT 
+WHERE customerNo = 'L2876734180';
 
-SELECT IsSARFiled ,customerNo  FROM BSA_SUB_CUST_FACT  WHERE customerNo = 'L2876734180'
+額外建議（調查用綜合版本）
+如果你想一次看完整圖像，可以用下面這個組合查詢：
+-- 綜合調查單一 TS_CUST_ID
+DECLARE @TargetTS VARCHAR(20) = 'L2876734180';
 
+-- 1. SK 重複情況
+SELECT 
+    TS_CUST_ID,
+    COUNT(DISTINCT SK_CUST_ID) AS SK_COUNT,
+    STRING_AGG(SK_CUST_ID, ', ') AS SK_LIST
+FROM BANCS_SK_CUST_INFO 
+WHERE TS_CUST_ID = @TargetTS
+GROUP BY TS_CUST_ID;
 
-幫我寫好一點
+-- 2. BSA_SUB_CUST_FACT 資料
+SELECT * FROM BSA_SUB_CUST_FACT 
+WHERE CUSTOMERNO = @TargetTS;
+
+-- 3. Migrate Buffer
+SELECT * FROM Customer_Migrate_buffer 
+WHERE customerNo LIKE @TargetTS + '%';
+優化重點：
+	•	使用有意義的別名（bscf, t, s）
+	•	加上 ORDER BY 方便閱讀
+	•	使用 STRING_AGG 快速看到所有 SK_CUST_ID
+	•	加上視窗函數顯示 count
+	•	使用變數方便重複執行
+需要我再幫你加上 JOIN 其他主檔（例如客戶基本資料表），或是做 duplicate housekeeping 的 DELETE/UPDATE 語句嗎？
