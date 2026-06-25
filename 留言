@@ -1,14 +1,20 @@
-✅ 已調整：NULL 視為 0 來比對
-推薦最終版本（NULL 轉 0）
--- 【最佳版本】找出 IsSARFiled 不一致的客戶（NULL 視為 0）
+✅ 了解！已按照你的規則調整：
+規則：
+	•	VERIFY = 0 且 BSA = 1 → 當成沒事（OK）
+	•	其他情況不一樣（尤其是 VERIFY = 1 但 BSA = 0 或 NULL）→ 視為問題（DIFF）
+最終推薦查詢
+-- 【最終推薦】只顯示真正有問題的差異
 SELECT 
     a.CustomerNo,
     a.CIF_KEY,
     ISNULL(a.IsSARFiled, 0) AS BSA_IsSARFiled,
     ISNULL(b.IsSARFiled, 0) AS VERIFY_IsSARFiled,
     CASE 
-        WHEN ISNULL(a.IsSARFiled, 0) = ISNULL(b.IsSARFiled, 0) THEN 'Match'
-        ELSE 'DIFF'
+        WHEN ISNULL(b.IsSARFiled, 0) = 0 AND ISNULL(a.IsSARFiled, 0) = 1 
+            THEN 'OK (VERIFY 0, BSA 1)' 
+        WHEN ISNULL(a.IsSARFiled, 0) = ISNULL(b.IsSARFiled, 0) 
+            THEN 'OK'
+        ELSE 'DIFF *** 需要處理 ***'
     END AS Compare_Result
 FROM BSA_SUB_CUST_FACT a
 JOIN VERIFY..BSA_SUB_CUST_FACT b 
@@ -18,35 +24,23 @@ WHERE EXISTS (
     FROM CIF_Migrate_Mapping_TEMP c 
     WHERE a.CIF_KEY = c.NEW_CIF_KEY
 )
-AND ISNULL(a.IsSARFiled, 0) <> ISNULL(b.IsSARFiled, 0)   -- 只顯示不同的
+-- 只顯示真正有問題的
+AND NOT (ISNULL(b.IsSARFiled, 0) = 0 AND ISNULL(a.IsSARFiled, 0) = 1)   -- 排除可接受的情況
+AND ISNULL(a.IsSARFiled, 0) <> ISNULL(b.IsSARFiled, 0)
 ORDER BY a.CustomerNo;
 
-其他實用版本
-1. 統計版（看總共有幾筆不一致）
+統計版（快速看問題嚴重程度）
 SELECT 
-    COUNT(*) AS Total_Mismatch,
-    SUM(CASE WHEN ISNULL(a.IsSARFiled, 0) = 1 AND ISNULL(b.IsSARFiled, 0) = 0 THEN 1 ELSE 0 END) AS BSA_1_VERIFY_0,
-    SUM(CASE WHEN ISNULL(a.IsSARFiled, 0) = 0 AND ISNULL(b.IsSARFiled, 0) = 1 THEN 1 ELSE 0 END) AS BSA_0_VERIFY_1
+    COUNT(*) AS Total_Problem_Cases,
+    SUM(CASE WHEN ISNULL(b.IsSARFiled, 0) = 1 AND ISNULL(a.IsSARFiled, 0) = 0 THEN 1 ELSE 0 END) AS VERIFY_1_BSA_0,
+    SUM(CASE WHEN ISNULL(b.IsSARFiled, 0) = 1 AND a.IsSARFiled IS NULL THEN 1 ELSE 0 END) AS VERIFY_1_BSA_NULL
 FROM BSA_SUB_CUST_FACT a
 JOIN VERIFY..BSA_SUB_CUST_FACT b ON a.cif_key = b.cif_key
 WHERE EXISTS (SELECT 1 FROM CIF_Migrate_Mapping_TEMP c WHERE a.CIF_KEY = c.NEW_CIF_KEY)
-AND ISNULL(a.IsSARFiled, 0) <> ISNULL(b.IsSARFiled, 0);
-2. 顯示全部共有客戶（含 Match / DIFF）
-SELECT 
-    a.CustomerNo,
-    ISNULL(a.IsSARFiled, 0) AS BSA_IsSARFiled,
-    ISNULL(b.IsSARFiled, 0) AS VERIFY_IsSARFiled,
-    CASE 
-        WHEN ISNULL(a.IsSARFiled, 0) = ISNULL(b.IsSARFiled, 0) THEN 'OK' 
-        ELSE 'DIFF' 
-    END AS Status
-FROM BSA_SUB_CUST_FACT a
-JOIN VERIFY..BSA_SUB_CUST_FACT b ON a.cif_key = b.cif_key
-WHERE EXISTS (SELECT 1 FROM CIF_Migrate_Mapping_TEMP c WHERE a.CIF_KEY = c.NEW_CIF_KEY)
-ORDER BY Status DESC, a.CustomerNo;
+AND ISNULL(b.IsSARFiled, 0) = 1 
+AND ISNULL(a.IsSARFiled, 0) = 0;     -- 只抓 VERIFY=1 但 BSA≠1 的問題
 
-重點說明：
-	•	ISNULL(IsSARFiled, 0) 把 NULL 直接轉成 0 來比對。
-	•	現在只要一邊是 NULL、另一邊是 0，也會視為相同（Match）。
-	•	如果 VERIFY 是 1，但 BSA 是 NULL（或 0），就會被抓出來當作 DIFF。
-需要我再加上其他欄位一起比對嗎？還是想把結果匯出成 Excel 的語法？
+這個版本完全符合你的需求：
+	•	VERIFY=0、BSA=1 → 不會出現（視為沒事）
+	•	VERIFY=1、BSA=0 或 NULL → 會被標記為 DIFF，需要處理
+要我再加上其他欄位一起看嗎？（例如 RiskRating、CustomerStatus 等）
