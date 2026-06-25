@@ -1,77 +1,32 @@
-問題已理解：因為 CIF_Migrate_Mapping_TEMP 裡面存在 1 對多（同一個 NEW_CIF_KEY 有多筆 mapping，如 INSERT / UPDATE2），導致同一組客戶重複出現。
-
-✅ 修正後的 Query（去除重複）
-WITH Mapping AS (
-    SELECT DISTINCT
-        m.NEW_CIF_KEY,
-        b.CustomerNo AS TS_CUST_ID,
-        b.CIF_KEY AS BSA_CIF_KEY
-    FROM CIF_Migrate_Mapping_TEMP m
-    INNER JOIN BSA_SUB_CUST_FACT b 
-        ON m.NEW_CIF_KEY = b.CIF_KEY
-),
-Review_Compare AS (
-    SELECT 
-        m.TS_CUST_ID,
-        m.NEW_CIF_KEY,
-        m.BSA_CIF_KEY,
-        buf.ReviewDt AS Buffer_ReviewDt,
-        edd.ReviewDt AS EDD_ReviewDt,
-        CASE 
-            WHEN buf.ReviewDt IS NULL AND edd.ReviewDt IS NULL THEN 'Both NULL'
-            WHEN buf.ReviewDt IS NULL THEN 'Buffer 無日期'
-            WHEN edd.ReviewDt IS NULL THEN 'EDD 無日期'
-            WHEN buf.ReviewDt <> edd.ReviewDt THEN '日期不同'
-            ELSE '相同'
-        END AS Diff_Reason
-    FROM Mapping m
-    LEFT JOIN Cust_NP_Migrate_buffer buf 
-        ON m.BSA_CIF_KEY = buf.CIF_KEY
-    LEFT JOIN EDD_ReviewSchedule edd 
-        ON m.NEW_CIF_KEY = edd.CIFKey
+WITH Shared_Cust AS (
+    SELECT b.CustomerNo AS TS_CUST_ID
+    FROM BSA_SUB_CUST_FACT b
+    INNER JOIN VERIFY..BSA_SUB_CUST_FACT v ON b.CustomerNo = v.CustomerNo
+    INNER JOIN CIF_Migrate_Mapping_TEMP p ON p.NEW_CIF_KEY = b.CIF_KEY
 )
 SELECT 
-    TS_CUST_ID,
-    NEW_CIF_KEY,
-    BSA_CIF_KEY,
-    Buffer_ReviewDt,
-    EDD_ReviewDt,
-    Diff_Reason
-FROM Review_Compare
-WHERE Diff_Reason <> '相同'          -- 只顯示有差異的
-ORDER BY TS_CUST_ID, NEW_CIF_KEY;
-
-主要修正點：
-	•	在 Mapping CTE 加上 DISTINCT，避免同一組 NEW_CIF_KEY + CustomerNo 重複。
-	•	把 Diff_Reason 改得更清楚。
-	•	WHERE Diff_Reason <> '相同' 只保留有差異的紀錄。
-
-如果你還想看到 所有 mapping 來源（包含 INSERT / UPDATE2 等），想確認是哪一筆 mapping 造成的，可以改用下面這個版本：
-SELECT DISTINCT
     b.CustomerNo AS TS_CUST_ID,
-    m.NEW_CIF_KEY,
-    m.SOURCE_CIF_KEY,           -- 加上來源
-    m.ACTION,                   -- 加上 Action
-    buf.ReviewDt AS Buffer_ReviewDt,
-    edd.ReviewDt AS EDD_ReviewDt,
-    CASE 
-        WHEN buf.ReviewDt IS NULL AND edd.ReviewDt IS NULL THEN 'Both NULL'
-        WHEN buf.ReviewDt IS NULL THEN 'Buffer 無日期'
-        WHEN edd.ReviewDt IS NULL THEN 'EDD 無日期'
-        WHEN buf.ReviewDt <> edd.ReviewDt THEN '日期不同'
-        ELSE '相同'
-    END AS Diff_Reason
-FROM CIF_Migrate_Mapping_TEMP m
-INNER JOIN BSA_SUB_CUST_FACT b 
-    ON m.NEW_CIF_KEY = b.CIF_KEY
-LEFT JOIN Cust_NP_Migrate_buffer buf 
-    ON b.CIF_KEY = buf.CIF_KEY
-LEFT JOIN EDD_ReviewSchedule edd 
-    ON m.NEW_CIF_KEY = edd.CIFKey
-WHERE (buf.ReviewDt <> edd.ReviewDt 
-    OR buf.ReviewDt IS NULL AND edd.ReviewDt IS NOT NULL
-    OR buf.ReviewDt IS NOT NULL AND edd.ReviewDt IS NULL)
-ORDER BY TS_CUST_ID, NEW_CIF_KEY, m.ACTION;
+    b.HIGHRISK AS BSA_HIGHRISK,      -- 新光
+    v.HIGHRISK AS VERIFY_HIGHRISK,   -- 台新
+    b.NXTRVDT AS BSA_NXTRVDT,
+    v.NXTRVDT AS VERIFY_NXTRVDT,
+    e.ReviewDt AS EDD_ReviewDt,
+    -- 風險等級數字（方便確認）
+    CASE b.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS BSA_Risk,
+    CASE v.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS VERIFY_Risk
+FROM Shared_Cust c
+JOIN BSA_SUB_CUST_FACT b ON c.TS_CUST_ID = b.CustomerNo
+JOIN VERIFY..BSA_SUB_CUST_FACT v ON c.TS_CUST_ID = v.CustomerNo
+LEFT JOIN EDD_ReviewSchedule e ON b.CIF_KEY = e.CIFKey
+WHERE 
+    CASE v.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END 
+    <
+    CASE b.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END 
+ORDER BY VERIFY_Risk DESC, BSA_Risk DESC, TS_CUST_ID;
 
-請試跑上面第一個修正版本，看結果是否乾淨很多。
-如果還有重複，或你想再加其他欄位（例如 HIGHRISK、NXTRVDT），告訴我，我再幫你微調！
+
+
+
+我客戶ID 是要找 新光風險等級 > 台新風險等級 如上面
+
+
