@@ -1,5 +1,13 @@
-以下是修改後的 SQL 建議，可以一次取得你想要的三個數字：
-推薦寫法（一次查詢就拿到所有統計）
+原因找到了！
+你的 Total_Count (9,759,645) 和 Same_Count (9,759,996) 不一致（差了 351 筆），而且 Different_Count 是 0，這是典型的 JOIN 造成重複行（row multiplication） 的問題。
+為什麼會發生？
+	•	PURE_TS 是用 EXCEPT 產生的，CustomerNo 是唯一的。
+	•	但你在 Same_Count 和 Different_Count 的查詢裡用了 LEFT JOIN，如果 BSA_SUB_CUST_FACT 或 VERIFY..BSA_SUB_CUST_FACT 裡面針對同一個 CustomerNo 有重複資料，就會讓同一筆 PURE_TS 的記錄被重複計算多次。
+這導致：
+	•	Total 用 COUNT(*) 只算 PURE_TS → 正確
+	•	Same/Different 因為 JOIN 膨脹 → 數字變多
+
+✅ 正確的寫法（推薦一次取得三個數字）
 WITH PURE_TS AS
 (
     SELECT CustomerNo    
@@ -10,70 +18,39 @@ WITH PURE_TS AS
     JOIN CIF_Migrate_Mapping_TEMP b ON a.cif_key = b.NEW_CIF_KEY
 )
 , CompareData AS (
-    SELECT
+    SELECT 
         p.CustomerNo,
         v.IsSARFiled AS VERIFY_IsSARFiled,
         b.IsSARFiled AS BSA_IsSARFiled,
-        CASE
-            WHEN ISNULL(CAST(v.IsSARFiled AS INT),0) = ISNULL(CAST(b.IsSARFiled AS INT),0)
-            THEN 'Same'
-            ELSE 'Different'
+        CASE 
+            WHEN ISNULL(CAST(v.IsSARFiled AS INT), 0) = ISNULL(CAST(b.IsSARFiled AS INT), 0) 
+            THEN 'Same' 
+            ELSE 'Different' 
         END AS CompareResult
     FROM PURE_TS p
     LEFT JOIN VERIFY..BSA_SUB_CUST_FACT v ON p.CustomerNo = v.CustomerNo
-    LEFT JOIN BSA_SUB_CUST_FACT b ON p.CustomerNo = b.CustomerNo
+    LEFT JOIN BSA_SUB_CUST_FACT b         ON p.CustomerNo = b.CustomerNo
 )
 SELECT 
     COUNT(*) AS Total_Count,
-    SUM(CASE WHEN CompareResult = 'Same'     THEN 1 ELSE 0 END) AS Same_Count,
-    SUM(CASE WHEN CompareResult = 'Different' THEN 1 ELSE 0 END) AS Different_Count
+    SUM(CASE WHEN CompareResult = 'Same'      THEN 1 ELSE 0 END) AS Same_Count,
+    SUM(CASE WHEN CompareResult = 'Different' THEN 1 ELSE 0 END) AS Different_Count,
+    COUNT(CASE WHEN CompareResult = 'Same'      THEN 1 END) AS Same_Count2,     -- 另一種寫法
+    COUNT(CASE WHEN CompareResult = 'Different' THEN 1 END) AS Different_Count2
 FROM CompareData;
 
-如果你想分開跑三個獨立的查詢，也可以這樣寫：
-1. 總共有幾個
-WITH PURE_TS AS
-(
-    SELECT CustomerNo    
-    FROM VERIFY..BSA_SUB_CUST_FACT
-    EXCEPT
-    SELECT a.CustomerNo    
-    FROM BSA_SUB_CUST_FACT a
-    JOIN CIF_Migrate_Mapping_TEMP b ON a.cif_key = b.NEW_CIF_KEY
-)
-SELECT COUNT(*) AS Total_Count FROM PURE_TS;
-2. 一樣的有幾個
-WITH PURE_TS AS
-(
-    SELECT CustomerNo    
-    FROM VERIFY..BSA_SUB_CUST_FACT
-    EXCEPT
-    SELECT a.CustomerNo    
-    FROM BSA_SUB_CUST_FACT a
-    JOIN CIF_Migrate_Mapping_TEMP b ON a.cif_key = b.NEW_CIF_KEY
-)
-SELECT COUNT(*) AS Same_Count
-FROM PURE_TS p
-LEFT JOIN VERIFY..BSA_SUB_CUST_FACT v ON p.CustomerNo = v.CustomerNo
-LEFT JOIN BSA_SUB_CUST_FACT b ON p.CustomerNo = b.CustomerNo
-WHERE ISNULL(CAST(v.IsSARFiled AS INT),0) = ISNULL(CAST(b.IsSARFiled AS INT),0);
-3. 不一樣的有幾個
-WITH PURE_TS AS
-(
-    SELECT CustomerNo    
-    FROM VERIFY..BSA_SUB_CUST_FACT
-    EXCEPT
-    SELECT a.CustomerNo    
-    FROM BSA_SUB_CUST_FACT a
-    JOIN CIF_Migrate_Mapping_TEMP b ON a.cif_key = b.NEW_CIF_KEY
-)
-SELECT COUNT(*) AS Different_Count
-FROM PURE_TS p
-LEFT JOIN VERIFY..BSA_SUB_CUST_FACT v ON p.CustomerNo = v.CustomerNo
-LEFT JOIN BSA_SUB_CUST_FACT b ON p.CustomerNo = b.CustomerNo
-WHERE ISNULL(CAST(v.IsSARFiled AS INT),0) <> ISNULL(CAST(b.IsSARFiled AS INT),0);
+快速檢查是否有重複的指令
+請先跑下面這兩句確認問題根源：
+-- 檢查 PURE_TS 裡是否有重複（理論上不應該有）
+SELECT CustomerNo, COUNT(*) 
+FROM PURE_TS 
+GROUP BY CustomerNo 
+HAVING COUNT(*) > 1;
 
-小建議：
-	•	第一種「一次查詢」的方式最有效率（只掃一次資料）。
-	•	如果資料量很大，可以先把 PURE_TS 結果存成 temp table 再統計，會更快。
-	•	需要我幫你把這三個數字再加上 CustomerNo 清單（方便查問題）也可以告訴我。
-需要調整或再加其他欄位嗎？
+-- 檢查 VERIFY 表是否有重複 CustomerNo
+SELECT CustomerNo, COUNT(*) 
+FROM VERIFY..BSA_SUB_CUST_FACT 
+GROUP BY CustomerNo 
+HAVING COUNT(*) > 1;
+把結果貼給我，我可以再幫你調整。
+需要我幫你把有問題的 CustomerNo 清單也找出來嗎？（方便你調查那 351 筆為什麼被多算）
