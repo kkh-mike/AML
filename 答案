@@ -1,41 +1,105 @@
-
-SELECT * FROM BSA_SUB_CUST_FACT WHERE CUSTOMERNO in
-(
-
-SELECT DISTINCT s.TS_CUST_ID
-FROM (
+完整驗證設計建議（針對多客戶的一對多 SK 情境）
+你的需求很清楚： 想要批次找出所有「TS_CUST_ID 有多個 SK_CUST_ID（一對多）」且在 BSA_SUB_CUST_FACT 的 IsSARFiled != '0' 的客戶，然後針對這些客戶對應的 SK 客戶名單 → CIF_KEY，去 Cust_NP_Migrate_buffer 驗證 IsSARFiled 是否嚴格只有 0、1、NULL 三種值。因為客戶很多，不能一個一個手動查，要用 set-based 的方式一次驗證全部，並能清楚看到有沒有違規的資料。
+1. 先修正/優化「找出 problematic TS_CUST_ID」的邏輯
+你原本的 query 有幾個小問題：
+	•	HAVING COUNT(DISTINCT SK_CUST_ID) > 1 後面又加 WHERE SK_COUNT > '2'（字串比較 + 條件不一致）。
+	•	外層 CUSTOMERNO in (TS_CUST_ID) 的對應關係，需要跟後面「找 SK 名單」一致。
+建議改用 CTE 寫法，更清楚也更好維護：
+WITH multi_sk AS (
     SELECT 
         TS_CUST_ID,
-        COUNT(DISTINCT SK_CUST_ID) AS SK_COUNT
+        COUNT(DISTINCT SK_CUST_ID) AS sk_count
+    FROM BANCS_SK_CUST_INFO
+    GROUP BY TS_CUST_ID
+    HAVING COUNT(DISTINCT SK_CUST_ID) > 1     -- ← 這裡確認你要 >1 還是 >2
+),
+sar_nonzero AS (
+    SELECT DISTINCT CUSTOMERNO AS TS_CUST_ID
+    FROM BSA_SUB_CUST_FACT
+    WHERE IsSARFiled != '0'
+),
+problematic_ts AS (
+    SELECT m.TS_CUST_ID
+    FROM multi_sk m
+    INNER JOIN sar_nonzero s 
+        ON m.TS_CUST_ID = s.TS_CUST_ID
+)
+SELECT TS_CUST_ID
+FROM problematic_ts
+ORDER BY TS_CUST_ID;
+註：如果確定只要 sk_count >= 3 才算，則把 > 1 改成 > 2 即可。
+2. 完整驗證流程（一次抓全部客戶 + 驗證 IsSARFiled 嚴格性）
+把上面 problematic_ts 當成起點，繼續往下接：
+WITH multi_sk AS (
+    SELECT TS_CUST_ID, COUNT(DISTINCT SK_CUST_ID) AS sk_count
     FROM BANCS_SK_CUST_INFO
     GROUP BY TS_CUST_ID
     HAVING COUNT(DISTINCT SK_CUST_ID) > 1
-) t
-JOIN BANCS_SK_CUST_INFO s ON t.TS_CUST_ID = s.TS_CUST_ID
-WHERE SK_COUNT > '2'
-) AND IsSARFiled != '0'
-
-找到要的客戶ID
-
-然後帶進去找到對應的 一對多 SK客戶明單
-
-
-SELECT * FROM BANCS_SK_CUST_INFO WHERE TS_CUST_ID = 'L2876734180'
-
-找到名單後去找到對應的CIFKEY 再去Cust_NP_Migrate_buffer找 是不是有取嚴格 IsSARFiled 只有 0,1,NULL
-
-SELECT IsSARFiled FROM Cust_NP_Migrate_buffer WHERE CIF_KEY in
-(
-	SELECT CIF_KEY FROM Customer_Migrate_buffer WHERE customerNo in
-	(
-	'L287673418',
-	'L287673418C',
-	'L287673418D',
-	'L287673418E',
-	'L287673418F',
-	'L287673418G',
-	'L287673418H'
-	)
+),
+sar_nonzero AS (
+    SELECT DISTINCT CUSTOMERNO AS TS_CUST_ID
+    FROM BSA_SUB_CUST_FACT
+    WHERE IsSARFiled != '0'
+),
+problematic_ts AS (
+    SELECT m.TS_CUST_ID
+    FROM multi_sk m
+    INNER JOIN sar_nonzero s ON m.TS_CUST_ID = s.TS_CUST_ID
+),
+-- 關鍵：把這些 TS 對應的所有 SK_CUST_ID 收集起來（一對多名單）
+related_sk AS (
+    SELECT DISTINCT s.SK_CUST_ID AS customer_identifier
+    FROM BANCS_SK_CUST_INFO s
+    INNER JOIN problematic_ts p ON s.TS_CUST_ID = p.TS_CUST_ID
+),
+-- 再從 Customer_Migrate_buffer 找出對應的 CIF_KEY
+related_cif AS (
+    SELECT DISTINCT CIF_KEY
+    FROM Customer_Migrate_buffer
+    WHERE customerNo IN (SELECT customer_identifier FROM related_sk)
 )
+-- ===================== 驗證區 =====================
+-- A. 先看整體分布（最快知道有沒有問題）
+SELECT 
+    IsSARFiled,
+    COUNT(*) AS record_count,
+    COUNT(DISTINCT CIF_KEY) AS cif_count
+FROM Cust_NP_Migrate_buffer
+WHERE CIF_KEY IN (SELECT CIF_KEY FROM related_cif)
+GROUP BY IsSARFiled
+ORDER BY IsSARFiled NULLS FIRST;
+B. 找出「違規」的資料（IsSARFiled 不是 0、1、NULL）
+SELECT 
+    np.CIF_KEY,
+    np.IsSARFiled,
+    c.customerNo,
+    c.customerName,           -- 如果有這個欄位可加
+    p.TS_CUST_ID              -- 還原回原本的 TS（可選）
+FROM Cust_NP_Migrate_buffer np
+INNER JOIN Customer_Migrate_buffer c 
+    ON np.CIF_KEY = c.CIF_KEY
+INNER JOIN related_sk rs 
+    ON c.customerNo = rs.customer_identifier
+INNER JOIN problematic_ts p 
+    ON rs.TS_CUST_ID = p.TS_CUST_ID   -- 如果需要還原 TS
+WHERE np.CIF_KEY IN (SELECT CIF_KEY FROM related_cif)
+  AND (np.IsSARFiled IS NOT NULL 
+       AND np.IsSARFiled NOT IN ('0', '1'))
+ORDER BY np.IsSARFiled, c.customerNo;
+3. 如何判斷「是否都取嚴格」？
+	•	如果 A 查詢 只出現 0、1、NULL 三種值 → 全部都嚴格符合。
+	•	如果出現其他值（例如 '2'、'Y'、'N'、空字串等）→ 有違規，直接看 B 查詢 的結果，就能精準知道是哪幾個 CIF_KEY / customerNo / TS_CUST_ID 出問題。
+	•	B 查詢 如果回傳 0 筆 → 表示這些多 SK 的客戶在 migrate buffer 裡的 IsSARFiled 全部都嚴格只有 0/1/NULL。
+4. 實務建議（因為客戶很多）
+	1	先跑 A 查詢 看分布，最快確認整體狀況。
+	2	如果有違規，再跑 B 查詢 抓明細（通常不會太多）。
+	3	可以把 problematic_ts、related_sk、related_cif 這些 CTE 抽成 暫存表（CREATE TEMP TABLE 或 ##temp），後續驗證、報表、UAT 都比較好用。
+	4	如果資料量很大，建議在 TS_CUST_ID、SK_CUST_ID、CIF_KEY、customerNo 上確認有 index，或在 where 條件前加上日期/分支等額外 filter。
+	5	驗證完後，可以再加一層統計： SELECT 
+	6	    COUNT(DISTINCT CIF_KEY) AS total_cif,
+	7	    SUM(CASE WHEN IsSARFiled NOT IN ('0','1') AND IsSARFiled IS NOT NULL THEN 1 ELSE 0 END) AS bad_cif_count
+	8	FROM Cust_NP_Migrate_buffer
+	9	WHERE CIF_KEY IN (SELECT CIF_KEY FROM related_cif);
+	10	
 
-因為有很多客戶 我要怎麼設計才能完整驗證確保他都有取嚴格?
+需要我幫你再調整成「只輸出有問題的 TS_CUST_ID 清單 + 違規明細」版本，還是想把這個流程包成一個可以重複執行的 script（例如加上 INSERT INTO validation_log）？或者你實際的 join 條件跟上面有差（例如 SK_CUST_ID 跟 customerNo 的對應規則），可以把實際的欄位關係再告訴我，我再幫你微調。
