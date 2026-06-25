@@ -1,2 +1,44 @@
-訊息 195，層級 15，狀態 10，行 4
-'TRIM' 不是可辨識的 內建函數名稱。
+問題原因： 你的 SQL Server 版本比較舊，TRIM() 函數不支援（SQL Server 2017 才開始有）。
+
+✅ 修正後的 SQL（相容舊版本）
+WITH SplitValues AS (
+    SELECT 
+        b.CustPurposeOfAcc,
+        a.NEW_CIF_KEY,
+        a.SOURCE_CIF_KEY,
+        LTRIM(RTRIM(value)) AS single_code
+    FROM CIF_Migrate_Mapping_TEMP a
+    JOIN Customer_Migrate_buffer b 
+        ON a.SOURCE_CIF_KEY = b.CIF_KEY
+    CROSS APPLY STRING_SPLIT(b.CustPurposeOfAcc, '|') 
+    WHERE b.CustPurposeOfAcc IS NOT NULL
+)
+SELECT 
+    CustPurposeOfAcc,
+    NEW_CIF_KEY,
+    SOURCE_CIF_KEY,
+    single_code,
+    '❌ 不合法代碼' AS 問題
+FROM SplitValues
+WHERE single_code NOT IN ('01','03','04','06','10','11','15','21','38','99')
+  AND single_code <> ''
+ORDER BY CustPurposeOfAcc;
+
+如果還是出現錯誤，請試下面這個更保守的版本（不用 WITH）：
+SELECT 
+    b.CustPurposeOfAcc,
+    a.NEW_CIF_KEY,
+    a.SOURCE_CIF_KEY,
+    LTRIM(RTRIM(value)) AS single_code,
+    '❌ 不合法代碼' AS 問題
+FROM CIF_Migrate_Mapping_TEMP a
+JOIN Customer_Migrate_buffer b 
+    ON a.SOURCE_CIF_KEY = b.CIF_KEY
+CROSS APPLY STRING_SPLIT(b.CustPurposeOfAcc, '|') 
+WHERE b.CustPurposeOfAcc IS NOT NULL
+  AND LTRIM(RTRIM(value)) NOT IN ('01','03','04','06','10','11','15','21','38','99')
+  AND LTRIM(RTRIM(value)) <> ''
+ORDER BY b.CustPurposeOfAcc;
+
+請直接複製上面第一個修正版執行看看。
+如果還是報錯，請把完整錯誤訊息貼給我，我再繼續調整（例如改用 XML 方法拆分，適用更舊的版本）。
