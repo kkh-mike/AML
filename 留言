@@ -1,18 +1,57 @@
-SELECT a.CustomerNo ,*  FROM BSA_SUB_CUST_FACT a
-JOIN VERIFY..BSA_SUB_CUST_FACT b ON a.cif_key = b.cif_key
+✅ 推薦寫法（找出所有共有客戶的 IsSARFiled 差異）
+-- 【推薦】找出 IsSARFiled 不一致的共有客戶（最實用）
+SELECT 
+    a.CustomerNo,
+    a.CIF_KEY,
+    a.IsSARFiled AS BSA_IsSARFiled,
+    b.IsSARFiled AS VERIFY_IsSARFiled,
+    CASE 
+        WHEN a.IsSARFiled IS NULL AND b.IsSARFiled IS NULL THEN 'Both NULL'
+        WHEN a.IsSARFiled = b.IsSARFiled THEN 'Match'
+        ELSE 'DIFF'
+    END AS Compare_Result
+FROM BSA_SUB_CUST_FACT a
+JOIN VERIFY..BSA_SUB_CUST_FACT b 
+    ON a.cif_key = b.cif_key
 WHERE EXISTS (
-    SELECT 1
-    FROM CIF_Migrate_Mapping_TEMP c
+    SELECT 1 
+    FROM CIF_Migrate_Mapping_TEMP c 
     WHERE a.CIF_KEY = c.NEW_CIF_KEY
-);
-找出共有客戶
-比對IsSARFiled
-SELECT IsSARFiled, CustomerNo , * FROM VERIFY..BSA_SUB_CUST_FACT WHERE customerno = 'F2336395550'
-SELECT IsSARFiled, CustomerNo , * FROM BSA_SUB_CUST_FACT WHERE customerno = 'F2336395550'
+)
+AND (a.IsSARFiled <> b.IsSARFiled 
+     OR (a.IsSARFiled IS NULL AND b.IsSARFiled IS NOT NULL)
+     OR (a.IsSARFiled IS NOT NULL AND b.IsSARFiled IS NULL))
+ORDER BY a.CustomerNo;
 
+其他常見變體
+1. 全部共有客戶（方便整體檢查）
+SELECT 
+    a.CustomerNo,
+    a.IsSARFiled AS BSA_IsSARFiled,
+    b.IsSARFiled AS VERIFY_IsSARFiled,
+    CASE WHEN a.IsSARFiled = b.IsSARFiled THEN 'OK' ELSE 'DIFF' END AS Status
+FROM BSA_SUB_CUST_FACT a
+JOIN VERIFY..BSA_SUB_CUST_FACT b ON a.cif_key = b.cif_key
+WHERE EXISTS (SELECT 1 FROM CIF_Migrate_Mapping_TEMP c WHERE a.CIF_KEY = c.NEW_CIF_KEY)
+ORDER BY Status DESC, a.CustomerNo;
+2. 只看差異並統計數量（最推薦先跑這個）
+SELECT 
+    COUNT(*) AS Total_Mismatch,
+    SUM(CASE WHEN a.IsSARFiled = 1 AND b.IsSARFiled = 0 THEN 1 ELSE 0 END) AS BSA_1_VERIFY_0,
+    SUM(CASE WHEN a.IsSARFiled = 0 AND b.IsSARFiled = 1 THEN 1 ELSE 0 END) AS BSA_0_VERIFY_1,
+    SUM(CASE WHEN a.IsSARFiled IS NULL AND b.IsSARFiled IS NOT NULL THEN 1 ELSE 0 END) AS NULL_Diff
+FROM BSA_SUB_CUST_FACT a
+JOIN VERIFY..BSA_SUB_CUST_FACT b ON a.cif_key = b.cif_key
+WHERE EXISTS (SELECT 1 FROM CIF_Migrate_Mapping_TEMP c WHERE a.CIF_KEY = c.NEW_CIF_KEY)
+AND (a.IsSARFiled <> b.IsSARFiled 
+     OR a.IsSARFiled IS NULL <> b.IsSARFiled IS NULL);
+3. 如果你想一次看到更多欄位做交叉比對 可以在 SELECT 裡多加幾個重要欄位，例如：
+	•	a.IsPEP, b.IsPEP
+	•	a.CustomerStatus, b.CustomerStatus
+	•	a.RiskRating, b.RiskRating 等
 
-如果VERIFY..BSA_SUB_CUST_FACT  的IsSARFiled = 1 那BSA_SUB_CUST_FACT 一定要是1
-
-反正我是要驗證IsSARFiled 是否一樣
-
-幫我看怎麼寫比較好 不是單一客戶看
+建議
+	1	先跑第2個統計版 → 看總共有幾筆不一致。
+	2	如果有差異，再跑第1個詳細版把 CustomerNo 抓出來。
+	3	IsSARFiled 是 bit 欄位的話，建議用 a.IsSARFiled <> b.IsSARFiled 搭配 NULL 判斷，比較安全。
+需要我幫你把這支改成只看 VERIFY.IsSARFiled = 1 但 BSA 不是 1 的版本嗎？還是想多比對其他欄位？
