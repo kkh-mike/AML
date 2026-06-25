@@ -1,32 +1,67 @@
+了解！ 你現在想要的是：找出「新光風險等級 > 台新風險等級」的客戶，並且同時顯示兩個系統的 ReviewDt 差異（Buffer vs EDD）。
+
+✅ 整合版 Query（風險比對 + ReviewDt 差異）
 WITH Shared_Cust AS (
-    SELECT b.CustomerNo AS TS_CUST_ID
+    SELECT DISTINCT 
+        b.CustomerNo AS TS_CUST_ID,
+        b.CIF_KEY AS BSA_CIF_KEY
     FROM BSA_SUB_CUST_FACT b
-    INNER JOIN VERIFY..BSA_SUB_CUST_FACT v ON b.CustomerNo = v.CustomerNo
-    INNER JOIN CIF_Migrate_Mapping_TEMP p ON p.NEW_CIF_KEY = b.CIF_KEY
+    INNER JOIN VERIFY..BSA_SUB_CUST_FACT v 
+        ON b.CustomerNo = v.CustomerNo
+    INNER JOIN CIF_Migrate_Mapping_TEMP p 
+        ON p.NEW_CIF_KEY = b.CIF_KEY
+),
+Risk_Compare AS (
+    SELECT 
+        c.TS_CUST_ID,
+        b.HIGHRISK AS BSA_HIGHRISK,
+        v.HIGHRISK AS VERIFY_HIGHRISK,
+        b.NXTRVDT AS BSA_NXTRVDT,
+        v.NXTRVDT AS VERIFY_NXTRVDT,
+        e.ReviewDt AS EDD_ReviewDt,
+        buf.ReviewDt AS Buffer_ReviewDt,
+        CASE b.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS BSA_Risk,
+        CASE v.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS VERIFY_Risk,
+        CASE 
+            WHEN buf.ReviewDt IS NULL AND e.ReviewDt IS NULL THEN 'Both NULL'
+            WHEN buf.ReviewDt IS NULL THEN 'Buffer 無日期'
+            WHEN e.ReviewDt IS NULL THEN 'EDD 無日期'
+            WHEN buf.ReviewDt <> e.ReviewDt THEN '日期不同'
+            ELSE '日期相同'
+        END AS ReviewDt_Status
+    FROM Shared_Cust c
+    JOIN BSA_SUB_CUST_FACT b 
+        ON c.TS_CUST_ID = b.CustomerNo
+    JOIN VERIFY..BSA_SUB_CUST_FACT v 
+        ON c.TS_CUST_ID = v.CustomerNo
+    LEFT JOIN EDD_ReviewSchedule e 
+        ON b.CIF_KEY = e.CIFKey
+    LEFT JOIN Cust_NP_Migrate_buffer buf 
+        ON b.CIF_KEY = buf.CIF_KEY
 )
 SELECT 
-    b.CustomerNo AS TS_CUST_ID,
-    b.HIGHRISK AS BSA_HIGHRISK,      -- 新光
-    v.HIGHRISK AS VERIFY_HIGHRISK,   -- 台新
-    b.NXTRVDT AS BSA_NXTRVDT,
-    v.NXTRVDT AS VERIFY_NXTRVDT,
-    e.ReviewDt AS EDD_ReviewDt,
-    -- 風險等級數字（方便確認）
-    CASE b.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS BSA_Risk,
-    CASE v.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS VERIFY_Risk
-FROM Shared_Cust c
-JOIN BSA_SUB_CUST_FACT b ON c.TS_CUST_ID = b.CustomerNo
-JOIN VERIFY..BSA_SUB_CUST_FACT v ON c.TS_CUST_ID = v.CustomerNo
-LEFT JOIN EDD_ReviewSchedule e ON b.CIF_KEY = e.CIFKey
-WHERE 
-    CASE v.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END 
-    <
-    CASE b.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END 
+    TS_CUST_ID,
+    BSA_HIGHRISK,
+    VERIFY_HIGHRISK,
+    BSA_Risk,
+    VERIFY_Risk,
+    BSA_NXTRVDT,
+    VERIFY_NXTRVDT,
+    Buffer_ReviewDt,
+    EDD_ReviewDt,
+    ReviewDt_Status
+FROM Risk_Compare
+WHERE BSA_Risk > VERIFY_Risk          -- 新光風險 > 台新風險
 ORDER BY VERIFY_Risk DESC, BSA_Risk DESC, TS_CUST_ID;
 
+主要調整：
+	•	使用 DISTINCT 避免 mapping 一對多造成的重複。
+	•	同時 LEFT JOIN Cust_NP_Migrate_buffer 和 EDD_ReviewSchedule，顯示兩個 ReviewDt。
+	•	增加 ReviewDt_Status 清楚標示日期狀態。
+	•	保留你原本的風險等級比對條件 BSA_Risk > VERIFY_Risk。
 
-
-
-我客戶ID 是要找 新光風險等級 > 台新風險等級 如上面
-
-
+執行後，請告訴我結果如何：
+	1	有沒有重複？
+	2	是否需要再加上 NEW_CIF_KEY 或 ACTION 等 mapping 資訊？
+	3	要不要只顯示 ReviewDt 有差異 的客戶？
+需要再微調隨時說，我立刻幫你改！
