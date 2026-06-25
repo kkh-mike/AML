@@ -1,46 +1,72 @@
-✅ 了解！已按照你的規則調整：
-規則：
-	•	VERIFY = 0 且 BSA = 1 → 當成沒事（OK）
-	•	其他情況不一樣（尤其是 VERIFY = 1 但 BSA = 0 或 NULL）→ 視為問題（DIFF）
-最終推薦查詢
--- 【最終推薦】只顯示真正有問題的差異
-SELECT 
-    a.CustomerNo,
-    a.CIF_KEY,
-    ISNULL(a.IsSARFiled, 0) AS BSA_IsSARFiled,
-    ISNULL(b.IsSARFiled, 0) AS VERIFY_IsSARFiled,
-    CASE 
-        WHEN ISNULL(b.IsSARFiled, 0) = 0 AND ISNULL(a.IsSARFiled, 0) = 1 
-            THEN 'OK (VERIFY 0, BSA 1)' 
-        WHEN ISNULL(a.IsSARFiled, 0) = ISNULL(b.IsSARFiled, 0) 
-            THEN 'OK'
-        ELSE 'DIFF *** 需要處理 ***'
-    END AS Compare_Result
-FROM BSA_SUB_CUST_FACT a
-JOIN VERIFY..BSA_SUB_CUST_FACT b 
-    ON a.cif_key = b.cif_key
-WHERE EXISTS (
-    SELECT 1 
-    FROM CIF_Migrate_Mapping_TEMP c 
-    WHERE a.CIF_KEY = c.NEW_CIF_KEY
+TC06 下次審查日驗證
+情境3：共有戶
+新光風險等級 > 台新風險等級
+取較近的 Review Date
+預期結果，採用兩邊較近日期。
+
+
+
+WITH 
+Shared_Cust AS (
+    -- 嚴格共有戶：同時存在於台新與新光
+    SELECT b.CustomerNo AS TS_CUST_ID
+    FROM BSA_SUB_CUST_FACT b
+    INNER JOIN VERIFY..BSA_SUB_CUST_FACT v ON b.CustomerNo = v.CustomerNo
+),
+
+Shared_Review AS (
+    SELECT 
+        c.TS_CUST_ID,
+        b.HIGHRISK AS BSA_HIGHRISK,
+        v.HIGHRISK AS VERIFY_HIGHRISK,
+        b.NXTRVDT AS BSA_NXTRVDT,
+        v.NXTRVDT AS VERIFY_NXTRVDT,
+        e.ReviewDt AS EDD_ReviewDt,
+
+        -- 風險等級轉換
+        CASE b.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS BSA_RiskLevel,
+        CASE v.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS VERIFY_RiskLevel,
+
+        -- 是否需要取兩邊較近日期
+        CASE WHEN 
+            CASE v.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END 
+            > 
+            CASE b.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END 
+        THEN '是' ELSE '否' END AS Should_Take_Min_Date
+
+    FROM Shared_Cust c
+    INNER JOIN BSA_SUB_CUST_FACT b ON c.TS_CUST_ID = b.CustomerNo
+    INNER JOIN VERIFY..BSA_SUB_CUST_FACT v ON c.TS_CUST_ID = v.CustomerNo
+    LEFT JOIN EDD_ReviewSchedule e ON b.CIF_KEY = e.CIFKey
 )
--- 只顯示真正有問題的
-AND NOT (ISNULL(b.IsSARFiled, 0) = 0 AND ISNULL(a.IsSARFiled, 0) = 1)   -- 排除可接受的情況
-AND ISNULL(a.IsSARFiled, 0) <> ISNULL(b.IsSARFiled, 0)
-ORDER BY a.CustomerNo;
 
-統計版（快速看問題嚴重程度）
+-- ==================== 明細資料 ====================
 SELECT 
-    COUNT(*) AS Total_Problem_Cases,
-    SUM(CASE WHEN ISNULL(b.IsSARFiled, 0) = 1 AND ISNULL(a.IsSARFiled, 0) = 0 THEN 1 ELSE 0 END) AS VERIFY_1_BSA_0,
-    SUM(CASE WHEN ISNULL(b.IsSARFiled, 0) = 1 AND a.IsSARFiled IS NULL THEN 1 ELSE 0 END) AS VERIFY_1_BSA_NULL
-FROM BSA_SUB_CUST_FACT a
-JOIN VERIFY..BSA_SUB_CUST_FACT b ON a.cif_key = b.cif_key
-WHERE EXISTS (SELECT 1 FROM CIF_Migrate_Mapping_TEMP c WHERE a.CIF_KEY = c.NEW_CIF_KEY)
-AND ISNULL(b.IsSARFiled, 0) = 1 
-AND ISNULL(a.IsSARFiled, 0) = 0;     -- 只抓 VERIFY=1 但 BSA≠1 的問題
+    TS_CUST_ID,
+    BSA_HIGHRISK,
+    VERIFY_HIGHRISK,
+    Should_Take_Min_Date,
+    BSA_NXTRVDT,
+    VERIFY_NXTRVDT,
+    EDD_ReviewDt,
+    
+    -- 兩邊較近的日期（較早）
+    (SELECT MIN(dt) FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt)) AS Min_of_Both,
 
-這個版本完全符合你的需求：
-	•	VERIFY=0、BSA=1 → 不會出現（視為沒事）
-	•	VERIFY=1、BSA=0 或 NULL → 會被標記為 DIFF，需要處理
-要我再加上其他欄位一起看嗎？（例如 RiskRating、CustomerStatus 等）
+    -- 驗證結果
+    CASE 
+        WHEN Should_Take_Min_Date = '是' 
+             AND EDD_ReviewDt = (SELECT MIN(dt) FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt)) 
+            THEN '? PASS（正確取兩邊較近日期）'
+        WHEN Should_Take_Min_Date = '否' 
+             AND EDD_ReviewDt = BSA_NXTRVDT 
+            THEN '? PASS（正確取台新日期）'
+        ELSE '? FAIL'
+    END AS Validation_Result
+
+FROM Shared_Review
+ORDER BY Should_Take_Min_Date DESC, Validation_Result DESC, TS_CUST_ID;
+
+
+有沒有簡單一點的寫法阿
+可以分段拆開來驗證沒關係
