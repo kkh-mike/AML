@@ -1,50 +1,70 @@
-WITH Shared_Cust AS (
-    SELECT b.CustomerNo AS TS_CUST_ID
-    FROM BSA_SUB_CUST_FACT b
-    INNER JOIN VERIFY..BSA_SUB_CUST_FACT v ON b.CustomerNo = v.CustomerNo
-    INNER JOIN CIF_Migrate_Mapping_TEMP p ON p.NEW_CIF_KEY = b.CIF_KEY
+以下是符合你需求的 SQL Query：
+找出 Cust_NP_Migrate_buffer 與 EDD_ReviewSchedule 的 ReviewDt 不同的客戶，並同時顯示兩個日期。
+WITH Mapping AS (
+    SELECT 
+        m.NEW_CIF_KEY,
+        b.CustomerNo AS TS_CUST_ID,
+        b.CIF_KEY AS BSA_CIF_KEY
+    FROM CIF_Migrate_Mapping_TEMP m
+    INNER JOIN BSA_SUB_CUST_FACT b 
+        ON m.NEW_CIF_KEY = b.CIF_KEY
+),
+Review_Compare AS (
+    SELECT 
+        m.TS_CUST_ID,
+        m.NEW_CIF_KEY,
+        m.BSA_CIF_KEY,
+        b.ReviewDt AS Buffer_ReviewDt,           -- Cust_NP_Migrate_buffer
+        e.ReviewDt AS EDD_ReviewDt,              -- EDD_ReviewSchedule
+        CASE 
+            WHEN b.ReviewDt IS NULL AND e.ReviewDt IS NULL THEN 0
+            WHEN b.ReviewDt IS NULL OR e.ReviewDt IS NULL THEN 1
+            WHEN b.ReviewDt <> e.ReviewDt THEN 1 
+            ELSE 0 
+        END AS ReviewDt_Diff_Flag
+    FROM Mapping m
+    LEFT JOIN Cust_NP_Migrate_buffer b 
+        ON m.BSA_CIF_KEY = b.CIF_KEY
+    LEFT JOIN EDD_ReviewSchedule e 
+        ON m.NEW_CIF_KEY = e.CIFKey
+    WHERE b.ReviewDt IS NOT NULL OR e.ReviewDt IS NOT NULL  -- 至少有一邊有日期
 )
 SELECT 
+    TS_CUST_ID,
+    NEW_CIF_KEY,
+    BSA_CIF_KEY,
+    Buffer_ReviewDt,
+    EDD_ReviewDt,
+    CASE 
+        WHEN Buffer_ReviewDt IS NULL THEN 'Buffer 無日期'
+        WHEN EDD_ReviewDt IS NULL THEN 'EDD 無日期'
+        ELSE '日期不同'
+    END AS Diff_Reason
+FROM Review_Compare
+WHERE ReviewDt_Diff_Flag = 1
+ORDER BY TS_CUST_ID;
+
+說明：
+	1	Mapping CTE：先把 CIF_Migrate_Mapping_TEMP 跟 BSA_SUB_CUST_FACT 對應起來，取得 TS_CUST_ID（CustomerNo）和兩個 CIF_KEY。
+	2	Review_Compare CTE：同時 LEFT JOIN Cust_NP_Migrate_buffer 和 EDD_ReviewSchedule，取出兩個 ReviewDt 做比對。
+	3	最終輸出：只顯示 ReviewDt 不同的客戶，並清楚標示差異原因。
+
+如果你只要簡單版（不需要 Mapping 過程）：
+SELECT 
     b.CustomerNo AS TS_CUST_ID,
-    b.HIGHRISK AS BSA_HIGHRISK,      -- 新光
-    v.HIGHRISK AS VERIFY_HIGHRISK,   -- 台新
-    b.NXTRVDT AS BSA_NXTRVDT,
-    v.NXTRVDT AS VERIFY_NXTRVDT,
-    e.ReviewDt AS EDD_ReviewDt,
-    -- 風險等級數字（方便確認）
-    CASE b.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS BSA_Risk,
-    CASE v.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS VERIFY_Risk
-FROM Shared_Cust c
-JOIN BSA_SUB_CUST_FACT b ON c.TS_CUST_ID = b.CustomerNo
-JOIN VERIFY..BSA_SUB_CUST_FACT v ON c.TS_CUST_ID = v.CustomerNo
-LEFT JOIN EDD_ReviewSchedule e ON b.CIF_KEY = e.CIFKey
-WHERE 
-    CASE v.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END 
-    <
-    CASE b.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END 
-ORDER BY VERIFY_Risk DESC, BSA_Risk DESC, TS_CUST_ID;
+    m.NEW_CIF_KEY,
+    buf.ReviewDt AS Buffer_ReviewDt,
+    edd.ReviewDt AS EDD_ReviewDt
+FROM BSA_SUB_CUST_FACT b
+INNER JOIN CIF_Migrate_Mapping_TEMP m 
+    ON m.NEW_CIF_KEY = b.CIF_KEY
+LEFT JOIN Cust_NP_Migrate_buffer buf 
+    ON b.CIF_KEY = buf.CIF_KEY
+LEFT JOIN EDD_ReviewSchedule edd 
+    ON m.NEW_CIF_KEY = edd.CIFKey
+WHERE (buf.ReviewDt <> edd.ReviewDt 
+       OR buf.ReviewDt IS NULL AND edd.ReviewDt IS NOT NULL
+       OR buf.ReviewDt IS NOT NULL AND edd.ReviewDt IS NULL)
+ORDER BY b.CustomerNo;
 
-
-
-這邊找出來的customerno
-
-帶入 BSA_SUB_CUST_FACT
-SELECT * FROM BSA_SUB_CUST_FACT WHERE customerno = '25834009'
-找到NEW_CIF_KEY
-
-SELECT ReviewDt FROM EDD_ReviewSchedule WHERE CIFKey =NEW_CIF_KEY
-
-
-SELECT * FROM CIF_Migrate_Mapping_TEMP WHERE NEW_CIF_KEY 
-in
-(
-'ED63FAB0-65AD-E511-80C0-0050568C5B10'
-)
-再去
-SELECT ReviewDt FROM Cust_NP_Migrate_buffer where CIF_KEY = '922e387a-8e20-4910-b091-46ee4cca24ae'
-找到 ReviewDt
-
-
-我是要找出Cust_NP_Migrate_buffer 他的ReviewDt 跟 EDD_ReviewSchedule 的ReviewDt 不同的客戶
-顯示出來兩個 ReviewDt
-
+你現在是用哪個版本？如果需要再加其他欄位（例如 HIGHRISK、NXTRVDT 等），或只看特定條件（例如 Buffer 有日期但 EDD 沒有），告訴我，我馬上幫你調整。
