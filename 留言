@@ -1,3 +1,6 @@
+✅ 已修改完成！
+以下是針對你需求的兩個優化版本：
+1. 分布檢查版（加上「我要檢查的總數量」）
 WITH multi_sk AS (
     SELECT TS_CUST_ID, COUNT(DISTINCT SK_CUST_ID) AS sk_count
     FROM BANCS_SK_CUST_INFO
@@ -23,6 +26,7 @@ related_cif AS (
     FROM Customer_Migrate_buffer
     WHERE customerNo IN (SELECT customer_identifier FROM related_sk)
 )
+-- ====================== 分布 + 總檢查數量 ======================
 SELECT 
     IsSARFiled                  AS [IsSARFiled 值],
     COUNT(*)                    AS [筆數],
@@ -30,14 +34,19 @@ SELECT
 FROM Cust_NP_Migrate_buffer
 WHERE CIF_KEY IN (SELECT CIF_KEY FROM related_cif)
 GROUP BY IsSARFiled
-ORDER BY 
-    CASE WHEN IsSARFiled IS NULL THEN 0 ELSE 1 END, 
-    IsSARFiled;
 
-可不可以改成 我要檢查的數量有幾個
+UNION ALL
 
+SELECT 
+    '=== 總檢查數量 ==='        AS [IsSARFiled 值],
+    COUNT(*)                    AS [筆數],
+    COUNT(DISTINCT CIF_KEY)     AS [受影響 CIF 數量]
+FROM Cust_NP_Migrate_buffer
+WHERE CIF_KEY IN (SELECT CIF_KEY FROM related_cif)
+ORDER BY [IsSARFiled 值];
+這樣執行後，最後會多一行顯示「=== 總檢查數量 ===」，告訴你這次總共檢查了多少筆資料。
 
-
+2. 違規明細版（加上「有違規的有幾個」）
 WITH multi_sk AS (
     SELECT TS_CUST_ID, COUNT(DISTINCT SK_CUST_ID) AS sk_count
     FROM BANCS_SK_CUST_INFO
@@ -76,5 +85,20 @@ INNER JOIN problematic_ts p ON rs.TS_CUST_ID = p.TS_CUST_ID
 WHERE np.IsSARFiled IS NOT NULL 
   AND np.IsSARFiled NOT IN ('0', '1')
 ORDER BY np.IsSARFiled, p.TS_CUST_ID, rs.customer_identifier;
+如果想同時看到違規總數，可以用下面這個總結版（推薦）：
+WITH ... (同上面到 related_cif 的 CTE) 
+SELECT 
+    COUNT(*) AS [違規總筆數],
+    COUNT(DISTINCT p.TS_CUST_ID) AS [違規 TS_CUST_ID 數量],
+    COUNT(DISTINCT c.CIF_KEY) AS [違規 CIF 數量]
+FROM Cust_NP_Migrate_buffer np
+INNER JOIN Customer_Migrate_buffer c ON np.CIF_KEY = c.CIF_KEY
+INNER JOIN related_sk rs ON c.customerNo = rs.customer_identifier
+INNER JOIN problematic_ts p ON rs.TS_CUST_ID = p.TS_CUST_ID
+WHERE np.IsSARFiled IS NOT NULL 
+  AND np.IsSARFiled NOT IN ('0', '1');
 
-有何規的有幾個
+使用建議：
+	1	先執行第1個（分布 + 總檢查數量）
+	2	如果有違規，再執行違規明細或違規總結
+需要我把全部三個結果合併成一個完整單一腳本（一次執行看到所有）嗎？
