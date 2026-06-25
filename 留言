@@ -1,51 +1,28 @@
-✅ 以下是「完整單一查詢」版本 直接複製整段執行即可，會一次輸出三個結果集（方便一次看完）：
 WITH multi_sk AS (
-    SELECT 
-        TS_CUST_ID,
-        COUNT(DISTINCT SK_CUST_ID) AS sk_count
+    SELECT TS_CUST_ID, COUNT(DISTINCT SK_CUST_ID) AS sk_count
     FROM BANCS_SK_CUST_INFO
     GROUP BY TS_CUST_ID
     HAVING COUNT(DISTINCT SK_CUST_ID) > 1
 ),
-
 sar_nonzero AS (
     SELECT DISTINCT CUSTOMERNO AS TS_CUST_ID
     FROM BSA_SUB_CUST_FACT
     WHERE IsSARFiled != '0'
 ),
-
 problematic_ts AS (
-    SELECT m.TS_CUST_ID
-    FROM multi_sk m
+    SELECT m.TS_CUST_ID FROM multi_sk m
     INNER JOIN sar_nonzero s ON m.TS_CUST_ID = s.TS_CUST_ID
 ),
-
 related_sk AS (
-    SELECT DISTINCT 
-        s.TS_CUST_ID,
-        s.SK_CUST_ID AS customer_identifier
+    SELECT DISTINCT s.TS_CUST_ID, s.SK_CUST_ID AS customer_identifier
     FROM BANCS_SK_CUST_INFO s
     INNER JOIN problematic_ts p ON s.TS_CUST_ID = p.TS_CUST_ID
 ),
-
 related_cif AS (
     SELECT DISTINCT CIF_KEY
     FROM Customer_Migrate_buffer
     WHERE customerNo IN (SELECT customer_identifier FROM related_sk)
 )
-
--- ====================== 【結果1】問題客戶總覽 ======================
-SELECT 
-    p.TS_CUST_ID                  AS [TS_CUST_ID],
-    m.sk_count                    AS [SK一對多數量],
-    COUNT(DISTINCT rs.customer_identifier) AS [實際SK筆數]
-FROM problematic_ts p
-INNER JOIN multi_sk m ON p.TS_CUST_ID = m.TS_CUST_ID
-LEFT JOIN related_sk rs ON p.TS_CUST_ID = rs.TS_CUST_ID
-GROUP BY p.TS_CUST_ID, m.sk_count
-ORDER BY m.sk_count DESC, p.TS_CUST_ID;
-
--- ====================== 【結果2】IsSARFiled 分布（驗證是否嚴格） ======================
 SELECT 
     IsSARFiled                  AS [IsSARFiled 值],
     COUNT(*)                    AS [筆數],
@@ -57,12 +34,40 @@ ORDER BY
     CASE WHEN IsSARFiled IS NULL THEN 0 ELSE 1 END, 
     IsSARFiled;
 
--- ====================== 【結果3】違規明細（若有其他值才會顯示資料） ======================
+
+
+
+WITH multi_sk AS (
+    SELECT TS_CUST_ID, COUNT(DISTINCT SK_CUST_ID) AS sk_count
+    FROM BANCS_SK_CUST_INFO
+    GROUP BY TS_CUST_ID
+    HAVING COUNT(DISTINCT SK_CUST_ID) > 1
+),
+sar_nonzero AS (
+    SELECT DISTINCT CUSTOMERNO AS TS_CUST_ID
+    FROM BSA_SUB_CUST_FACT
+    WHERE IsSARFiled != '0'
+),
+problematic_ts AS (
+    SELECT m.TS_CUST_ID FROM multi_sk m
+    INNER JOIN sar_nonzero s ON m.TS_CUST_ID = s.TS_CUST_ID
+),
+related_sk AS (
+    SELECT DISTINCT s.TS_CUST_ID, s.SK_CUST_ID AS customer_identifier
+    FROM BANCS_SK_CUST_INFO s
+    INNER JOIN problematic_ts p ON s.TS_CUST_ID = p.TS_CUST_ID
+),
+related_cif AS (
+    SELECT DISTINCT CIF_KEY
+    FROM Customer_Migrate_buffer
+    WHERE customerNo IN (SELECT customer_identifier FROM related_sk)
+)
 SELECT 
-    p.TS_CUST_ID                  AS [TS_CUST_ID],
-    rs.customer_identifier        AS [SK_CUST_ID_or_CustomerNo],
-    c.CIF_KEY                     AS [CIF_KEY],
-    np.IsSARFiled                 AS [IsSARFiled 值]
+    p.TS_CUST_ID             AS [TS_CUST_ID],
+    rs.customer_identifier   AS [SK_CUST_ID_or_CustomerNo],
+    c.CIF_KEY                AS [CIF_KEY],
+    np.IsSARFiled            AS [IsSARFiled 值],
+    COUNT(*) OVER (PARTITION BY p.TS_CUST_ID) AS [該TS的一對多總筆數]
 FROM Cust_NP_Migrate_buffer np
 INNER JOIN Customer_Migrate_buffer c ON np.CIF_KEY = c.CIF_KEY
 INNER JOIN related_sk rs ON c.customerNo = rs.customer_identifier
@@ -71,14 +76,3 @@ WHERE np.IsSARFiled IS NOT NULL
   AND np.IsSARFiled NOT IN ('0', '1')
 ORDER BY np.IsSARFiled, p.TS_CUST_ID, rs.customer_identifier;
 
-使用方式
-	1	直接全選複製上面整段 SQL 執行。
-	2	執行後會出現 3 個結果視窗：
-	◦	結果1：有哪些 TS_CUST_ID 是一對多且需要驗證
-	◦	結果2：IsSARFiled 的分布 → 看這裡判斷是否嚴格
-	◦	結果3：只有違規的明細（如果全部都是 0、1、NULL，這段會是空的）
-
-判斷標準：
-	•	如果結果2 只顯示 0、1、NULL 三行 → 通過嚴格驗證。
-	•	如果出現其他值 → 看結果3 的違規明細。
-需要我再加上「最終總結」那一行（例如 ✅ 通過 / ❌ 有違規），或是增加其他欄位（例如客戶姓名），告訴我！
