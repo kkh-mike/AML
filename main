@@ -1,207 +1,24 @@
-USE SOURCEDBTW
-GO
-
---- RAW_TABLE HOUSEKEEP
--- EXEC [PRELOAD_HOUSEKEEPING]
-
--- =============================================
--- 宣告暫存表，用來存放要處理關戶的帳戶資料
--- =============================================
-DECLARE @DelACCTTEMP TABLE (
-    CustomerNo       VARCHAR(100),
-    ACCT_KEY         VARCHAR(100),
-    APPL             VARCHAR(100),
-    BRNCH_NBR        VARCHAR(100),
-    ACCTYP           VARCHAR(100),
-    ADTOPN           DATETIME,
-    MethodOfAcctOpn  VARCHAR(100),
-    ASTATCD          INT
-)
-
--- =============================================
--- Control-M 作業說明
--- 1) HOLD AMLTWDC008C (Ordered date 20220114)
--- 2) 待通知 FREE AMLTWDC008C
--- =============================================
-
--- =============================================
--- 找出要關戶的客戶帳戶並插入暫存表
--- =============================================
-INSERT INTO @DelACCTTEMP
-SELECT 
-    B.CustomerNo,
-    A.ACCT_KEY,
-    A.APPL,
-    A.BRNCH_NBR,
-    A.ACCTYP,
-    A.ADTOPN,
-    A.MethodOfAcctOpn,
-    A.ASTATCD 
-FROM BSADBTW..ACCT_XREF_DIM A
-INNER JOIN BSADBTW..BSA_SUB_CUST_FACT B 
-    ON A.CIF_KEY = B.CIF_KEY
-INNER JOIN BSADBTW..PB_CUSTOMER_FACT D 
-    ON B.CIF_KEY = D.CIF_KEY
-WHERE ASTATCD = 0 
-  AND B.CUSTOMERNO IN ('JENCH01SC');
 
 
--- =============================================
--- BEFORE：檢查各帳戶類別目前資料
--- =============================================
-SELECT * FROM RAW_CASH_ACCOUNT 
-WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
-
-SELECT * FROM SG_FX_PASSBOOK_SAVING 
-WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
-
-SELECT * FROM SG_FX_TD_CERTIFICATE 
-WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
-
-SELECT * FROM LOAN_LIMIT 
-WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
-
-SELECT * FROM RAW_CCARD_ACCOUNT 
-WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
+SELECT b.CustPurposeOfAcc , a.NEW_CIF_KEY , a.SOURCE_CIF_KEY  FROM CIF_Migrate_Mapping_TEMP a
+JOIN Customer_Migrate_buffer b on a.SOURCE_CIF_KEY = b.CIF_KEY
+JOIN BSA_SUB_CUST_FACT c  on c.CIF_KEY = a.NEW_CIF_KEY
+WHERE b.CustPurposeOfAcc is not NULL
 
 
--- =============================================
--- CASA 帳戶 (TRD / DDA)
--- =============================================
-INSERT INTO [RAW_CASH_ACCOUNT] 
-SELECT 
-    ACCT_KEY,
-    APPL,
-    CustomerNo,
-    ISNULL(BRNCH_NBR, ''),
-    '',
-    ISNULL(ACCTYP, ''),
-    '', '', '', '', '',
-    CONVERT(VARCHAR(10), ADTOPN, 120),
-    '',
-    '1',
-    '', '',
-    ISNULL(MethodOfAcctOpn, ''),
-    '', '', '', '', '', '',
-    CONVERT(VARCHAR(10), GETDATE()-1, 120),
-    '', '', ''
-FROM @DelACCTTEMP 
-WHERE APPL IN ('TRD', 'DDA');
+CustPurposeOfAcc	NEW_CIF_KEY	SOURCE_CIF_KEY
+01	BBA89EA7-65AD-E511-80C0-0050568C5B10	345f73cd-2beb-e511-80c8-0050568c710a
 
+我要檢查CustPurposeOfAcc是不是都在這些號碼裡面
+[01]儲蓄
+[11]信託交易
+[10]資金調度
+[04]金融投資
+[06]薪轉
+[03]證券投資
+[15]授信
+[38]扣繳保費
+[99]其他
+[21]信用卡
+[11]信託交易
 
--- =============================================
--- SAV 存摺帳戶
--- =============================================
-INSERT INTO [SG_FX_PASSBOOK_SAVING]
-SELECT 
-    ACCT_KEY,
-    APPL,
-    CustomerNo,
-    ISNULL(BRNCH_NBR, ''),
-    '',
-    ISNULL(ACCTYP, ''),
-    '', '', '', '', '',
-    CONVERT(VARCHAR(10), ADTOPN, 120),
-    '',
-    '1',
-    '', '',
-    ISNULL(MethodOfAcctOpn, ''),
-    '', '', '', '', '', '',
-    CONVERT(VARCHAR(10), GETDATE()-1, 120),
-    '', ''
-FROM @DelACCTTEMP 
-WHERE APPL = 'SAV';
-
-
--- =============================================
--- COD 定存帳戶
--- =============================================
-INSERT INTO [SG_FX_TD_CERTIFICATE]
-SELECT 
-    ACCT_KEY,
-    APPL,
-    CustomerNo,
-    ISNULL(BRNCH_NBR, ''),
-    '',
-    ISNULL(ACCTYP, ''),
-    '', '', '', '', '',
-    CONVERT(VARCHAR(10), ADTOPN, 120),
-    '',
-    '1',
-    '', '',
-    '',
-    '',
-    ISNULL(MethodOfAcctOpn, ''),
-    '', '', '', '', '', '',
-    CONVERT(VARCHAR(10), GETDATE()-1, 120),
-    '', '', ''
-FROM @DelACCTTEMP 
-WHERE APPL = 'COD';
-
-
--- =============================================
--- LOAN 貸款帳戶
--- =============================================
-INSERT INTO LOAN_LIMIT
-SELECT 
-    ACCT_KEY,
-    APPL,
-    CustomerNo,
-    ISNULL(BRNCH_NBR, ''),
-    '',
-    ISNULL(ACCTYP, ''),
-    '', '', '', '', '',
-    CONVERT(VARCHAR(10), ADTOPN, 120),
-    '',
-    '1',
-    '', '', '', '', '', '', '', '', '', '',
-    ISNULL(MethodOfAcctOpn, ''),
-    '', '', '', '', '', '', '', '',
-    CONVERT(VARCHAR(10), GETDATE()-1, 120),
-    '', '', ''
-FROM @DelACCTTEMP 
-WHERE APPL = 'LNA';
-
-
--- =============================================
--- CCARD 信用卡帳戶
--- =============================================
-INSERT INTO RAW_CCARD_ACCOUNT
-SELECT 
-    ACCT_KEY,
-    APPL,
-    CustomerNo,
-    ISNULL(BRNCH_NBR, ''),
-    '',
-    ISNULL(ACCTYP, ''),
-    '', '', '', '', '',
-    CONVERT(VARCHAR(10), ADTOPN, 120),
-    '',
-    '1',
-    '', '',
-    '', '',
-    ISNULL(MethodOfAcctOpn, ''),
-    '', '', '', '', '', '',
-    CONVERT(VARCHAR(10), GETDATE()-1, 120),
-    '', '', ''
-FROM @DelACCTTEMP 
-WHERE APPL = 'CCD';
-
-
--- =============================================
--- AFTER：確認插入結果
--- =============================================
-SELECT * FROM RAW_CASH_ACCOUNT 
-WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
-
-SELECT * FROM SG_FX_PASSBOOK_SAVING 
-WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
-
-SELECT * FROM SG_FX_TD_CERTIFICATE 
-WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
-
-SELECT * FROM LOAN_LIMIT 
-WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
-
-SELECT * FROM RAW_CCARD_ACCOUNT 
-WHERE CUSTOMER_ID IN (SELECT CustomerNo FROM @DelACCTTEMP);
