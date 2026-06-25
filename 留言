@@ -1,91 +1,64 @@
-✅ 好的，我幫你把驗證寫得更清楚、更符合你的題目描述。
-驗證核心規則（你的原題目）
-共有戶的下審日，若新光的客戶風險等級高於台新，則下審日要取兩邊較近的日期（即較早的那一天）。
-
-推薦最終驗證 SQL（最清楚版）
--- =============================================
--- TC06 共有戶 下次審查日驗證
--- 規則：若新光風險等級 > 台新風險等級，則必須取兩邊較近（較早）的日期
--- =============================================
-
-WITH 
-Shared_Cust AS (
-    -- 嚴格共有戶：同時存在於台新與新光
-    SELECT b.CustomerNo AS TS_CUST_ID
-    FROM BSA_SUB_CUST_FACT b
-    INNER JOIN VERIFY..BSA_SUB_CUST_FACT v ON b.CustomerNo = v.CustomerNo
+WITH multi_sk AS (
+    -- 步驟1：找出所有一對多的 TS_CUST_ID
+    SELECT 
+        TS_CUST_ID,
+        COUNT(DISTINCT SK_CUST_ID) AS sk_count
+    FROM BANCS_SK_CUST_INFO
+    GROUP BY TS_CUST_ID
+    HAVING COUNT(DISTINCT SK_CUST_ID) > 1     -- ← 如果你要 >=3 才算，把 >1 改成 >2
 ),
 
-Shared_Review AS (
-    SELECT 
-        c.TS_CUST_ID,
-        b.HIGHRISK AS BSA_HIGHRISK,
-        v.HIGHRISK AS VERIFY_HIGHRISK,
-        b.NXTRVDT AS BSA_NXTRVDT,
-        v.NXTRVDT AS VERIFY_NXTRVDT,
-        e.ReviewDt AS EDD_ReviewDt,
+sar_nonzero AS (
+    -- 步驟2：找出 IsSARFiled != '0' 的客戶
+    SELECT DISTINCT CUSTOMERNO AS TS_CUST_ID
+    FROM BSA_SUB_CUST_FACT
+    WHERE IsSARFiled != '0'
+),
 
-        -- 風險等級轉換
-        CASE b.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS BSA_RiskLevel,
-        CASE v.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS VERIFY_RiskLevel,
-
-        -- 是否需要取兩邊較近日期
-        CASE WHEN 
-            CASE v.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END 
-            > 
-            CASE b.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END 
-        THEN '是' ELSE '否' END AS Should_Take_Min_Date
-
-    FROM Shared_Cust c
-    INNER JOIN BSA_SUB_CUST_FACT b ON c.TS_CUST_ID = b.CustomerNo
-    INNER JOIN VERIFY..BSA_SUB_CUST_FACT v ON c.TS_CUST_ID = v.CustomerNo
-    LEFT JOIN EDD_ReviewSchedule e ON b.CIF_KEY = e.CIFKey
+problematic_ts AS (
+    -- 步驟3：兩邊交集，得到真正需要驗證的 TS_CUST_ID
+    SELECT m.TS_CUST_ID
+    FROM multi_sk m
+    INNER JOIN sar_nonzero s 
+        ON m.TS_CUST_ID = s.TS_CUST_ID
 )
+-- 預覽結果（可先單獨跑這一段看有多少客戶）
+--SELECT 
+--    TS_CUST_ID,
+--    (SELECT sk_count FROM multi_sk WHERE TS_CUST_ID = p.TS_CUST_ID) AS sk_count
+--FROM problematic_ts p
+--ORDER BY TS_CUST_ID;
 
--- ==================== 明細資料 ====================
+
+
+, related_sk AS (
+    -- 從 BANCS_SK_CUST_INFO 拿出所有相關的 SK_CUST_ID
+    SELECT DISTINCT 
+        s.TS_CUST_ID,
+        s.SK_CUST_ID AS customer_identifier   -- 這通常就是你要帶去 Customer_Migrate_buffer 的 customerNo
+    FROM BANCS_SK_CUST_INFO s
+    INNER JOIN problematic_ts p 
+        ON s.TS_CUST_ID = p.TS_CUST_ID
+)
+   --找出對應的 CIF_KEY
+, related_cif AS (
+    SELECT DISTINCT CIF_KEY
+    FROM Customer_Migrate_buffer
+    WHERE customerNo IN (
+        SELECT customer_identifier FROM related_sk
+    )
+)
 SELECT 
-    TS_CUST_ID,
-    BSA_HIGHRISK,
-    VERIFY_HIGHRISK,
-    Should_Take_Min_Date,
-    BSA_NXTRVDT,
-    VERIFY_NXTRVDT,
-    EDD_ReviewDt,
-    
-    -- 兩邊較近的日期（較早）
-    (SELECT MIN(dt) FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt)) AS Min_of_Both,
-
-    -- 驗證結果
-    CASE 
-        WHEN Should_Take_Min_Date = '是' 
-             AND EDD_ReviewDt = (SELECT MIN(dt) FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt)) 
-            THEN '✅ PASS（正確取兩邊較近日期）'
-        WHEN Should_Take_Min_Date = '否' 
-             AND EDD_ReviewDt = BSA_NXTRVDT 
-            THEN '✅ PASS（正確取台新日期）'
-        ELSE '❌ FAIL'
-    END AS Validation_Result
-
-FROM Shared_Review
-ORDER BY Should_Take_Min_Date DESC, Validation_Result DESC, TS_CUST_ID;
+    IsSARFiled,
+    COUNT(*) AS record_count,
+    COUNT(DISTINCT CIF_KEY) AS affected_cif_count
+FROM Cust_NP_Migrate_buffer
+WHERE CIF_KEY IN (SELECT CIF_KEY FROM related_cif)
+GROUP BY IsSARFiled
+ORDER BY IsSARFiled NULLS FIRST;
 
 
--- ==================== 統計摘要 ====================
-SELECT 
-    COUNT(*) AS 共有戶總筆數,
-    SUM(CASE WHEN Should_Take_Min_Date = '是' THEN 1 ELSE 0 END) AS 需要取兩邊較近日期_筆數,
-    SUM(CASE WHEN Should_Take_Min_Date = '是' 
-             AND EDD_ReviewDt = (SELECT MIN(dt) FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt)) 
-             THEN 1 ELSE 0 END) AS 實際正確取兩邊較近_筆數,
-    SUM(CASE WHEN Should_Take_Min_Date = '是' 
-             AND EDD_ReviewDt <> (SELECT MIN(dt) FROM (VALUES (BSA_NXTRVDT), (VERIFY_NXTRVDT)) AS t(dt)) 
-             THEN 1 ELSE 0 END) AS 應取但未取較近_筆數
-FROM Shared_Review;
 
-這個版本的優點：
-	•	清楚對應你的題目：Should_Take_Min_Date 直接顯示「是否需要取兩邊較近日期」
-	•	Min_of_Both 欄位讓人一看就知道應該是哪一天
-	•	PASS/FAIL 標註很明顯
-	•	最後有統計摘要，一眼就能看出整體正確率
+訊息 102，層級 15，狀態 1，行 58
+接近 'NULLS' 之處的語法不正確。
 
-請執行後告訴我結果，尤其是統計摘要的數字，我再幫你優化或產生修正 UPDATE 語法。 有哪裡還要調整嗎？（例如欄位名稱、日期格式等）
