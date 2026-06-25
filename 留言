@@ -1,7 +1,4 @@
-✅ 問題診斷與修正
-錯誤原因： SQL Server 不支援 NULLS FIRST（這是 PostgreSQL 的語法）。 你目前的資料庫是 SQL Server，所以 ORDER BY ... NULLS FIRST 會報錯。
-
-修正後的完整查詢（直接複製執行）
+✅ 以下是「完整單一查詢」版本 直接複製整段執行即可，會一次輸出三個結果集（方便一次看完）：
 WITH multi_sk AS (
     SELECT 
         TS_CUST_ID,
@@ -37,32 +34,51 @@ related_cif AS (
     WHERE customerNo IN (SELECT customer_identifier FROM related_sk)
 )
 
--- ====================== 最終查詢：IsSARFiled 分布 ======================
+-- ====================== 【結果1】問題客戶總覽 ======================
 SELECT 
-    IsSARFiled,
-    COUNT(*) AS record_count,
-    COUNT(DISTINCT CIF_KEY) AS affected_cif_count
+    p.TS_CUST_ID                  AS [TS_CUST_ID],
+    m.sk_count                    AS [SK一對多數量],
+    COUNT(DISTINCT rs.customer_identifier) AS [實際SK筆數]
+FROM problematic_ts p
+INNER JOIN multi_sk m ON p.TS_CUST_ID = m.TS_CUST_ID
+LEFT JOIN related_sk rs ON p.TS_CUST_ID = rs.TS_CUST_ID
+GROUP BY p.TS_CUST_ID, m.sk_count
+ORDER BY m.sk_count DESC, p.TS_CUST_ID;
+
+-- ====================== 【結果2】IsSARFiled 分布（驗證是否嚴格） ======================
+SELECT 
+    IsSARFiled                  AS [IsSARFiled 值],
+    COUNT(*)                    AS [筆數],
+    COUNT(DISTINCT CIF_KEY)     AS [受影響 CIF 數量]
 FROM Cust_NP_Migrate_buffer
 WHERE CIF_KEY IN (SELECT CIF_KEY FROM related_cif)
 GROUP BY IsSARFiled
 ORDER BY 
-    CASE WHEN IsSARFiled IS NULL THEN 0 ELSE 1 END,   -- NULL 排最前面
+    CASE WHEN IsSARFiled IS NULL THEN 0 ELSE 1 END, 
     IsSARFiled;
 
-如果想先看問題客戶清單（建議先跑這段確認有沒有資料）
-把上面 WITH ... related_cif 的部分保留，然後改用下面這段：
--- 先看有多少問題的 TS_CUST_ID
+-- ====================== 【結果3】違規明細（若有其他值才會顯示資料） ======================
 SELECT 
-    p.TS_CUST_ID,
-    m.sk_count
-FROM problematic_ts p
-INNER JOIN multi_sk m ON p.TS_CUST_ID = m.TS_CUST_ID
-ORDER BY m.sk_count DESC, p.TS_CUST_ID;
+    p.TS_CUST_ID                  AS [TS_CUST_ID],
+    rs.customer_identifier        AS [SK_CUST_ID_or_CustomerNo],
+    c.CIF_KEY                     AS [CIF_KEY],
+    np.IsSARFiled                 AS [IsSARFiled 值]
+FROM Cust_NP_Migrate_buffer np
+INNER JOIN Customer_Migrate_buffer c ON np.CIF_KEY = c.CIF_KEY
+INNER JOIN related_sk rs ON c.customerNo = rs.customer_identifier
+INNER JOIN problematic_ts p ON rs.TS_CUST_ID = p.TS_CUST_ID
+WHERE np.IsSARFiled IS NOT NULL 
+  AND np.IsSARFiled NOT IN ('0', '1')
+ORDER BY np.IsSARFiled, p.TS_CUST_ID, rs.customer_identifier;
 
-其他小建議
-	1	如果還是報錯，請把完整錯誤訊息貼給我（包含行號）。
-	2	如果資料量很大，可以先測試 related_cif 有多少筆： SELECT COUNT(*) FROM related_cif;
-	3	
-	4	想把 NULL 排最後，就把 CASE WHEN IsSARFiled IS NULL THEN 0 ELSE 1 END 改成 1 跟 0 對調即可。
+使用方式
+	1	直接全選複製上面整段 SQL 執行。
+	2	執行後會出現 3 個結果視窗：
+	◦	結果1：有哪些 TS_CUST_ID 是一對多且需要驗證
+	◦	結果2：IsSARFiled 的分布 → 看這裡判斷是否嚴格
+	◦	結果3：只有違規的明細（如果全部都是 0、1、NULL，這段會是空的）
 
-直接複製上面第一個修正後的完整查詢去執行試試看。 執行完後告訴我結果（例如出現哪些 IsSARFiled 值），我再幫你寫違規明細的查詢。
+判斷標準：
+	•	如果結果2 只顯示 0、1、NULL 三行 → 通過嚴格驗證。
+	•	如果出現其他值 → 看結果3 的違規明細。
+需要我再加上「最終總結」那一行（例如 ✅ 通過 / ❌ 有違規），或是增加其他欄位（例如客戶姓名），告訴我！
