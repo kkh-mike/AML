@@ -1,24 +1,51 @@
+✅ 好的，我幫你檢查。
+目前你查出來的 CustPurposeOfAcc 值只有 01，這是合法的（對應「儲蓄」）。
 
+建議：一次檢查所有不合法的 CustPurposeOfAcc
+請執行下面這條 SQL，會直接幫你找出不在允許清單裡的資料：
+SELECT 
+    b.CustPurposeOfAcc,
+    COUNT(*) as 筆數,
+    a.NEW_CIF_KEY,
+    a.SOURCE_CIF_KEY
+FROM CIF_Migrate_Mapping_TEMP a
+JOIN Customer_Migrate_buffer b ON a.SOURCE_CIF_KEY = b.CIF_KEY
+JOIN BSA_SUB_CUST_FACT c ON c.CIF_KEY = a.NEW_CIF_KEY
+WHERE b.CustPurposeOfAcc IS NOT NULL
+  AND b.CustPurposeOfAcc NOT IN ('01','11','10','04','06','03','15','38','99','21')
+GROUP BY b.CustPurposeOfAcc, a.NEW_CIF_KEY, a.SOURCE_CIF_KEY
+ORDER BY b.CustPurposeOfAcc;
 
-SELECT b.CustPurposeOfAcc , a.NEW_CIF_KEY , a.SOURCE_CIF_KEY  FROM CIF_Migrate_Mapping_TEMP a
-JOIN Customer_Migrate_buffer b on a.SOURCE_CIF_KEY = b.CIF_KEY
-JOIN BSA_SUB_CUST_FACT c  on c.CIF_KEY = a.NEW_CIF_KEY
-WHERE b.CustPurposeOfAcc is not NULL
+如果你只想看「有哪些不合法的值」：
+SELECT DISTINCT b.CustPurposeOfAcc
+FROM CIF_Migrate_Mapping_TEMP a
+JOIN Customer_Migrate_buffer b ON a.SOURCE_CIF_KEY = b.CIF_KEY
+WHERE b.CustPurposeOfAcc IS NOT NULL
+  AND b.CustPurposeOfAcc NOT IN ('01','11','10','04','06','03','15','38','99','21')
+ORDER BY b.CustPurposeOfAcc;
 
+完整允許清單（供你參考）
+代碼
+說明
+01
+儲蓄
+11
+信託交易
+10
+資金調度
+04
+金融投資
+06
+薪轉
+03
+證券投資
+15
+授信
+38
+扣繳保費
+99
+其他
+21
+信用卡
 
-CustPurposeOfAcc	NEW_CIF_KEY	SOURCE_CIF_KEY
-01	BBA89EA7-65AD-E511-80C0-0050568C5B10	345f73cd-2beb-e511-80c8-0050568c710a
-
-我要檢查CustPurposeOfAcc是不是都在這些號碼裡面
-[01]儲蓄
-[11]信託交易
-[10]資金調度
-[04]金融投資
-[06]薪轉
-[03]證券投資
-[15]授信
-[38]扣繳保費
-[99]其他
-[21]信用卡
-[11]信託交易
-
+執行完上面那條查詢後，把結果貼給我，我再幫你判斷要怎麼處理（例如要修正、mapping、或忽略）。
