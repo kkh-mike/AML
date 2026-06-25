@@ -1,3 +1,40 @@
-可以先幫我找出 新光風險等級 > 台新風險等級
+好的！ 以下是單純找出「新光風險等級 > 台新風險等級」的共有戶查詢：
+✅ 簡潔版（推薦）
+WITH Shared_Cust AS (
+    SELECT b.CustomerNo AS TS_CUST_ID
+    FROM BSA_SUB_CUST_FACT b
+    INNER JOIN VERIFY..BSA_SUB_CUST_FACT v ON b.CustomerNo = v.CustomerNo
+)
+SELECT 
+    b.CustomerNo AS TS_CUST_ID,
+    b.HIGHRISK AS BSA_HIGHRISK,      -- 台新
+    v.HIGHRISK AS VERIFY_HIGHRISK,   -- 新光
+    b.NXTRVDT AS BSA_NXTRVDT,
+    v.NXTRVDT AS VERIFY_NXTRVDT,
+    e.ReviewDt AS EDD_ReviewDt,
+    
+    -- 風險等級數字（方便確認）
+    CASE b.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS BSA_Risk,
+    CASE v.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS VERIFY_Risk,
 
-然後我自己去確認
+    -- 兩邊較近日期
+    LEAST(b.NXTRVDT, v.NXTRVDT) AS Min_of_Both   -- 若版本不支援 LEAST，可改用下面註解寫法
+
+FROM Shared_Cust c
+JOIN BSA_SUB_CUST_FACT b ON c.TS_CUST_ID = b.CustomerNo
+JOIN VERIFY..BSA_SUB_CUST_FACT v ON c.TS_CUST_ID = v.CustomerNo
+LEFT JOIN EDD_ReviewSchedule e ON b.CIF_KEY = e.CIFKey
+
+WHERE 
+    CASE v.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END 
+    > 
+    CASE b.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END 
+
+ORDER BY VERIFY_Risk DESC, BSA_Risk DESC, TS_CUST_ID;
+
+如果你的 SQL Server 版本不支援 `LEAST()`，請改用下面這行代替：
+-- 替換上面的 LEAST 那行
+(SELECT MIN(dt) FROM (VALUES (b.NXTRVDT), (v.NXTRVDT)) AS t(dt)) AS Min_of_Both
+
+這個查詢只會顯示新光風險等級高於台新的共有戶，你可以直接執行後自己慢慢檢查日期是否正確。
+需要我再幫你加上「風險相同」或「台新風險較高」的版本嗎？
