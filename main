@@ -1,51 +1,54 @@
-✅ 好的，我幫你檢查。
-目前你查出來的 CustPurposeOfAcc 值只有 01，這是合法的（對應「儲蓄」）。
-
-建議：一次檢查所有不合法的 CustPurposeOfAcc
-請執行下面這條 SQL，會直接幫你找出不在允許清單裡的資料：
+✅ 你要找的是「TS_CUST_ID 一對多 SK_CUST_ID」的案例
+推薦 SQL 查詢（直接 Copy 用）
 SELECT 
-    b.CustPurposeOfAcc,
-    COUNT(*) as 筆數,
-    a.NEW_CIF_KEY,
-    a.SOURCE_CIF_KEY
-FROM CIF_Migrate_Mapping_TEMP a
-JOIN Customer_Migrate_buffer b ON a.SOURCE_CIF_KEY = b.CIF_KEY
-JOIN BSA_SUB_CUST_FACT c ON c.CIF_KEY = a.NEW_CIF_KEY
-WHERE b.CustPurposeOfAcc IS NOT NULL
-  AND b.CustPurposeOfAcc NOT IN ('01','11','10','04','06','03','15','38','99','21')
-GROUP BY b.CustPurposeOfAcc, a.NEW_CIF_KEY, a.SOURCE_CIF_KEY
-ORDER BY b.CustPurposeOfAcc;
+    TS_CUST_ID,
+    COUNT(DISTINCT SK_CUST_ID) AS SK_COUNT,
+    STRING_AGG(SK_CUST_ID, ', ') AS SK_LIST,           -- 把所有 SK 列出來
+    COUNT(*) AS ROW_COUNT,
+    MIN(CUST_RE_NO_FL) AS MIN_FLAG,
+    MAX(CUST_RE_NO_FL) AS MAX_FLAG
+FROM BANCS_SK_CUST_INFO
+GROUP BY TS_CUST_ID
+HAVING COUNT(DISTINCT SK_CUST_ID) > 1
+ORDER BY SK_COUNT DESC, TS_CUST_ID;
 
-如果你只想看「有哪些不合法的值」：
-SELECT DISTINCT b.CustPurposeOfAcc
-FROM CIF_Migrate_Mapping_TEMP a
-JOIN Customer_Migrate_buffer b ON a.SOURCE_CIF_KEY = b.CIF_KEY
-WHERE b.CustPurposeOfAcc IS NOT NULL
-  AND b.CustPurposeOfAcc NOT IN ('01','11','10','04','06','03','15','38','99','21')
-ORDER BY b.CustPurposeOfAcc;
+如果你只要看 Flag 是 1、2、3 的
+SELECT 
+    TS_CUST_ID,
+    COUNT(DISTINCT SK_CUST_ID) AS SK_COUNT,
+    STRING_AGG(SK_CUST_ID, ', ') AS SK_LIST,
+    STRING_AGG(CAST(CUST_RE_NO_FL AS VARCHAR), ', ') AS FLAGS
+FROM BANCS_SK_CUST_INFO
+WHERE CUST_RE_NO_FL IN (1, 2, 3)
+GROUP BY TS_CUST_ID
+HAVING COUNT(DISTINCT SK_CUST_ID) > 1
+ORDER BY SK_COUNT DESC;
 
-完整允許清單（供你參考）
-代碼
-說明
-01
-儲蓄
-11
-信託交易
-10
-資金調度
-04
-金融投資
-06
-薪轉
-03
-證券投資
-15
-授信
-38
-扣繳保費
-99
-其他
-21
-信用卡
+更詳細版（包含 CUST_NO 等資訊）
+SELECT 
+    t.TS_CUST_ID,
+    t.SK_COUNT,
+    s.SK_CUST_ID,
+    s.CUST_NO,
+    s.CUST_RE_NO_FL
+FROM (
+    SELECT 
+        TS_CUST_ID,
+        COUNT(DISTINCT SK_CUST_ID) AS SK_COUNT
+    FROM BANCS_SK_CUST_INFO
+    GROUP BY TS_CUST_ID
+    HAVING COUNT(DISTINCT SK_CUST_ID) > 1
+) t
+JOIN BANCS_SK_CUST_INFO s ON t.TS_CUST_ID = s.TS_CUST_ID
+ORDER BY t.TS_CUST_ID, s.SK_CUST_ID;
 
-執行完上面那條查詢後，把結果貼給我，我再幫你判斷要怎麼處理（例如要修正、mapping、或忽略）。
+解釋：
+	•	TS_CUST_ID 一對多 → COUNT(DISTINCT SK_CUST_ID) > 1
+	•	你提到的 Flag 有 2 或 3，也有 1 → 可以用 WHERE CUST_RE_NO_FL IN (1,2,3) 過濾
+	•	STRING_AGG 可以一次看到所有對應的 SK_CUST_ID（方便檢查）
+
+想再調整的話告訴我：
+	1	要不要只看特定 Flag？
+	2	要不要把 CUST_NO 也一起顯示？
+	3	資料量很大嗎？需要加 TOP 100 或分頁嗎？
+直接執行第一個查詢看看結果，應該就能抓到你想要的「一對多」案例了！
