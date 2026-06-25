@@ -1,2 +1,41 @@
 
-SELECT * FROM Customer_Migrate_buffer WHERE CustomerNo
+SELECT * FROM BSA_SUB_CUST_FACT WHERE CUSTOMERNO in
+(
+
+SELECT DISTINCT s.TS_CUST_ID
+FROM (
+    SELECT 
+        TS_CUST_ID,
+        COUNT(DISTINCT SK_CUST_ID) AS SK_COUNT
+    FROM BANCS_SK_CUST_INFO
+    GROUP BY TS_CUST_ID
+    HAVING COUNT(DISTINCT SK_CUST_ID) > 1
+) t
+JOIN BANCS_SK_CUST_INFO s ON t.TS_CUST_ID = s.TS_CUST_ID
+WHERE SK_COUNT > '2'
+) AND IsSARFiled != '0'
+
+找到要的客戶ID
+
+然後帶進去找到對應的 一對多 SK客戶明單
+
+
+SELECT * FROM BANCS_SK_CUST_INFO WHERE TS_CUST_ID = 'L2876734180'
+
+找到名單後去找到對應的CIFKEY 再去Cust_NP_Migrate_buffer找 是不是有取嚴格 IsSARFiled 只有 0,1,NULL
+
+SELECT IsSARFiled FROM Cust_NP_Migrate_buffer WHERE CIF_KEY in
+(
+	SELECT CIF_KEY FROM Customer_Migrate_buffer WHERE customerNo in
+	(
+	'L287673418',
+	'L287673418C',
+	'L287673418D',
+	'L287673418E',
+	'L287673418F',
+	'L287673418G',
+	'L287673418H'
+	)
+)
+
+因為有很多客戶 我要怎麼設計才能完整驗證確保他都有取嚴格?
