@@ -1,99 +1,42 @@
-✅ 完整驗證設計（分段說明）
-你的目標是：
-	•	找出所有「一個 TS_CUST_ID 對應多個 SK_CUST_ID」（一對多）的客戶。
-	•	這些客戶必須同時滿足 BSA_SUB_CUST_FACT.IsSARFiled != '0'。
-	•	再針對這些客戶的相關 SK 名單，查 Customer_Migrate_buffer → Cust_NP_Migrate_buffer，確認 IsSARFiled 嚴格只有 0、1、NULL 三種值，沒有其他髒資料。
-因為客戶很多，我用 CTE（Common Table Expression） 方式一次處理全部，效率高且容易維護。
-
-第1段：找出有問題的 TS_CUST_ID（problematic_ts）
-WITH multi_sk AS (
-    -- 步驟1：找出所有一對多的 TS_CUST_ID
-    SELECT 
-        TS_CUST_ID,
-        COUNT(DISTINCT SK_CUST_ID) AS sk_count
-    FROM BANCS_SK_CUST_INFO
-    GROUP BY TS_CUST_ID
-    HAVING COUNT(DISTINCT SK_CUST_ID) > 1     -- ← 如果你要 >=3 才算，把 >1 改成 >2
-),
-
-sar_nonzero AS (
-    -- 步驟2：找出 IsSARFiled != '0' 的客戶
-    SELECT DISTINCT CUSTOMERNO AS TS_CUST_ID
-    FROM BSA_SUB_CUST_FACT
-    WHERE IsSARFiled != '0'
-),
-
-problematic_ts AS (
-    -- 步驟3：兩邊交集，得到真正需要驗證的 TS_CUST_ID
-    SELECT m.TS_CUST_ID
-    FROM multi_sk m
-    INNER JOIN sar_nonzero s 
-        ON m.TS_CUST_ID = s.TS_CUST_ID
-)
-
--- 預覽結果（可先單獨跑這一段看有多少客戶）
-SELECT 
-    TS_CUST_ID,
-    (SELECT sk_count FROM multi_sk WHERE TS_CUST_ID = p.TS_CUST_ID) AS sk_count
-FROM problematic_ts p
-ORDER BY TS_CUST_ID;
-
-第2段：收集這些 TS 對應的所有 SK 客戶名單（一對多明細）
-, related_sk AS (
-    -- 從 BANCS_SK_CUST_INFO 拿出所有相關的 SK_CUST_ID
-    SELECT DISTINCT 
-        s.TS_CUST_ID,
-        s.SK_CUST_ID AS customer_identifier   -- 這通常就是你要帶去 Customer_Migrate_buffer 的 customerNo
-    FROM BANCS_SK_CUST_INFO s
-    INNER JOIN problematic_ts p 
-        ON s.TS_CUST_ID = p.TS_CUST_ID
-)
-注意：如果你實際上是用其他欄位對應（例如 SK_CUST_ID 格式跟 customerNo 略有不同），請把 customer_identifier 改成正確的對應欄位。
-
-第3段：找出對應的 CIF_KEY
-, related_cif AS (
-    SELECT DISTINCT CIF_KEY
-    FROM Customer_Migrate_buffer
-    WHERE customerNo IN (
-        SELECT customer_identifier FROM related_sk
-    )
-)
-
-第4段：驗證 IsSARFiled 是否嚴格（核心檢查）
-4-1 先看整體分布（推薦最先跑這一段）
--- A. 分布統計
-SELECT 
-    IsSARFiled,
-    COUNT(*) AS record_count,
-    COUNT(DISTINCT CIF_KEY) AS affected_cif_count
-FROM Cust_NP_Migrate_buffer
-WHERE CIF_KEY IN (SELECT CIF_KEY FROM related_cif)
-GROUP BY IsSARFiled
-ORDER BY IsSARFiled NULLS FIRST;
-判斷方式：
-	•	如果只出現 0、1、NULL 三行 → 全部符合嚴格要求。
-	•	如果出現其他值（例如 2、Y 等）→ 有問題。
-4-2 列出所有違規明細（方便調查）
--- B. 違規紀錄（如果 A 有問題就跑這段）
-SELECT 
-    p.TS_CUST_ID,
-    rs.customer_identifier AS SK_CUST_ID_or_customerNo,
-    c.CIF_KEY,
-    np.IsSARFiled,
-    np.*   -- 如果想看其他欄位可展開
-FROM Cust_NP_Migrate_buffer np
-INNER JOIN Customer_Migrate_buffer c ON np.CIF_KEY = c.CIF_KEY
-INNER JOIN related_sk rs ON c.customerNo = rs.customer_identifier
-INNER JOIN problematic_ts p ON rs.TS_CUST_ID = p.TS_CUST_ID
-WHERE np.IsSARFiled IS NOT NULL 
-  AND np.IsSARFiled NOT IN ('0', '1')
-ORDER BY np.IsSARFiled, p.TS_CUST_ID, c.customerNo;
-
-使用方式建議
-	1	把上面所有 CTE 合在一起（從 WITH multi_sk AS ... 開始，到最後的 SELECT），一次執行。
-	2	先跑 4-1 的分布查詢，快速確認整體狀況。
-	3	如果有違規，再跑 4-2 抓明細。
-	4	可以把 problematic_ts 或 related_cif 存成暫存表，方便後續多次驗證或匯出 Excel 做報告。
-	5	如果資料量非常大，建議在關鍵欄位（TS_CUST_ID、SK_CUST_ID、CIF_KEY、customerNo）加上 WHERE 條件先縮小範圍。
-
-需要我幫你把全部 CTE 合併成一個完整可直接複製執行的 SQL，還是想加上「把結果 INSERT 到驗證 log 表格」之類的功能？或者你的資料庫是特定種類（Oracle / SQL Server 等），我可以再針對語法微調。告訴我哪一段還不清楚，我繼續調整！
+中文： 給他們一個三明治。 English: GIVE THEM A SANDWICH.
+中文： 即使對劫持人質者也要友善。 English: Be Friendly—Even with the Hostage Taker.
+中文： 假設有個男人急需錢用，所以他借了一把槍去搶劫當地銀行。 English: LET’S SAY A GUY IS desperate for money, so he borrows a gun and sets out to rob the local bank.
+中文： 銀行職員按了警鈴，警察隨即趕到。 English: A teller pulls the alarm, and the cops show up.
+中文： 作為回應，他把槍指向一位顧客，並告訴警察離開否則他會射殺人質。 English: In response, he points the gun at a customer and tells the cops to get out or he’ll shoot the hostage.
+中文： 警察離開了大樓，但很快大樓前後就有十幾名警察和帶狙擊手的特警隊。 English: They leave the building, but soon there are a dozen police out front and back, and a SWAT team with snipers.
+中文： 劫持者被困住了。 English: The hostage taker is trapped.
+中文： 警察在門口留了一個裝有電話的手提箱，電話開始響起。 English: The cops leave a suitcase with a phone in it by the door, and it starts ringing.
+中文： 當劫匪打開手提箱拿起電話時，電話另一端傳來一個溫和的聲音說： English: When the robber opens the suitcase and picks up the phone, a soothing voice on the other end of the line says,
+中文： 「我叫Terry，是警察。你還好嗎？你需要醫生嗎？不需要？很好，我很高興你沒事。」 English: “My name is Terry, I’m with the police. Are you OK? Do you need a doctor? No? Good, I’m glad you’re all right.
+中文： 「那裡面其他人呢，有誰需要醫生嗎？」 English: What about the other people inside, do any of them need a doctor?”
+中文： 劫持者現在正在和人質談判專家通話，對方會試圖讓他釋放所有人並和平投降。 English: The robber is now talking to a hostage negotiator, who is going to try to get him to let everyone go and surrender peacefully.
+中文： 而且幾乎總是，談判會成功。 English: And almost always, the negotiation works.
+中文： 在現代人質談判方法出現之前，被槍擊的機率大約是五五波——可能是壞人、警察，或者最糟的是無辜民眾。 English: Before modern hostage negotiation methods, it was about fifty-fifty whether someone would get shot—maybe the bad guy, maybe a cop, or, worst of all, an innocent civilian.
+中文： 現在，超過95%的這類情況都能和平解決，壞人被捕、沒有開槍，大家都安全回家。 English: Nowadays, more than 95 percent of these situations are resolved peacefully, with the bad guy captured, no shots fired, and everyone going home safely.
+中文： 這相當驚人。他們是怎麼做到的呢？ English: That’s pretty amazing. How do they do it?
+中文： 嗯，Terry一開始就表達對壞人福祉的關心。 English: Well, Terry starts by expressing concern for the welfare of the bad guy.
+中文： 劫持者聽到的第一件事就是Terry在擔心他。 English: The first thing the hostage taker hears is that Terry is worried about him.
+中文： 但Terry的計劃遠不止於此。她會一直讓他說話，什麼都行。 English: But Terry’s plan goes way past that. She is going to keep him talking. About anything.
+中文： 也許劫持者要求一輛逃亡車。 English: Maybe the hostage taker asks for a getaway car.
+中文： 「好的，」Terry說，「我必須把這個請求呈報給我的上司。我不知道他會不會同意，可能需要一點時間。」 English: “OK,” Terry says, “I have to send that request up to my boss. I don’t know if he’ll agree. It could take a while.”
+中文： 所以他等待著。 English: So he waits.
+中文： 與此同時，Terry很樂意聽他想談的任何事情，而且她有很多問題。 English: Meanwhile, Terry is happy to listen to anything he wants to talk about. And she has lots of questions.
+中文： 「大家還好嗎？你為什麼決定這麼做？你需要錢做什麼？」 English: “How is everyone doing? What made you decide to do this? What did you need the money for?”
+中文： 她對他說的任何話都表示同情。 English: She is sympathetic to whatever he says.
+中文： 「是啊，我知道付不起房租是什麼感覺，尤其是還有家人要靠你。」 English: “Yeah, I know what it’s like when you can’t pay the rent. Especially when you have people depending on you.”
+中文： 幾小時後，劫持者開始餓了。他告訴Terry他想要一個三明治。 English: After a couple of hours, the hostage taker starts to get hungry. He tells Terry that he wants a sandwich.
+中文： 「好的，我們可以處理這個。你最喜歡哪種三明治？你有想去的地方嗎？」 English: “OK, we can work on that. What’s your favorite kind of sandwich? Do you have a place in mind?”
+中文： 她一直在等他提出要這個三明治，試圖不讓聲音裡透露出勝利的語氣。 English: She’s been waiting for him to ask for that sandwich; she tries to keep the note of triumph out of her voice.
+中文： 大約一小時後，他最喜歡的三明治由特警隊員送達，Terry又回到電話上。 English: About an hour later, his favorite sandwich is delivered by a SWAT officer, and Terry’s back on the phone.
+中文： 「嘿，三明治怎麼樣？很棒對吧？那些真的很好吃。聽著，我需要你的幫助。」 English: “Hey, how’d you like the sandwich? Awesome, right? Those are so good. Look, I need your help.
+中文： 「這裡的中尉有點生我的氣，因為我給了你那個三明治。我不介意挨罵，因為你看起來是個不錯的人。」 English: The lieutenant here is kind of mad at me for getting you that sandwich. I don’t mind taking some heat, because you seem like a decent guy.
+中文： 「但你能不能幫我一個忙？如果你放一個人走，真的會幫我向上司交代。」 English: But could you do me a favor? What if you let one of those people go? That would really help me out with my boss.”
+中文： 十次中有九次，他會照做。幾乎每個人都會。 English: Nine times out of ten, he does. Almost everyone does.
+中文： 每個訓練人質談判員的執法單位都會使用這種互惠技巧。 English: Every law enforcement force that trains hostage negotiators uses this technique of reciprocity.
+中文： 人質談判團隊會維持一份正面警察行動（PPA）的清單，用來作為要求對方回報的理由。 English: Hostage negotiation teams keep a running list of positive police actions, or PPAs, they can use as justification to ask for a reciprocal favor.
+中文： 「我們給了你想要的水，也幫你聯絡到女朋友……兄弟，該你幫我們一個忙了。」 English: “We gave you the water you asked for and got your girlfriend on the phone…. Bro, time for you to do us a solid.”
+中文： 這之所以有效，是因為每個人，即使是終身罪犯，也會覺得有義務回報善意。 English: It works because everybody, even a lifelong criminal, feels the obligation to repay generosity.
+中文： 即使是給他三明治然後要把他關進監獄的警察也一樣。 English: Even to the police, who gave him that sandwich and are going to put him in jail.
+中文： 你可能在想，這很好，但這對我日常生活中有用嗎？ English: You may be thinking, Great, but does this work for me in my daily life?
+中文： 哦，是的。 English: Oh yes.
+中文： 這裡是另一個例子。 English: Here’s another example.
