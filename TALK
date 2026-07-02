@@ -1,82 +1,133 @@
-SELECT Record_Stat,* FROM Preload_Customer 
+這一份主要是在做 Customer / RM Risk Level / Customer Master Data 的查詢，我建議依照功能分類，之後維護會比較方便。
 
-
-SELECT HIGHRISK , CustomerNo, * FROM BSA_SUB_CUST_FACT 
-WHERE CustomerNo in ('680130')
-
-
-SELECT HIGHRISK , CustomerNo, * FROM BSA_SUB_CUST_FACT 
-WHERE CustomerNo in (
+/*********************************************************************
+* Customer / RM Risk Level Investigation SQL
+*********************************************************************/
+------------------------------------------------------------
+-- 1. Customer Preload
+------------------------------------------------------------
+SELECT
+    Record_Stat,
+    *
+FROM Preload_Customer;
+------------------------------------------------------------
+-- 2. 查詢 Customer 資料 (BSA_SUB_CUST_FACT)
+------------------------------------------------------------
+-- 單一 Customer
+SELECT
+    HighRisk,
+    CustomerNo,
+    *
+FROM BSA_SUB_CUST_FACT
+WHERE CustomerNo = '680130';
+-- 多筆 Customer
+SELECT
+    HighRisk,
+    CustomerNo,
+    *
+FROM BSA_SUB_CUST_FACT
+WHERE CustomerNo IN
+(
 '681188',
 '682380',
 '682572',
 '682683',
 '683197',
 '683497'
-)
-
-select * from PB_CUSTOMER_FACT WHERE CIF_KEY = 'C76854C0-181D-F111-AE3C-0050568A471B'
-
-
--- 要有 STATUS = 1 跟 QUEUEID 不為空才會算RM風險等級
-UPDATE BSADBHK..HRS_CUST_RISK_MGMT 
-SET STATUS = '1'
- WHERE CIF_KEY = 'C76854C0-181D-F111-AE3C-0050568A471B' 
-
- QUEUEID
-23
-UPDATE BSADBHK..HRS_CUST_RISK_MGMT 
-SET QUEUEID = '23'
- WHERE CIF_KEY = 'C76854C0-181D-F111-AE3C-0050568A471B' 
-
-
-
-SELECT Status, * FROM BSADBHK..HRS_CUST_RISK_MGMT WHERE CIF_KEY = 'C76854C0-181D-F111-AE3C-0050568A471B' 
-
-
-
-SELECT 
-    B.CUST_TYPE_CDE     AS '客戶類型',       -- P:個人, C:法人...等
-    B.CUSTOMER_SEGMENT  AS '客戶群體',       -- 客戶所屬的客群分類
-    B.CUST_NME          AS '姓名1',          -- 客戶中文姓名/主要名稱
-    B.NATIVE_CUST_NME   AS '姓名2',          -- 客戶英文姓名/原生名稱
-    B.RecordStatus      AS '客戶狀態',       -- 客戶目前的帳戶/往來狀態
-    B.REM_CDE           AS 'AO_CODE',        -- 客戶經理 (AO) 代號
-    B.REM_NME           AS 'AO_NAME',        -- 客戶經理 (AO) 姓名
-
-     ISNULL(B.NATIONALITY_1, '') AS 'NATIONALITY 客戶國籍', -- 客戶國籍
-            '_' + B.BRNCH_NBR   AS '所屬分行',       -- 客戶開戶分行代號 (來自 B 表)
-    CONVERT(CHAR(8), B.OPEN_DTE, 112) AS '開戶日期'     -- 客戶最初開戶日 (來自 B 表)
-FROM PB_CUSTOMER_FACT  B
-WHERE CIF_KEY in (
+);
+------------------------------------------------------------
+-- 3. 查詢 PB Customer Master
+------------------------------------------------------------
+SELECT *
+FROM PB_CUSTOMER_FACT
+WHERE CIF_KEY = 'C76854C0-181D-F111-AE3C-0050568A471B';
+------------------------------------------------------------
+-- 4. RM Risk Level
+------------------------------------------------------------
+-- RM Risk Level 生效條件：
+-- 1. STATUS = 1
+-- 2. QUEUEID 不可為 NULL
+SELECT
+    Status,
+    *
+FROM BSADBHK..HRS_CUST_RISK_MGMT
+WHERE CIF_KEY = 'C76854C0-181D-F111-AE3C-0050568A471B';
+-- 更新 Status
+UPDATE BSADBHK..HRS_CUST_RISK_MGMT
+SET Status = 1
+WHERE CIF_KEY = 'C76854C0-181D-F111-AE3C-0050568A471B';
+-- 更新 QueueID
+UPDATE BSADBHK..HRS_CUST_RISK_MGMT
+SET QueueID = 23
+WHERE CIF_KEY = 'C76854C0-181D-F111-AE3C-0050568A471B';
+------------------------------------------------------------
+-- 5. Customer 基本資料
+------------------------------------------------------------
+SELECT
+    B.CUST_TYPE_CDE                    AS 客戶類型,
+    B.CUSTOMER_SEGMENT                 AS 客戶群體,
+    B.CUST_NME                         AS 中文姓名,
+    B.NATIVE_CUST_NME                  AS 英文姓名,
+    B.RecordStatus                     AS 客戶狀態,
+    B.REM_CDE                          AS AO_CODE,
+    B.REM_NME                          AS AO_NAME,
+    ISNULL(B.NATIONALITY_1,'')         AS 客戶國籍,
+    '_' + B.BRNCH_NBR                  AS 所屬分行,
+    CONVERT(CHAR(8),B.OPEN_DTE,112)    AS 開戶日期
+FROM PB_CUSTOMER_FACT B
+WHERE CIF_KEY IN
+(
 'AF6C54C0-181D-F111-AE3C-0050568A471B',
 'B66F54C0-181D-F111-AE3C-0050568A471B',
 '5A7054C0-181D-F111-AE3C-0050568A471B'
-)
-
-
-
-
-
-
-
-
-DECLARE @CheckID TABLE (CustomerNo VARCHAR(50));
-INSERT INTO @CheckID VALUES ('681474'), ('682380'), ('682572');
-
-SELECT 
-    J.CustomerNo AS 欲查詢編號,
-    CASE WHEN B.CIF_KEY IS NOT NULL THEN 'Y' ELSE 'N (主表無資料!)' END AS [PB_CUSTOMER_FACT存在狀態],
-    CASE WHEN D.CIF_KEY IS NOT NULL THEN 'Y' ELSE 'N (BSA副表無資料!)' END AS [BSA_SUB_CUST_FACT存在狀態],
+);
+------------------------------------------------------------
+-- 6. Customer 資料完整性檢查
+------------------------------------------------------------
+DECLARE @CheckID TABLE
+(
+    CustomerNo VARCHAR(50)
+);
+INSERT INTO @CheckID
+VALUES
+('681474'),
+('682380'),
+('682572');
+SELECT
+    J.CustomerNo AS 欲查詢CustomerNo,
+    CASE
+        WHEN B.CIF_KEY IS NOT NULL
+        THEN 'Y'
+        ELSE 'N (PB_CUSTOMER_FACT 無資料)'
+    END AS PB_CUSTOMER_FACT,
+    CASE
+        WHEN D.CIF_KEY IS NOT NULL
+        THEN 'Y'
+        ELSE 'N (BSA_SUB_CUST_FACT 無資料)'
+    END AS BSA_SUB_CUST_FACT,
     B.CUST_TYPE_CDE AS 客戶類型,
     B.RecordStatus AS 客戶狀態,
     D.CoreSystem AS 系統來源
 FROM @CheckID J
-LEFT JOIN BSADBHK..BSA_SUB_CUST_FACT D ON J.CustomerNo = D.CustomerNo
-LEFT JOIN BSADBHK..PB_CUSTOMER_FACT B ON D.CIF_KEY = B.CIF_KEY;
+LEFT JOIN BSADBHK..BSA_SUB_CUST_FACT D
+       ON J.CustomerNo = D.CustomerNo
+LEFT JOIN BSADBHK..PB_CUSTOMER_FACT B
+       ON D.CIF_KEY = B.CIF_KEY;
 
+我建議之後可以再分成三支 SQL Script
 
+1. Customer Investigation.sql
+    * Preload_Customer
+    * PB_CUSTOMER_FACT
+    * BSA_SUB_CUST_FACT
+    * Customer 基本資料
+2. RM Risk Investigation.sql
+    * HRS_CUST_RISK_MGMT 查詢
+    * Status 更新
+    * QueueID 更新
+3. Customer Data Validation.sql
+    * Customer 是否存在
+    * PB 與 BSA 對應檢查
+    * 資料完整性驗證
 
-
-
-幫我整理一下
+這樣比全部放在同一支 SQL 好維護許多，之後找問題也會更快。
