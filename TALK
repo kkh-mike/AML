@@ -1,25 +1,27 @@
-親愛的達倫：
+Dear Darren,
 
-> 為了更清楚地說明我們討論過的「一對多」關係資料結構，我建立了一個範例 Excel 範本供您參考（請參閱附件）。
+To make the one to many relationship easier to understand, I have prepared a sample Excel template for your reference (please see the attached file).
 
-> 如附件所示，我們建議將資料分成**三個獨立的工作表**，並透過**“客戶編號”**進行鏈接，以避免資料冗餘和格式問題：
+As shown in the attachment, we will provide the data in three separate files, which can be linked together using Customer_Number:
 
-> 1. **客戶檔案**：一般識別和風險評估資訊。
+1. Customer_Profile: General customer identification and risk assessment information.
+2. Account_Information: Multiple bank accounts belonging to the same customer.
+3. Related_Parties: Trustees, legal representatives, or other related parties.
 
-> 2. **帳戶資訊**：同一客戶名下的多個銀行帳戶。
+You can review the information by matching the Customer_Number across the three files.
 
-> 3. **關聯方**：受託人、法定代理人或其他關聯方。
+What we need you to confirm is whether the columns in each file meet your audit requirements, or if any required fields are missing.
 
-> 請查看附件中的版面配置和列。如果此結構和建議的列名符合您的審計需求，請告知我們，我們將據此進行資料提取。
+For example, the Customer_Profile file currently includes the following columns:
 
-三個分頁代表著我們會下三個檔案給您
-你們可以依照對應的客戶去看，然後我需要知道的是欄位是否都是你要的有沒有缺少?
-例如
-Customer_Profile 
-有 
-Customer_Number 	Customer_Name 	Nationality 	ID_Number 	Risk_Ranking 	Risk_Score 	Last_Reviewed_Date 
+* Customer_Number
+* Customer_Name
+* Nationality
+* ID_Number
+* Risk_Ranking
+* Risk_Score
+* Last_Reviewed_Date
 
-是否都是你要的還是有少資料?
+Please let us know whether these are all the fields you require, or if there are any additional columns that should be included. Once the required columns are confirmed, we will proceed with the data extraction accordingly.
 
-
-以上幫我用英文表達
+Thank you.
