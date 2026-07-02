@@ -1,67 +1,334 @@
-了解！ 你現在想要的是：找出「新光風險等級 > 台新風險等級」的客戶，並且同時顯示兩個系統的 ReviewDt 差異（Buffer vs EDD）。
+USE BSADBJP
 
-✅ 整合版 Query（風險比對 + ReviewDt 差異）
-WITH Shared_Cust AS (
-    SELECT DISTINCT 
-        b.CustomerNo AS TS_CUST_ID,
-        b.CIF_KEY AS BSA_CIF_KEY
-    FROM BSA_SUB_CUST_FACT b
-    INNER JOIN VERIFY..BSA_SUB_CUST_FACT v 
-        ON b.CustomerNo = v.CustomerNo
-    INNER JOIN CIF_Migrate_Mapping_TEMP p 
-        ON p.NEW_CIF_KEY = b.CIF_KEY
-),
-Risk_Compare AS (
-    SELECT 
-        c.TS_CUST_ID,
-        b.HIGHRISK AS BSA_HIGHRISK,
-        v.HIGHRISK AS VERIFY_HIGHRISK,
-        b.NXTRVDT AS BSA_NXTRVDT,
-        v.NXTRVDT AS VERIFY_NXTRVDT,
-        e.ReviewDt AS EDD_ReviewDt,
-        buf.ReviewDt AS Buffer_ReviewDt,
-        CASE b.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS BSA_Risk,
-        CASE v.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END AS VERIFY_Risk,
-        CASE 
-            WHEN buf.ReviewDt IS NULL AND e.ReviewDt IS NULL THEN 'Both NULL'
-            WHEN buf.ReviewDt IS NULL THEN 'Buffer 無日期'
-            WHEN e.ReviewDt IS NULL THEN 'EDD 無日期'
-            WHEN buf.ReviewDt <> e.ReviewDt THEN '日期不同'
-            ELSE '日期相同'
-        END AS ReviewDt_Status
-    FROM Shared_Cust c
-    JOIN BSA_SUB_CUST_FACT b 
-        ON c.TS_CUST_ID = b.CustomerNo
-    JOIN VERIFY..BSA_SUB_CUST_FACT v 
-        ON c.TS_CUST_ID = v.CustomerNo
-    LEFT JOIN EDD_ReviewSchedule e 
-        ON b.CIF_KEY = e.CIFKey
-    LEFT JOIN Cust_NP_Migrate_buffer buf 
-        ON b.CIF_KEY = buf.CIF_KEY
+
+--before
+
+SELECT * FROM CIP_SCENARIO_LIBRARY WHERE DELETEFLAG = 'N' AND TEMPLATE_ID IN ('lkAnyCustomerComboCtry','lkAnyCustomerComboUSTerritory',
+'lkMainBusinessCtry','lkAnyAppointerComboCtry','lkAnyBoardOfDirectorMemberComboCtry',
+'lkAnyMainClientComboCtry','lkAnyMainShareHolderComboCtry','lkAnyLegalAgentComboCtry', 'lkTaxEvasionBeneficialAddrHighTaxCountry')
+
+SELECT A.* FROM dbo.HRS_QuerySyntaxes A
+JOIN dbo.HRS_CIP_TemplateMappings B ON A.TemplateId = B.HRSTemplateId
+WHERE DELETED = 'N' and B.CIPQueryId IN ('lkAnyCustomerComboCtry','lkAnyCustomerComboUSTerritory',
+'lkMainBusinessCtry','lkAnyAppointerComboCtry','lkAnyBoardOfDirectorMemberComboCtry',
+'lkAnyMainClientComboCtry','lkAnyMainShareHolderComboCtry','lkAnyLegalAgentComboCtry', 'lkTaxEvasionBeneficialAddrHighTaxCountry')
+
+SELECT * FROM CIP_SCENARIO_LIBRARY_MakerChecker
+SELECT * FROM CIP_SCENARIO_LIBRARY_Pending WHERE  CONVERT(VARCHAR, LSTUPDATE_DATE_INDV , 112) = CONVERT(VARCHAR, getdate() , 112) OR CONVERT(VARCHAR, LSTUPDATE_DATE_BUSS , 112) = CONVERT(VARCHAR, getdate() , 112)
+
+SELECT * FROM HRS_QuerySyntaxes_CheckerMaker
+SELECT * FROM HRS_QuerySyntaxes_Pending WHERE  CONVERT(VARCHAR, LastModifiedDate , 112) = CONVERT(VARCHAR, getdate() , 112)
+
+--Synchronize national data
+DECLARE 
+@CIPQueryId VARCHAR(50) = 'CIPT1200059' ,
+@SampleCIPQueryGroupName NVARCHAR(50) = 'Individual Customers' -- Group Name eg: 'Individual Customers'
+
+/*
+###############################################
+	Do not change anything below!
+###############################################
+*/
+
+DECLARE 
+@GroupID INT,
+@GroupCategory VARCHAR(5),
+@CIPid VARCHAR(50),
+@Score INT,
+@SourceGroupID INT,
+@Answer1 NVARCHAR(50),
+@Answer2 NVARCHAR(50),
+@NewQryID NVARCHAR(100),
+@CIPTemplateId NVARCHAR(100),
+@HRSTemplateId NVARCHAR(100),
+@Year INT,
+@SQLString NVARCHAR(MAX),
+@TableName NVARCHAR(1000)
+
+
+/*
+	Get parameters
+*/
+SELECT @CIPid = id, @GroupCategory = CASE WHEN CUST_TYPE = 'P' THEN 1 ELSE 2 END FROM dbo.CIP_TEMPLATE_DIM WHERE QueryId = @CIPQueryId
+SELECT TOP 1 @SourceGroupID = ID  FROM dbo.CIP_SyntaxGroups WHERE Deleted = 0 AND GroupName = @SampleCIPQueryGroupName AND Category = @GroupCategory
+SET @Year = YEAR(GETDATE())
+
+
+IF ISNULL(@CIPid, '') = ''
+BEGIN
+	PRINT 'invalid @CIPQueryId'
+	RETURN
+END
+
+IF ISNULL(@SourceGroupID, '') = ''
+BEGIN
+	PRINT 'invalid @SampleCIPQueryGroupName'
+	RETURN
+END
+
+/*
+	Drop country score table
+*/
+IF OBJECT_ID('tempdb..#CountryScore_Script', 'U') IS NOT NULL
+DROP TABLE #CountryScore_Script	
+
+/*
+	Prepare Country Score data
+*/
+SELECT DISTINCT A.ISO_2_CountryCode Country, CASE WHEN @GroupCategory = 1 THEN ISNULL(MAX(INDV_SCORE), 0) ELSE ISNULL(MAX(BUSS_SCORE), 0) END Score
+INTO #CountryScore_Script
+FROM dbo.COUNTRY_DIM A 
+JOIN dbo.CIP_SCENARIO_LIBRARY B ON B.ANSWER_CD = A.ISO_2_CountryCode AND TEMPLATE_ID = @CIPid 
+WHERE B.GroupId = @SourceGroupID AND B.DELETEFLAG <> 'Y'
+GROUP BY A.ISO_2_CountryCode
+
+
+/*
+	Drop country score table
+*/
+IF OBJECT_ID('tempdb..#CIP_IdealSet', 'U') IS NOT NULL
+	DROP TABLE #CIP_IdealSet	
+
+CREATE TABLE #CIP_IdealSet(
+	GroupId VARCHAR(15),
+	CUST_TYPE VARCHAR(5),
+	CIPTemplateId NVARCHAR(50),
+	HRSTemplateId Int,
+	Answer1 NVARCHAR(50),
+	Answer2 NVARCHAR(50),
+	Score INT
 )
-SELECT 
-    TS_CUST_ID,
-    BSA_HIGHRISK,
-    VERIFY_HIGHRISK,
-    BSA_Risk,
-    VERIFY_Risk,
-    BSA_NXTRVDT,
-    VERIFY_NXTRVDT,
-    Buffer_ReviewDt,
-    EDD_ReviewDt,
-    ReviewDt_Status
-FROM Risk_Compare
-WHERE BSA_Risk > VERIFY_Risk          -- 新光風險 > 台新風險
-ORDER BY VERIFY_Risk DESC, BSA_Risk DESC, TS_CUST_ID;
 
-主要調整：
-	•	使用 DISTINCT 避免 mapping 一對多造成的重複。
-	•	同時 LEFT JOIN Cust_NP_Migrate_buffer 和 EDD_ReviewSchedule，顯示兩個 ReviewDt。
-	•	增加 ReviewDt_Status 清楚標示日期狀態。
-	•	保留你原本的風險等級比對條件 BSA_Risk > VERIFY_Risk。
 
-執行後，請告訴我結果如何：
-	1	有沒有重複？
-	2	是否需要再加上 NEW_CIF_KEY 或 ACTION 等 mapping 資訊？
-	3	要不要只顯示 ReviewDt 有差異 的客戶？
-需要再微調隨時說，我立刻幫你改！
+PRINT 'Preparing ideal scenario set'
+/*
+	Prepare Ideal Set of scenario
+*/
+INSERT INTO #CIP_IdealSet( GroupId ,CUST_TYPE ,CIPTemplateId, HRSTemplateId ,Answer1 ,Answer2 ,Score)
+SELECT B.ID 'GroupId', A.CUST_TYPE, A.ID 'CIPTemplateId', D.HRSTemplateId, C.Country 'Answer1', NULL 'Answer2', C.Score
+FROM dbo.CIP_TEMPLATE_DIM A
+JOIN dbo.CIP_SyntaxGroups B ON CASE A.CUST_TYPE WHEN 'P' THEN 1 WHEN 'N' THEN 2 END = B.Category
+JOIN #CountryScore_Script C ON 1 = 1
+JOIN dbo.HRS_CIP_TemplateMappings D ON A.CUST_TYPE = D.CIP_CustomerType AND A.ID = D.CIPQueryId
+JOIN dbo.CIP_QuerySyntaxes E ON A.ID = E.TemplateId AND B.id = E.GroupId AND E.Enabled = 1
+WHERE B.Deleted = 0
+AND A.ID IN ('lkAnyCustomerComboCtry','lkAnyCustomerComboUSTerritory',
+'lkMainBusinessCtry','lkAnyAppointerComboCtry','lkAnyBoardOfDirectorMemberComboCtry',
+'lkAnyMainClientComboCtry','lkAnyMainShareHolderComboCtry','lkAnyLegalAgentComboCtry', 'lkTaxEvasionBeneficialAddrHighTaxCountry')
+
+	
+UNION
+	
+SELECT B.ID, A.CUST_TYPE, A.ID, E.HRSTemplateId, D.OtherRPType, C.Country, C.Score
+FROM dbo.CIP_TEMPLATE_DIM A
+JOIN dbo.CIP_SyntaxGroups B ON CASE A.CUST_TYPE WHEN 'P' THEN 1 WHEN 'N' THEN 2 END = B.Category
+JOIN #CountryScore_Script C ON 1 = 1
+JOIN dbo.OtherRPType_Dim D ON 1 = 1
+JOIN dbo.HRS_CIP_TemplateMappings E ON A.CUST_TYPE = E.CIP_CustomerType AND A.ID = E.CIPQueryId
+JOIN dbo.CIP_QuerySyntaxes F ON A.ID = F.TemplateId AND B.id = F.GroupId AND F.Enabled = 1
+WHERE B.Deleted = 0
+AND A.ID IN ('lkAnyOtherRelPartyComboCtry')
+ 
+ /*
+	#####################################
+		BEGIN
+	#####################################
+ */
+
+ /* 
+	Backup table 
+ */
+
+SELECT @TableName = 'CIP_SCENARIO_LIBRARY_BackUp_CountryDuplicate_' + CONVERT(VARCHAR, GETDATE(), 112)
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE name = @TableName)
+BEGIN
+	PRINT 'Backup CIP_SCENARIO_LIBRARY into ' + @TableName
+
+	SELECT @SQLString = 'SELECT *INTO ' + @TableName + ' FROM dbo.CIP_SCENARIO_LIBRARY'
+	EXEC(@SQLString)
+END
+
+SELECT @TableName = 'HRS_QuerySyntaxes_BackUp_CountryDuplicate_' + CONVERT(VARCHAR, GETDATE(), 112)
+IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE name = @TableName)
+BEGIN
+	PRINT 'Backup HRS_QuerySyntaxes into ' + @TableName
+
+	SELECT @SQLString = 'SELECT *INTO ' + @TableName + ' FROM dbo.HRS_QuerySyntaxes'
+	EXEC(@SQLString)
+END
+
+
+PRINT 'Processing..'
+PRINT 'Soft delete CIP Scenario templates that not in ideal set'
+/* Soft delete CIP scenario template that not in ideal set */
+UPDATE A 
+SET A.DELETEFLAG = 'Y'
+FROM dbo.CIP_SCENARIO_LIBRARY A
+WHERE NOT EXISTS(SELECT 1 FROM #CIP_IdealSet B WHERE A.GroupId = B.GroupId AND A.TEMPLATE_ID = B.CIPTemplateId AND A.ANSWER_CD = B.Answer1 AND ISNULL(A.ANSWER2_CD, '') = ISNULL(B.Answer2, ''))
+AND A.DELETEFLAG = 'N' 
+AND A.TEMPLATE_ID IN ('lkAnyCustomerComboCtry','lkAnyCustomerComboUSTerritory',
+'lkMainBusinessCtry','lkAnyAppointerComboCtry','lkAnyBoardOfDirectorMemberComboCtry',
+'lkAnyMainClientComboCtry','lkAnyMainShareHolderComboCtry','lkAnyLegalAgentComboCtry', 'lkTaxEvasionBeneficialAddrHighTaxCountry', 'lkAnyOtherRelPartyComboCtry')
+AND EXISTS(SELECT 1 FROM dbo.CIP_SyntaxGroups C WHERE A.GroupId = C.ID AND C.Deleted = 0)
+
+
+PRINT 'Soft delete HRS scenario template that not in ideal set'
+/* Soft delete HRS scenario template that not in ideal set */
+UPDATE A
+SET A.Deleted = 'Y'
+FROM dbo.HRS_QuerySyntaxes A
+JOIN dbo.HRS_CIP_TemplateMappings B ON A.TemplateId = B.HRSTemplateId
+WHERE NOT EXISTS(SELECT 1 FROM #CIP_IdealSet C WHERE A.GroupId = C.GroupId AND A.TemplateId = C.HRSTemplateId AND A.Parameter1 = C.Answer1 AND ISNULL(A.Parameter2, '') = ISNULL(C.Answer2, ''))
+AND A.Deleted = 'N'
+AND  B.CIPQueryId IN ('lkAnyCustomerComboCtry','lkAnyCustomerComboUSTerritory',
+'lkMainBusinessCtry','lkAnyAppointerComboCtry','lkAnyBoardOfDirectorMemberComboCtry',
+'lkAnyMainClientComboCtry','lkAnyMainShareHolderComboCtry','lkAnyLegalAgentComboCtry', 'lkTaxEvasionBeneficialAddrHighTaxCountry', 'lkAnyOtherRelPartyComboCtry')
+AND EXISTS(SELECT 1 FROM dbo.CIP_SyntaxGroups C WHERE A.GroupId = C.ID AND C.Deleted = 0)
+
+
+PRINT 'Cursor: update score or create scenarios'
+
+/* Deallocate Cursor */
+IF CURSOR_STATUS('local','ScenarioCursor') >= -1
+BEGIN
+	DEALLOCATE ScenarioCursor
+END
+
+
+/*
+	Merge to CIP current scenarios
+*/
+DECLARE ScenarioCursor CURSOR LOCAL FORWARD_ONLY READ_ONLY FOR 
+SELECT GroupId, CUST_TYPE, CIPTemplateId, HRSTemplateId, Answer1, Answer2, Score FROM #CIP_IdealSet
+OPEN ScenarioCursor
+FETCH ScenarioCursor
+INTO @GroupID,
+	 @GroupCategory,
+	 @CIPTemplateId,
+	 @HRSTemplateId,
+	 @Answer1,
+	 @Answer2,
+	 @Score
+
+
+WHILE (@@FETCH_STATUS = 0)
+BEGIN	
+	 /*
+		CIP -  handle existed and new  
+	
+	 */
+	IF EXISTS(SELECT * FROM dbo.CIP_SCENARIO_LIBRARY WHERE DELETEFLAG = 'N' AND GroupId = @GroupID AND TEMPLATE_ID = @CIPTemplateId AND ANSWER_CD = @Answer1 AND ISNULL(ANSWER2_CD, '') = ISNULL(@Answer2, ''))
+	BEGIN 
+		/* Exists */
+		IF @GroupCategory = 'P'
+			UPDATE dbo.CIP_SCENARIO_LIBRARY SET INDV_SCORE = @Score, LSTUPDATEBY_INDV = 'System Admin', LSTUPDATE_DATE_INDV = GETDATE(), LSTUPDATE_DATE_INDV_UTC = GETUTCDATE()
+			WHERE DELETEFLAG = 'N' AND GroupId = @GroupID AND TEMPLATE_ID = @CIPTemplateId AND ANSWER_CD = @Answer1 AND ISNULL(ANSWER2_CD, '') = ISNULL(@Answer2, '')
+		ELSE
+			UPDATE dbo.CIP_SCENARIO_LIBRARY SET BUSS_SCORE = @Score, LSTUPDATEBY_BUSS = 'System Admin', LSTUPDATE_DATE_BUSS = GETDATE(), LSTUPDATE_DATE_BUSS_UTC = GETUTCDATE()
+			WHERE DELETEFLAG = 'N' AND GroupId = @GroupID AND TEMPLATE_ID = @CIPTemplateId AND ANSWER_CD = @Answer1 AND ISNULL(ANSWER2_CD, '') = ISNULL(@Answer2, '')
+	END
+	ELSE
+    BEGIN
+		EXEC SP_BSAGETID 'CIP', 'U', @Year, @NewQryID OUTPUT, ''
+
+		IF @GroupCategory = 'P'
+			INSERT INTO dbo.CIP_SCENARIO_LIBRARY( ID ,TEMPLATE_ID ,ANSWER_CD ,INDV_SCORE ,LSTUPDATEBY_INDV ,LSTUPDATE_DATE_INDV ,LSTUPDATE_DATE_INDV_UTC ,
+													DELETEFLAG ,IS_REPEATABLE ,DetectionLevel ,GroupId ,QryId ,ANSWER2_CD)
+			VALUES(NEWID(), @CIPTemplateId, @Answer1, @Score, 'System Admin', GETDATE(), GETUTCDATE(), 'N', 'Y', 'C', @GroupID, @NewQryID, @Answer2)
+		ELSE
+			INSERT INTO dbo.CIP_SCENARIO_LIBRARY( ID ,TEMPLATE_ID ,ANSWER_CD ,BUSS_SCORE ,LSTUPDATEBY_BUSS ,LSTUPDATE_DATE_BUSS ,LSTUPDATE_DATE_BUSS_UTC ,
+													DELETEFLAG ,IS_REPEATABLE ,DetectionLevel ,GroupId ,QryId ,ANSWER2_CD)
+			VALUES(NEWID(), @CIPTemplateId, @Answer1, @Score, 'System Admin', GETDATE(), GETUTCDATE(), 'N', 'Y', 'C', @GroupID, @NewQryID, @Answer2)
+	END
+
+	/*
+		HRS -  handle existed and new  
+	*/
+	IF EXISTS(SELECT * FROM dbo.HRS_QuerySyntaxes WHERE Deleted = 'N' AND GroupId = @GroupID AND TemplateId = @HRSTemplateId AND Parameter1 = @Answer1 AND ISNULL(Parameter2,'') = ISNULL(@Answer2, ''))
+		/* Exists */
+		UPDATE dbo.HRS_QuerySyntaxes SET Score = @Score, LastModifiedDate = GETDATE(), LastModifiedDate_UTC = GETUTCDATE(), LastModifedBy = 'System Admin'
+		WHERE Deleted = 'N' AND GroupId = @GroupID AND TemplateId = @HRSTemplateId AND Parameter1 = @Answer1 AND ISNULL(Parameter2,'') = ISNULL(@Answer2, '')
+	ELSE
+    BEGIN
+		EXEC SP_BSAGETID 'HRS', 'U', @Year, @NewQryID OUTPUT, ''
+
+		INSERT dbo.HRS_QuerySyntaxes( ID ,TemplateId ,GroupId ,Parameter1 ,Parameter2 ,Score ,CreatedDate ,CreatedDate_UTC ,LastModifiedDate ,LastModifiedDate_UTC ,CreatedBy ,Enabled ,Deleted ,Repeatable ,Category ,LastModifedBy ,qryId)
+		SELECT ISNULL((SELECT MAX(ID) FROM dbo.HRS_QuerySyntaxes), 0) + 1, @HRSTemplateId, @GroupID, @Answer1, @Answer2, @Score, GETDATE(), GETUTCDATE(), GETDATE(), GETUTCDATE(), 'System Admin', 1, 'N', 1, CASE @GroupCategory WHEN 'P' THEN 1 ELSE 2 END, 'System Admin', @NewQryID
+	END
+
+	FETCH ScenarioCursor
+	INTO @GroupID,
+		 @GroupCategory,
+		 @CIPTemplateId,
+		 @HRSTemplateId,
+		 @Answer1,
+		 @Answer2,
+		 @Score
+END
+
+
+PRINT 'Synchronize CIP current scenarios to pending tables'
+/*
+
+	Sync CIP templates from current to pending 
+
+*/
+TRUNCATE TABLE CIP_SCENARIO_LIBRARY_MakerChecker
+TRUNCATE TABLE CIP_SCENARIO_LIBRARY_Pending
+
+INSERT INTO CIP_SCENARIO_LIBRARY_Pending(ID,TEMPLATE_ID,ANSWER_CD,INDV_SCORE,BUSS_SCORE,BANK_SCORE,LOGIC,LARGEST_SINGLE_TRAN_AMT,
+			DAILY_TOT,DAILY_FREQ,MTHLY_TOT,MTHLY_FREQ,LSTUPDATEBY_INDV,LSTUPDATEBY_BUSS,LSTUPDATEBY_BANK,LSTUPDATE_DATE_INDV,
+			LSTUPDATE_DATE_BUSS,LSTUPDATE_DATE_BANK,LSTUPDATE_DATE_INDV_UTC,LSTUPDATE_DATE_BUSS_UTC,LSTUPDATE_DATE_BANK_UTC,
+			DELETEFLAG,IS_REPEATABLE,DetectionLevel,GroupId,QryId,ANSWER2_CD)
+SELECT ID,TEMPLATE_ID,ANSWER_CD,INDV_SCORE,BUSS_SCORE,BANK_SCORE,LOGIC,LARGEST_SINGLE_TRAN_AMT,
+		DAILY_TOT,DAILY_FREQ,MTHLY_TOT,MTHLY_FREQ,LSTUPDATEBY_INDV,LSTUPDATEBY_BUSS,LSTUPDATEBY_BANK,LSTUPDATE_DATE_INDV,
+		LSTUPDATE_DATE_BUSS,LSTUPDATE_DATE_BANK,LSTUPDATE_DATE_INDV_UTC,LSTUPDATE_DATE_BUSS_UTC,LSTUPDATE_DATE_BANK_UTC,
+		DELETEFLAG,IS_REPEATABLE,DetectionLevel,GroupId,QryId,ANSWER2_CD
+FROM CIP_SCENARIO_LIBRARY
+
+PRINT 'Synchronize HRS current scenarios to pending tables'
+/*
+
+	Sync HRS templates from current to pending 
+
+*/
+TRUNCATE TABLE dbo.HRS_QuerySyntaxes_CheckerMaker
+TRUNCATE TABLE dbo.HRS_QuerySyntaxes_Pending
+
+SET IDENTITY_INSERT HRS_QuerySyntaxes_Pending ON 
+
+INSERT INTO dbo.HRS_QuerySyntaxes_Pending(ID, TemplateId ,GroupId ,Parameter1 ,Parameter2 ,Parameter3 ,Parameter4 ,Parameter5 ,
+			Parameter6 ,Parameter7 ,Parameter8 ,Parameter9 ,Parameter10 ,Score ,CreatedDate ,CreatedDate_UTC ,LastModifiedDate ,
+			LastModifiedDate_UTC ,CreatedBy ,Enabled ,Deleted ,Repeatable ,Category ,LastModifedBy ,qryId)
+SELECT ID ,TemplateId ,GroupId ,Parameter1 ,Parameter2 ,Parameter3 ,Parameter4 ,Parameter5 ,
+			Parameter6 ,Parameter7 ,Parameter8 ,Parameter9 ,Parameter10 ,Score ,CreatedDate ,CreatedDate_UTC ,LastModifiedDate ,
+			LastModifiedDate_UTC ,CreatedBy ,Enabled ,Deleted ,Repeatable ,Category ,LastModifedBy ,qryId 
+FROM dbo.HRS_QuerySyntaxes
+
+SET IDENTITY_INSERT HRS_QuerySyntaxes_Pending OFF
+
+
+PRINT 'COMPLETE'
+
+
+--after
+
+SELECT * FROM CIP_SCENARIO_LIBRARY WHERE DELETEFLAG = 'N' AND TEMPLATE_ID IN ('lkAnyCustomerComboCtry','lkAnyCustomerComboUSTerritory',
+'lkMainBusinessCtry','lkAnyAppointerComboCtry','lkAnyBoardOfDirectorMemberComboCtry',
+'lkAnyMainClientComboCtry','lkAnyMainShareHolderComboCtry','lkAnyLegalAgentComboCtry', 'lkTaxEvasionBeneficialAddrHighTaxCountry')
+
+SELECT A.* FROM dbo.HRS_QuerySyntaxes A
+JOIN dbo.HRS_CIP_TemplateMappings B ON A.TemplateId = B.HRSTemplateId
+WHERE DELETED = 'N' and B.CIPQueryId IN ('lkAnyCustomerComboCtry','lkAnyCustomerComboUSTerritory',
+'lkMainBusinessCtry','lkAnyAppointerComboCtry','lkAnyBoardOfDirectorMemberComboCtry',
+'lkAnyMainClientComboCtry','lkAnyMainShareHolderComboCtry','lkAnyLegalAgentComboCtry', 'lkTaxEvasionBeneficialAddrHighTaxCountry')
+
+SELECT * FROM CIP_SCENARIO_LIBRARY_MakerChecker
+SELECT * FROM CIP_SCENARIO_LIBRARY_Pending WHERE  CONVERT(VARCHAR, LSTUPDATE_DATE_INDV , 112) = CONVERT(VARCHAR, getdate() , 112) OR CONVERT(VARCHAR, LSTUPDATE_DATE_BUSS , 112) = CONVERT(VARCHAR, getdate() , 112)
+
+SELECT * FROM HRS_QuerySyntaxes_CheckerMaker
+SELECT * FROM HRS_QuerySyntaxes_Pending WHERE  CONVERT(VARCHAR, LastModifiedDate , 112) = CONVERT(VARCHAR, getdate() , 112)
+
+
+
+可以幫我看一下為什麼分數都沒變
