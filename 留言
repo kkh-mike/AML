@@ -1,334 +1,272 @@
-USE BSADBJP
+--dbo.GLSPEC_SyncDJToInternalList.StoredProcedure
+
+USE [BSADB]
+GO
+/****** Object:  StoredProcedure [dbo].[GLSPEC_SyncDJToInternalList]    Script Date: 2025/12/22 上午 09:59:19 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
 
 
---before
-
-SELECT * FROM CIP_SCENARIO_LIBRARY WHERE DELETEFLAG = 'N' AND TEMPLATE_ID IN ('lkAnyCustomerComboCtry','lkAnyCustomerComboUSTerritory',
-'lkMainBusinessCtry','lkAnyAppointerComboCtry','lkAnyBoardOfDirectorMemberComboCtry',
-'lkAnyMainClientComboCtry','lkAnyMainShareHolderComboCtry','lkAnyLegalAgentComboCtry', 'lkTaxEvasionBeneficialAddrHighTaxCountry')
-
-SELECT A.* FROM dbo.HRS_QuerySyntaxes A
-JOIN dbo.HRS_CIP_TemplateMappings B ON A.TemplateId = B.HRSTemplateId
-WHERE DELETED = 'N' and B.CIPQueryId IN ('lkAnyCustomerComboCtry','lkAnyCustomerComboUSTerritory',
-'lkMainBusinessCtry','lkAnyAppointerComboCtry','lkAnyBoardOfDirectorMemberComboCtry',
-'lkAnyMainClientComboCtry','lkAnyMainShareHolderComboCtry','lkAnyLegalAgentComboCtry', 'lkTaxEvasionBeneficialAddrHighTaxCountry')
-
-SELECT * FROM CIP_SCENARIO_LIBRARY_MakerChecker
-SELECT * FROM CIP_SCENARIO_LIBRARY_Pending WHERE  CONVERT(VARCHAR, LSTUPDATE_DATE_INDV , 112) = CONVERT(VARCHAR, getdate() , 112) OR CONVERT(VARCHAR, LSTUPDATE_DATE_BUSS , 112) = CONVERT(VARCHAR, getdate() , 112)
-
-SELECT * FROM HRS_QuerySyntaxes_CheckerMaker
-SELECT * FROM HRS_QuerySyntaxes_Pending WHERE  CONVERT(VARCHAR, LastModifiedDate , 112) = CONVERT(VARCHAR, getdate() , 112)
-
---Synchronize national data
-DECLARE 
-@CIPQueryId VARCHAR(50) = 'CIPT1200059' ,
-@SampleCIPQueryGroupName NVARCHAR(50) = 'Individual Customers' -- Group Name eg: 'Individual Customers'
-
-/*
-###############################################
-	Do not change anything below!
-###############################################
-*/
-
-DECLARE 
-@GroupID INT,
-@GroupCategory VARCHAR(5),
-@CIPid VARCHAR(50),
-@Score INT,
-@SourceGroupID INT,
-@Answer1 NVARCHAR(50),
-@Answer2 NVARCHAR(50),
-@NewQryID NVARCHAR(100),
-@CIPTemplateId NVARCHAR(100),
-@HRSTemplateId NVARCHAR(100),
-@Year INT,
-@SQLString NVARCHAR(MAX),
-@TableName NVARCHAR(1000)
-
-
-/*
-	Get parameters
-*/
-SELECT @CIPid = id, @GroupCategory = CASE WHEN CUST_TYPE = 'P' THEN 1 ELSE 2 END FROM dbo.CIP_TEMPLATE_DIM WHERE QueryId = @CIPQueryId
-SELECT TOP 1 @SourceGroupID = ID  FROM dbo.CIP_SyntaxGroups WHERE Deleted = 0 AND GroupName = @SampleCIPQueryGroupName AND Category = @GroupCategory
-SET @Year = YEAR(GETDATE())
-
-
-IF ISNULL(@CIPid, '') = ''
+ALTER PROCEDURE [dbo].[GLSPEC_SyncDJToInternalList]
+@GroupId BIGINT
+AS
 BEGIN
-	PRINT 'invalid @CIPQueryId'
-	RETURN
-END
+	DECLARE @OtherIdentMthCode VARCHAR(2),
+			@Filter_Alt_Str INT
+			
+	SELECT @OtherIdentMthCode = IDENTCODE FROM dbo.IDENTMTHD_DIM WHERE OTHIND = 'Y' 
+	SELECT @Filter_Alt_Str = CtrlVal FROM dbo.PO_DIMData WHERE Module = 'DJ' AND CtrlKey = 'DJ_ToGLSPEC_ALT_STR'
 
-IF ISNULL(@SourceGroupID, '') = ''
-BEGIN
-	PRINT 'invalid @SampleCIPQueryGroupName'
-	RETURN
-END
+	IF OBJECT_ID('tempdb..#tempDJBlacklist') IS NOT NULL
+	    DROP TABLE #tempDJBlacklist
+	IF OBJECT_ID('tempdb..#tempDJBlacklistDetails') IS NOT NULL
+	    DROP TABLE #tempDJBlacklistDetails
 
-/*
-	Drop country score table
-*/
-IF OBJECT_ID('tempdb..#CountryScore_Script', 'U') IS NOT NULL
-DROP TABLE #CountryScore_Script	
+	CREATE TABLE #tempDJBlacklist (EntNum INT NOT NULL, SdnName NVARCHAR(350) NOT NULL, UpdatedDate VARCHAR(8) NOT NULL)
 
-/*
-	Prepare Country Score data
-*/
-SELECT DISTINCT A.ISO_2_CountryCode Country, CASE WHEN @GroupCategory = 1 THEN ISNULL(MAX(INDV_SCORE), 0) ELSE ISNULL(MAX(BUSS_SCORE), 0) END Score
-INTO #CountryScore_Script
-FROM dbo.COUNTRY_DIM A 
-JOIN dbo.CIP_SCENARIO_LIBRARY B ON B.ANSWER_CD = A.ISO_2_CountryCode AND TEMPLATE_ID = @CIPid 
-WHERE B.GroupId = @SourceGroupID AND B.DELETEFLAG <> 'Y'
-GROUP BY A.ISO_2_CountryCode
-
-
-/*
-	Drop country score table
-*/
-IF OBJECT_ID('tempdb..#CIP_IdealSet', 'U') IS NOT NULL
-	DROP TABLE #CIP_IdealSet	
-
-CREATE TABLE #CIP_IdealSet(
-	GroupId VARCHAR(15),
-	CUST_TYPE VARCHAR(5),
-	CIPTemplateId NVARCHAR(50),
-	HRSTemplateId Int,
-	Answer1 NVARCHAR(50),
-	Answer2 NVARCHAR(50),
-	Score INT
-)
-
-
-PRINT 'Preparing ideal scenario set'
-/*
-	Prepare Ideal Set of scenario
-*/
-INSERT INTO #CIP_IdealSet( GroupId ,CUST_TYPE ,CIPTemplateId, HRSTemplateId ,Answer1 ,Answer2 ,Score)
-SELECT B.ID 'GroupId', A.CUST_TYPE, A.ID 'CIPTemplateId', D.HRSTemplateId, C.Country 'Answer1', NULL 'Answer2', C.Score
-FROM dbo.CIP_TEMPLATE_DIM A
-JOIN dbo.CIP_SyntaxGroups B ON CASE A.CUST_TYPE WHEN 'P' THEN 1 WHEN 'N' THEN 2 END = B.Category
-JOIN #CountryScore_Script C ON 1 = 1
-JOIN dbo.HRS_CIP_TemplateMappings D ON A.CUST_TYPE = D.CIP_CustomerType AND A.ID = D.CIPQueryId
-JOIN dbo.CIP_QuerySyntaxes E ON A.ID = E.TemplateId AND B.id = E.GroupId AND E.Enabled = 1
-WHERE B.Deleted = 0
-AND A.ID IN ('lkAnyCustomerComboCtry','lkAnyCustomerComboUSTerritory',
-'lkMainBusinessCtry','lkAnyAppointerComboCtry','lkAnyBoardOfDirectorMemberComboCtry',
-'lkAnyMainClientComboCtry','lkAnyMainShareHolderComboCtry','lkAnyLegalAgentComboCtry', 'lkTaxEvasionBeneficialAddrHighTaxCountry')
-
+	CREATE TABLE #tempDJBlacklistDetails(EntNum INT NOT NULL, SdnName NVARCHAR(350) NOT NULL, UpdatedDate VARCHAR(8) NOT NULL, 
+		Address NVARCHAR(400), City NVARCHAR(200), Country NVARCHAR(100), IdentType VARCHAR(2), IdentNumber NVARCHAR(44), DOB VARCHAR(8),Gender NVARCHAR(7))
 	
-UNION
+	INSERT INTO #tempDJBlacklist ( EntNum, SdnName, UpdatedDate )
+	SELECT  A.EntNum, A.SdnName, MAX(A.UpdatedDate) AS UpdatedDate 
+	FROM BSADB.dbo.DJ_List_Data_A A 
+	WHERE A.NamePropertyBitCode & 1 > 0 AND A.AltStrengthBitCode & @Filter_Alt_Str <> 0
+	GROUP BY A.EntNum, A.SdnName 
+
+	;WITH TempAddress AS (
+		SELECT A.EntityId, A.Address, A.City, A.AddressCountry, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId'
+		FROM BSADB.dbo.DJ_Address A WITH(NOLOCK) 
+		WHERE A.Deleted = 0  AND EXISTS(SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
+	), TempIdent AS(
+		SELECT EntityId, CASE WHEN ISNULL(IdentificationType,'') = '' THEN NULL ELSE @OtherIdentMthCode END 'IdentificationType', IdentificationNumber, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId' 
+		FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH(NOLOCK) WHERE A.Deleted = 0 AND EXISTS(SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
+	), TempDOB AS (
+		SELECT EntityId, InfoDay, InfoMonth, InfoYear, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId' 
+		FROM BSADB.dbo.DJ_DateTypeInfo A WITH(NOLOCK) WHERE A.DateType = 'Date of Birth' AND A.Deleted = 0 AND EXISTS(SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
+	), TempGender AS (
+		SELECT A.EntityId, CASE 
+			WHEN ISNULL(A.Gender,'') = '' THEN NULL 
+			WHEN ISNULL(A.Gender,'') = 'Male' THEN 'M' 
+			WHEN ISNULL(A.Gender,'') = 'Female' THEN 'F'
+		END 'Gender' , ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.EntityId) 'RowId' 
+		FROM BSADB.dbo.DJ_Entity A WITH(NOLOCK)
+		WHERE a.Deleted = 0 AND EXISTS(SELECT 1 FROM #tempDJBlacklist X WITH(NOLOCK) WHERE a.EntityId = x.EntNum)
+	)
+	INSERT INTO #tempDJBlacklistDetails ( EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB, Gender )
+	SELECT A.EntNum, A.SdnName, A.UpdatedDate, B.Address, LEFT(B.City,100), LEFT(B.AddressCountry,100),
+		C.IdentificationType, LEFT(C.IdentificationNumber,44) , 
+		CASE WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL THEN D.InfoYear ELSE	CONVERT(VARCHAR(8),dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) END, E.Gender
+	FROM #tempDJBlacklist A 
+		LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1 
+		LEFT JOIN TempIdent C ON A.EntNum = C.EntityId AND C.RowId = 1 
+		LEFT JOIN TempDOB D ON A.EntNum = D.EntityId AND D.RowId = 1 
+		LEFT JOIN TempGender E ON A.EntNum = E.EntityId AND E.RowId = 1
+
+
+	;WITH TargetTable AS (
+		SELECT A.spec_name, A.updated_date, A.remark, A.TaxID, A.IDENT, A.IDENTO, A.TaxIDCD, A.IDNUM, A.DInd, A.creUserID, A.STATE, A.ADDRESS, A.COUNTRY,
+               A.GROUPID, A.SOURCE, A.EnterFlag, A.ApprovedBy, A.ApprovedDate, A.DelUserID, A.DelDate, A.ApproveDelUserID, A.ApproveDelDate, A.creDate,
+               A.updated_date_UTC, A.ApprovedDate_UTC, A.DelDate_UTC, A.ApproveDelDate_UTC, A.creDate_UTC, A.ent_num, A.DOB, A.Gender
+		/*A.spec_name, A.updated_date, A.remark, A.DInd, A.creUserID, A.STATE, A.ADDRESS, A.COUNTRY,
+			   A.GROUPID, A.SOURCE, A.EnterFlag, A.ApprovedBy, A.ApprovedDate, A.DelUserID, A.DelDate, A.ApproveDelUserID, A.ApproveDelDate, A.creDate,
+			   A.updated_date_UTC, A.ApprovedDate_UTC, A.DelDate_UTC, A.ApproveDelDate_UTC, A.creDate_UTC, A.ent_num*/
+		FROM BSADB.dbo.OFAC_GLSpec A WHERE A.GROUPID = @GroupId --AND A.DInd = 'N'
+	)
+	MERGE TargetTable T 
+	USING (SELECT EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB, Gender FROM #tempDJBlacklistDetails) S
+	ON T.spec_name = S.SdnName AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+	WHEN NOT MATCHED BY TARGET THEN
+		INSERT ( spec_name, updated_date, remark, DInd, creUserID, STATE, ADDRESS, COUNTRY, GROUPID, IDENT, IDNUM, DOB, Gender,
+                SOURCE, EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, creDate, updated_date_UTC,
+                ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, creDate_UTC)
+		VALUES(S.SdnName, S.UpdatedDate, S.EntNum, 'N', 'System Admin', ISNULL(S.City,''), S.Address, S.Country, @GroupId, S.IdentType, S.IdentNumber, S.DOB, 
+				S.Gender,
+				NULL, 'D', 'System Admin', GETDATE(), 'System Admin', GETDATE(), 'System Admin', GETDATE(), GETDATE(), GETDATE(), 
+				GETUTCDATE(), NULL, NULL, GETUTCDATE())
+	WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN 
+		UPDATE SET T.DInd = 'Y', T.DelUserID = 'System Admin', T.DelDate = GETDATE(), T.ApproveDelUserID = 'System Admin', T.ApproveDelDate = GETDATE(),
+				T.DelDate_UTC = GETUTCDATE()
+	WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN 
+		UPDATE SET T.DInd = 'N', T.updated_date = S.UpdatedDate, T.DelUserID = NULL, T.DelDate = NULL, T.ApproveDelUserID = NULL, T.ApproveDelDate = NULL,
+				T.DelDate_UTC = NULL, T.EnterFlag = 'D', T.updated_date_UTC = GETUTCDATE(),
+				T.ADDRESS = S.ADDRESS, T.STATE = ISNULL(S.City,''), T.COUNTRY = S.Country, T.IDENT = S.IdentType, T.IDNUM = S.IdentNumber, T.DOB = S.DOB, T.Gender = S.Gender
+	OUTPUT CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ent_num ELSE Deleted.ent_num END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.spec_name ELSE Deleted.spec_name END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date ELSE Deleted.updated_date END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.remark ELSE Deleted.remark END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DInd ELSE Deleted.DInd END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creUserID ELSE Deleted.creUserID END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENTO ELSE Deleted.IDENTO END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.STATE ELSE Deleted.STATE END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ADDRESS ELSE Deleted.ADDRESS END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.COUNTRY ELSE Deleted.COUNTRY END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.GROUPID ELSE Deleted.GROUPID END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENT ELSE Deleted.IDENT END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDNUM ELSE Deleted.IDNUM END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DOB ELSE Deleted.DOB END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.Gender ELSE Deleted.Gender END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.EnterFlag ELSE Deleted.EnterFlag END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedBy ELSE Deleted.ApprovedBy END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate ELSE Deleted.ApprovedDate END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelUserID ELSE Deleted.DelUserID END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate ELSE Deleted.DelDate END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelUserID ELSE Deleted.ApproveDelUserID END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate ELSE Deleted.ApproveDelDate END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creDate ELSE Deleted.creDate END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date_UTC ELSE Deleted.updated_date_UTC END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate_UTC ELSE Deleted.ApprovedDate_UTC END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate_UTC ELSE Deleted.DelDate_UTC END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate_UTC ELSE Deleted.ApproveDelDate_UTC END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creDate_UTC ELSE Deleted.creDate_UTC END,
+		CASE WHEN $ACTION = 'INSERT' OR ($ACTION = 'UPDATE' AND Deleted.DInd = 'Y' AND Inserted.DInd = 'N') THEN '01' WHEN $ACTION = 'UPDATE' AND Inserted.DInd = 'Y' THEN '03' ELSE '02' END, 
+		GETUTCDATE()
+	INTO BSADB.dbo.OFAC_GLSpec_Log (ent_num, spec_name, updated_date, remark, DInd, creUserID, IDENTO, STATE, ADDRESS, COUNTRY, GROUPID, IDENT, IDNUM, DOB,Gender,
+                EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, CreationDate, updated_date_UTC,
+                ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, CreationDate_UTC, ActionCD, ActionDt);
+
+	--20251219 IT20202509021049 split Sanctions Control & Ownership list from dowjones
+	IF OBJECT_ID('tempdb..#tempDJBlacklistSCO') IS NOT NULL
+		DROP TABLE #tempDJBlacklistSCO
+	IF OBJECT_ID('tempdb..#tempDJBlacklistDetailsSCO') IS NOT NULL
+		DROP TABLE #tempDJBlacklistDetailsSCO
+
+	CREATE TABLE #tempDJBlacklistSCO (EntNum INT NOT NULL, SdnName NVARCHAR(350) NOT NULL, UpdatedDate VARCHAR(8) NOT NULL)
+
+	CREATE TABLE #tempDJBlacklistDetailsSCO(Num INT ,EntNum INT NOT NULL, SdnName NVARCHAR(350) NOT NULL, UpdatedDate VARCHAR(8) NOT NULL, 
+			Address NVARCHAR(400), City NVARCHAR(200), Country NVARCHAR(100), IdentType VARCHAR(2), IdentNumber NVARCHAR(44), DOB VARCHAR(8))
+        
+	INSERT INTO #tempDJBlacklistSCO (EntNum, SdnName, UpdatedDate )
+	SELECT  C.EntNum, C.SdnName, MAX(C.UpdatedDate) AS UpdatedDate 
+	from BSADB.dbo.DJ_Entity A JOIN BSADB.dbo.DJ_ListCategory B ON A.EntityId = B.EntityId
+	JOIN DJ_List_Data_A C on a.EntityId = C.EntNum
+	LEFT JOIN DJ_AltName D ON C.EntNum = D.EntityId AND C.AltNum = D.AltNameId
+	WHERE A.PersonStatus <> 'Inactive' and B.Description3 IN (
+	'OFAC Related - Majority Owned',
+	'OFAC Related – Control',
+	'OFAC - Regional Sanctions Related - Majority Owned',
+	'OFAC - Regional Sanctions Related - Control',
+	'EU Related - Majority Owned',
+	'EU Related - Control',
+	'EU - Regional Sanctions Related - Majority Owned',
+	'EU - Regional Sanctions Related – Control'
+	) 
+	AND ISNULL(D.NameSubType,'') <> 'OSN'
+	AND B.Deleted = 0
+	GROUP BY C.EntNum, C.SdnName 
+
+	IF OBJECT_ID('tempdb..#DJ_SanctionListReference') IS NOT NULL
+	    DROP TABLE #DJ_SanctionListReference
+
+	SELECT  T.EntityId,
+        STUFF((
+            SELECT ';' + t2.SanctionListReference
+            FROM DJ_SanctionListReference t2
+            WHERE T2.EntityId = T.EntityId
+            FOR XML PATH(''), TYPE
+        ).value('.', 'nvarchar(max)'), 1, 1, '') AS SanctionListReference
+	INTO #DJ_SanctionListReference
+	FROM    DJ_SanctionListReference t
+	GROUP BY T.EntityId;
 	
-SELECT B.ID, A.CUST_TYPE, A.ID, E.HRSTemplateId, D.OtherRPType, C.Country, C.Score
-FROM dbo.CIP_TEMPLATE_DIM A
-JOIN dbo.CIP_SyntaxGroups B ON CASE A.CUST_TYPE WHEN 'P' THEN 1 WHEN 'N' THEN 2 END = B.Category
-JOIN #CountryScore_Script C ON 1 = 1
-JOIN dbo.OtherRPType_Dim D ON 1 = 1
-JOIN dbo.HRS_CIP_TemplateMappings E ON A.CUST_TYPE = E.CIP_CustomerType AND A.ID = E.CIPQueryId
-JOIN dbo.CIP_QuerySyntaxes F ON A.ID = F.TemplateId AND B.id = F.GroupId AND F.Enabled = 1
-WHERE B.Deleted = 0
-AND A.ID IN ('lkAnyOtherRelPartyComboCtry')
- 
- /*
-	#####################################
-		BEGIN
-	#####################################
- */
+	UPDATE #DJ_SanctionListReference
+	SET SanctionListReference = 'Visit the Dow Jones for further information'
+	WHERE len(SanctionListReference) >= 400
 
- /* 
-	Backup table 
- */
+	;WITH TempAddress AS (
+		SELECT A.EntityId, A.SanctionListReference, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.EntityId) 'RowId'
+		FROM #DJ_SanctionListReference A WITH(NOLOCK) 
+		WHERE EXISTS(SELECT 1 FROM #tempDJBlacklistSCO X WHERE A.EntityId = X.EntNum)
+	)/*, TempIdent AS(
+		SELECT EntityId, CASE WHEN ISNULL(IdentificationType,'') = '' THEN NULL ELSE @OtherIdentMthCode END 'IdentificationType', IdentificationNumber, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId' 
+		FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH(NOLOCK) WHERE A.Deleted = 0 AND EXISTS(SELECT 1 FROM #tempDJBlacklistSCO X WHERE A.EntityId = X.EntNum)
+	), TempDOB AS (
+		SELECT EntityId, InfoDay, InfoMonth, InfoYear, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId' 
+		FROM BSADB.dbo.DJ_DateTypeInfo A WITH(NOLOCK) WHERE A.DateType = 'Date of Birth' AND A.Deleted = 0 AND EXISTS(SELECT 1 FROM #tempDJBlacklistSCO X WHERE A.EntityId = X.EntNum)
+	)*/, TempNUM AS (
+		SELECT A.spec_name, A.updated_date, A.remark, A.TaxID, A.IDENT, A.IDENTO, A.TaxIDCD, A.IDNUM, A.issBy, A.DInd, A.creUserID, A.STATE, A.ADDRESS, A.COUNTRY,
+		A.GROUPID, A.SOURCE, A.EnterFlag, A.ApprovedBy, A.ApprovedDate, A.DelUserID, A.DelDate, A.ApproveDelUserID, A.ApproveDelDate, A.creDate,
+		A.updated_date_UTC, A.ApprovedDate_UTC, A.DelDate_UTC, A.ApproveDelDate_UTC, A.creDate_UTC, A.ent_num, A.DOB
+		FROM BSADBTW..OFAC_SPEC A WHERE A.GROUPID = 27 and A.DInd = 'N'
+	)
+	INSERT INTO #tempDJBlacklistDetailsSCO (Num, EntNum, SdnName, UpdatedDate, Address)
+	SELECT E.ent_num, A.EntNum, A.SdnName, A.UpdatedDate, B.SanctionListReference
+	FROM #tempDJBlacklistSCO A 
+		LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1 
+		LEFT JOIN TempNUM E on A.EntNum = E.remark and A.SdnName = E.spec_name
 
-SELECT @TableName = 'CIP_SCENARIO_LIBRARY_BackUp_CountryDuplicate_' + CONVERT(VARCHAR, GETDATE(), 112)
-IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE name = @TableName)
-BEGIN
-	PRINT 'Backup CIP_SCENARIO_LIBRARY into ' + @TableName
+	DECLARE @MAXNo INT
+	SELECT @MAXNo=MAX(ent_num) FROM BSADBTW..OFAC_SPEC
 
-	SELECT @SQLString = 'SELECT *INTO ' + @TableName + ' FROM dbo.CIP_SCENARIO_LIBRARY'
-	EXEC(@SQLString)
-END
+	UPDATE #tempDJBlacklistDetailsSCO
+	SET @MAXNo = @MAXNo +1 , Num = @MAXNo
+	WHERE Num IS NULL
 
-SELECT @TableName = 'HRS_QuerySyntaxes_BackUp_CountryDuplicate_' + CONVERT(VARCHAR, GETDATE(), 112)
-IF NOT EXISTS (SELECT 1 FROM sys.objects WHERE name = @TableName)
-BEGIN
-	PRINT 'Backup HRS_QuerySyntaxes into ' + @TableName
+	;WITH TargetTable AS (
+		SELECT A.spec_name, A.updated_date, A.remark, A.TaxID, A.IDENT, A.IDENTO, A.TaxIDCD, A.IDNUM, A.issBy, A.DInd, A.creUserID, A.STATE, A.ADDRESS, A.COUNTRY,
+				A.GROUPID, A.SOURCE, A.EnterFlag, A.ApprovedBy, A.ApprovedDate, A.DelUserID, A.DelDate, A.ApproveDelUserID, A.ApproveDelDate, A.creDate,
+				A.updated_date_UTC, A.ApprovedDate_UTC, A.DelDate_UTC, A.ApproveDelDate_UTC, A.creDate_UTC, A.ent_num, A.DOB
+		FROM BSADBTW..OFAC_SPEC A WHERE A.GROUPID = 27
+	)
+	MERGE TargetTable T
+	USING (SELECT NUM, EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB FROM #tempDJBlacklistDetailsSCO) S
+	ON T.spec_name = S.SdnName AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+	WHEN NOT MATCHED BY TARGET THEN
+		INSERT (spec_name,updated_date,remark,TaxID,IDENT,IDENTO,TaxIDCD,IDNUM,IssBy,DInd,
+				creUserID,STATE,ADDRESS,COUNTRY,GROUPID,SOURCE,EnterFlag,ApprovedBy,ApprovedDate,DelUserID,
+				DelDate,ApproveDelUserID,ApproveDelDate,creDate,updated_date_UTC,ApprovedDate_UTC,DelDate_UTC,ApproveDelDate_UTC,creDate_UTC,
+				ent_num,DOB)
+		VALUES(S.SdnName, S.UpdatedDate,EntNum,'', S.IdentType, S.IdentNumber,'','','' ,'N', 
+				'System Admin', ISNULL(S.City,''), S.Address, S.Country, '27', 'Sanctions Control Ownership', 'D', 'System Admin', GETDATE(), NULL, 
+				NULL, NULL, NULL, GETDATE(),GETUTCDATE(),GETUTCDATE(),NULL,NULL,GETUTCDATE(),S.num,
+				S.DOB)
+	WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN 
+		UPDATE SET T.DInd = 'Y', T.DelUserID = 'System Admin', T.DelDate = GETDATE(), T.ApproveDelUserID = 'System Admin', T.ApproveDelDate = GETDATE(),
+				T.DelDate_UTC = GETUTCDATE()
+	WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN 
+		UPDATE SET T.DInd = 'N', T.updated_date = S.UpdatedDate, T.DelUserID = NULL, T.DelDate = NULL, T.ApproveDelUserID = NULL, T.ApproveDelDate = NULL,
+				T.DelDate_UTC = NULL, T.EnterFlag = 'D', T.updated_date_UTC = GETUTCDATE(),
+				T.ADDRESS = S.ADDRESS, T.STATE = ISNULL(S.City,''), T.COUNTRY = S.Country, T.IDENT = S.IdentType, T.IDNUM = S.IdentNumber, T.DOB = S.DOB
+	OUTPUT CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ent_num ELSE Deleted.ent_num END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.spec_name ELSE Deleted.spec_name END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date ELSE Deleted.updated_date END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.remark ELSE Deleted.remark END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.taxid ELSE Deleted.taxid END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENT ELSE Deleted.IDENT END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENTO ELSE Deleted.IDENTO END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.TaxIDCD ELSE Deleted.TaxIDCD END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDNUM ELSE Deleted.IDNUM END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.issby ELSE Deleted.issby END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DInd ELSE Deleted.DInd END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creUserID ELSE Deleted.creUserID END,
+		CASE WHEN $ACTION IN ('INSERT') THEN 'System Admin' ELSE 'System Admin' END,
+		CASE WHEN $ACTION IN ('INSERT') THEN GETUTCDATE() ELSE GETUTCDATE() END,		
+		CASE WHEN $ACTION = 'INSERT' OR ($ACTION = 'UPDATE' AND Deleted.DInd = 'Y' AND Inserted.DInd = 'N') THEN '01' WHEN $ACTION = 'UPDATE' AND Inserted.DInd = 'Y' THEN '03' ELSE '02' END, 
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ADDRESS ELSE Deleted.ADDRESS END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.STATE ELSE Deleted.STATE END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.COUNTRY ELSE Deleted.COUNTRY END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.GROUPID ELSE Deleted.GROUPID END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.SOURCE ELSE Deleted.SOURCE END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.EnterFlag ELSE Deleted.EnterFlag END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedBy ELSE Deleted.ApprovedBy END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate ELSE Deleted.ApprovedDate END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelUserID ELSE Deleted.DelUserID END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate ELSE Deleted.DelDate END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelUserID ELSE Deleted.ApproveDelUserID END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate ELSE Deleted.ApproveDelDate END,
+		CASE WHEN $ACTION IN ('INSERT') THEN GETUTCDATE() ELSE GETUTCDATE() END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate_UTC ELSE Deleted.ApprovedDate_UTC END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate_UTC ELSE Deleted.DelDate_UTC END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate_UTC ELSE Deleted.ApproveDelDate_UTC END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DOB ELSE Deleted.DOB END
+	INTO BSADBTW.dbo.OFAC_SPEC_LOG (ent_num, spec_name, updated_date, remark, TaxID, IDENT, IDENTO,
+		TaxIDCD, IDNUM, IssBy, DInd, creUserID, UserID, ActionDT, ActionCD, Address, State, Country, GROUPID, SOURCE, EnterFlag,
+		ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, ActionDT_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC ,
+		DOB);
 
-	SELECT @SQLString = 'SELECT *INTO ' + @TableName + ' FROM dbo.HRS_QuerySyntaxes'
-	EXEC(@SQLString)
-END
-
-
-PRINT 'Processing..'
-PRINT 'Soft delete CIP Scenario templates that not in ideal set'
-/* Soft delete CIP scenario template that not in ideal set */
-UPDATE A 
-SET A.DELETEFLAG = 'Y'
-FROM dbo.CIP_SCENARIO_LIBRARY A
-WHERE NOT EXISTS(SELECT 1 FROM #CIP_IdealSet B WHERE A.GroupId = B.GroupId AND A.TEMPLATE_ID = B.CIPTemplateId AND A.ANSWER_CD = B.Answer1 AND ISNULL(A.ANSWER2_CD, '') = ISNULL(B.Answer2, ''))
-AND A.DELETEFLAG = 'N' 
-AND A.TEMPLATE_ID IN ('lkAnyCustomerComboCtry','lkAnyCustomerComboUSTerritory',
-'lkMainBusinessCtry','lkAnyAppointerComboCtry','lkAnyBoardOfDirectorMemberComboCtry',
-'lkAnyMainClientComboCtry','lkAnyMainShareHolderComboCtry','lkAnyLegalAgentComboCtry', 'lkTaxEvasionBeneficialAddrHighTaxCountry', 'lkAnyOtherRelPartyComboCtry')
-AND EXISTS(SELECT 1 FROM dbo.CIP_SyntaxGroups C WHERE A.GroupId = C.ID AND C.Deleted = 0)
-
-
-PRINT 'Soft delete HRS scenario template that not in ideal set'
-/* Soft delete HRS scenario template that not in ideal set */
-UPDATE A
-SET A.Deleted = 'Y'
-FROM dbo.HRS_QuerySyntaxes A
-JOIN dbo.HRS_CIP_TemplateMappings B ON A.TemplateId = B.HRSTemplateId
-WHERE NOT EXISTS(SELECT 1 FROM #CIP_IdealSet C WHERE A.GroupId = C.GroupId AND A.TemplateId = C.HRSTemplateId AND A.Parameter1 = C.Answer1 AND ISNULL(A.Parameter2, '') = ISNULL(C.Answer2, ''))
-AND A.Deleted = 'N'
-AND  B.CIPQueryId IN ('lkAnyCustomerComboCtry','lkAnyCustomerComboUSTerritory',
-'lkMainBusinessCtry','lkAnyAppointerComboCtry','lkAnyBoardOfDirectorMemberComboCtry',
-'lkAnyMainClientComboCtry','lkAnyMainShareHolderComboCtry','lkAnyLegalAgentComboCtry', 'lkTaxEvasionBeneficialAddrHighTaxCountry', 'lkAnyOtherRelPartyComboCtry')
-AND EXISTS(SELECT 1 FROM dbo.CIP_SyntaxGroups C WHERE A.GroupId = C.ID AND C.Deleted = 0)
-
-
-PRINT 'Cursor: update score or create scenarios'
-
-/* Deallocate Cursor */
-IF CURSOR_STATUS('local','ScenarioCursor') >= -1
-BEGIN
-	DEALLOCATE ScenarioCursor
-END
-
-
-/*
-	Merge to CIP current scenarios
-*/
-DECLARE ScenarioCursor CURSOR LOCAL FORWARD_ONLY READ_ONLY FOR 
-SELECT GroupId, CUST_TYPE, CIPTemplateId, HRSTemplateId, Answer1, Answer2, Score FROM #CIP_IdealSet
-OPEN ScenarioCursor
-FETCH ScenarioCursor
-INTO @GroupID,
-	 @GroupCategory,
-	 @CIPTemplateId,
-	 @HRSTemplateId,
-	 @Answer1,
-	 @Answer2,
-	 @Score
-
-
-WHILE (@@FETCH_STATUS = 0)
-BEGIN	
-	 /*
-		CIP -  handle existed and new  
-	
-	 */
-	IF EXISTS(SELECT * FROM dbo.CIP_SCENARIO_LIBRARY WHERE DELETEFLAG = 'N' AND GroupId = @GroupID AND TEMPLATE_ID = @CIPTemplateId AND ANSWER_CD = @Answer1 AND ISNULL(ANSWER2_CD, '') = ISNULL(@Answer2, ''))
-	BEGIN 
-		/* Exists */
-		IF @GroupCategory = 'P'
-			UPDATE dbo.CIP_SCENARIO_LIBRARY SET INDV_SCORE = @Score, LSTUPDATEBY_INDV = 'System Admin', LSTUPDATE_DATE_INDV = GETDATE(), LSTUPDATE_DATE_INDV_UTC = GETUTCDATE()
-			WHERE DELETEFLAG = 'N' AND GroupId = @GroupID AND TEMPLATE_ID = @CIPTemplateId AND ANSWER_CD = @Answer1 AND ISNULL(ANSWER2_CD, '') = ISNULL(@Answer2, '')
-		ELSE
-			UPDATE dbo.CIP_SCENARIO_LIBRARY SET BUSS_SCORE = @Score, LSTUPDATEBY_BUSS = 'System Admin', LSTUPDATE_DATE_BUSS = GETDATE(), LSTUPDATE_DATE_BUSS_UTC = GETUTCDATE()
-			WHERE DELETEFLAG = 'N' AND GroupId = @GroupID AND TEMPLATE_ID = @CIPTemplateId AND ANSWER_CD = @Answer1 AND ISNULL(ANSWER2_CD, '') = ISNULL(@Answer2, '')
-	END
-	ELSE
-    BEGIN
-		EXEC SP_BSAGETID 'CIP', 'U', @Year, @NewQryID OUTPUT, ''
-
-		IF @GroupCategory = 'P'
-			INSERT INTO dbo.CIP_SCENARIO_LIBRARY( ID ,TEMPLATE_ID ,ANSWER_CD ,INDV_SCORE ,LSTUPDATEBY_INDV ,LSTUPDATE_DATE_INDV ,LSTUPDATE_DATE_INDV_UTC ,
-													DELETEFLAG ,IS_REPEATABLE ,DetectionLevel ,GroupId ,QryId ,ANSWER2_CD)
-			VALUES(NEWID(), @CIPTemplateId, @Answer1, @Score, 'System Admin', GETDATE(), GETUTCDATE(), 'N', 'Y', 'C', @GroupID, @NewQryID, @Answer2)
-		ELSE
-			INSERT INTO dbo.CIP_SCENARIO_LIBRARY( ID ,TEMPLATE_ID ,ANSWER_CD ,BUSS_SCORE ,LSTUPDATEBY_BUSS ,LSTUPDATE_DATE_BUSS ,LSTUPDATE_DATE_BUSS_UTC ,
-													DELETEFLAG ,IS_REPEATABLE ,DetectionLevel ,GroupId ,QryId ,ANSWER2_CD)
-			VALUES(NEWID(), @CIPTemplateId, @Answer1, @Score, 'System Admin', GETDATE(), GETUTCDATE(), 'N', 'Y', 'C', @GroupID, @NewQryID, @Answer2)
-	END
-
-	/*
-		HRS -  handle existed and new  
-	*/
-	IF EXISTS(SELECT * FROM dbo.HRS_QuerySyntaxes WHERE Deleted = 'N' AND GroupId = @GroupID AND TemplateId = @HRSTemplateId AND Parameter1 = @Answer1 AND ISNULL(Parameter2,'') = ISNULL(@Answer2, ''))
-		/* Exists */
-		UPDATE dbo.HRS_QuerySyntaxes SET Score = @Score, LastModifiedDate = GETDATE(), LastModifiedDate_UTC = GETUTCDATE(), LastModifedBy = 'System Admin'
-		WHERE Deleted = 'N' AND GroupId = @GroupID AND TemplateId = @HRSTemplateId AND Parameter1 = @Answer1 AND ISNULL(Parameter2,'') = ISNULL(@Answer2, '')
-	ELSE
-    BEGIN
-		EXEC SP_BSAGETID 'HRS', 'U', @Year, @NewQryID OUTPUT, ''
-
-		INSERT dbo.HRS_QuerySyntaxes( ID ,TemplateId ,GroupId ,Parameter1 ,Parameter2 ,Score ,CreatedDate ,CreatedDate_UTC ,LastModifiedDate ,LastModifiedDate_UTC ,CreatedBy ,Enabled ,Deleted ,Repeatable ,Category ,LastModifedBy ,qryId)
-		SELECT ISNULL((SELECT MAX(ID) FROM dbo.HRS_QuerySyntaxes), 0) + 1, @HRSTemplateId, @GroupID, @Answer1, @Answer2, @Score, GETDATE(), GETUTCDATE(), GETDATE(), GETUTCDATE(), 'System Admin', 1, 'N', 1, CASE @GroupCategory WHEN 'P' THEN 1 ELSE 2 END, 'System Admin', @NewQryID
-	END
-
-	FETCH ScenarioCursor
-	INTO @GroupID,
-		 @GroupCategory,
-		 @CIPTemplateId,
-		 @HRSTemplateId,
-		 @Answer1,
-		 @Answer2,
-		 @Score
 END
 
 
-PRINT 'Synchronize CIP current scenarios to pending tables'
-/*
-
-	Sync CIP templates from current to pending 
-
-*/
-TRUNCATE TABLE CIP_SCENARIO_LIBRARY_MakerChecker
-TRUNCATE TABLE CIP_SCENARIO_LIBRARY_Pending
-
-INSERT INTO CIP_SCENARIO_LIBRARY_Pending(ID,TEMPLATE_ID,ANSWER_CD,INDV_SCORE,BUSS_SCORE,BANK_SCORE,LOGIC,LARGEST_SINGLE_TRAN_AMT,
-			DAILY_TOT,DAILY_FREQ,MTHLY_TOT,MTHLY_FREQ,LSTUPDATEBY_INDV,LSTUPDATEBY_BUSS,LSTUPDATEBY_BANK,LSTUPDATE_DATE_INDV,
-			LSTUPDATE_DATE_BUSS,LSTUPDATE_DATE_BANK,LSTUPDATE_DATE_INDV_UTC,LSTUPDATE_DATE_BUSS_UTC,LSTUPDATE_DATE_BANK_UTC,
-			DELETEFLAG,IS_REPEATABLE,DetectionLevel,GroupId,QryId,ANSWER2_CD)
-SELECT ID,TEMPLATE_ID,ANSWER_CD,INDV_SCORE,BUSS_SCORE,BANK_SCORE,LOGIC,LARGEST_SINGLE_TRAN_AMT,
-		DAILY_TOT,DAILY_FREQ,MTHLY_TOT,MTHLY_FREQ,LSTUPDATEBY_INDV,LSTUPDATEBY_BUSS,LSTUPDATEBY_BANK,LSTUPDATE_DATE_INDV,
-		LSTUPDATE_DATE_BUSS,LSTUPDATE_DATE_BANK,LSTUPDATE_DATE_INDV_UTC,LSTUPDATE_DATE_BUSS_UTC,LSTUPDATE_DATE_BANK_UTC,
-		DELETEFLAG,IS_REPEATABLE,DetectionLevel,GroupId,QryId,ANSWER2_CD
-FROM CIP_SCENARIO_LIBRARY
-
-PRINT 'Synchronize HRS current scenarios to pending tables'
-/*
-
-	Sync HRS templates from current to pending 
-
-*/
-TRUNCATE TABLE dbo.HRS_QuerySyntaxes_CheckerMaker
-TRUNCATE TABLE dbo.HRS_QuerySyntaxes_Pending
-
-SET IDENTITY_INSERT HRS_QuerySyntaxes_Pending ON 
-
-INSERT INTO dbo.HRS_QuerySyntaxes_Pending(ID, TemplateId ,GroupId ,Parameter1 ,Parameter2 ,Parameter3 ,Parameter4 ,Parameter5 ,
-			Parameter6 ,Parameter7 ,Parameter8 ,Parameter9 ,Parameter10 ,Score ,CreatedDate ,CreatedDate_UTC ,LastModifiedDate ,
-			LastModifiedDate_UTC ,CreatedBy ,Enabled ,Deleted ,Repeatable ,Category ,LastModifedBy ,qryId)
-SELECT ID ,TemplateId ,GroupId ,Parameter1 ,Parameter2 ,Parameter3 ,Parameter4 ,Parameter5 ,
-			Parameter6 ,Parameter7 ,Parameter8 ,Parameter9 ,Parameter10 ,Score ,CreatedDate ,CreatedDate_UTC ,LastModifiedDate ,
-			LastModifiedDate_UTC ,CreatedBy ,Enabled ,Deleted ,Repeatable ,Category ,LastModifedBy ,qryId 
-FROM dbo.HRS_QuerySyntaxes
-
-SET IDENTITY_INSERT HRS_QuerySyntaxes_Pending OFF
 
 
-PRINT 'COMPLETE'
-
-
---after
-
-SELECT * FROM CIP_SCENARIO_LIBRARY WHERE DELETEFLAG = 'N' AND TEMPLATE_ID IN ('lkAnyCustomerComboCtry','lkAnyCustomerComboUSTerritory',
-'lkMainBusinessCtry','lkAnyAppointerComboCtry','lkAnyBoardOfDirectorMemberComboCtry',
-'lkAnyMainClientComboCtry','lkAnyMainShareHolderComboCtry','lkAnyLegalAgentComboCtry', 'lkTaxEvasionBeneficialAddrHighTaxCountry')
-
-SELECT A.* FROM dbo.HRS_QuerySyntaxes A
-JOIN dbo.HRS_CIP_TemplateMappings B ON A.TemplateId = B.HRSTemplateId
-WHERE DELETED = 'N' and B.CIPQueryId IN ('lkAnyCustomerComboCtry','lkAnyCustomerComboUSTerritory',
-'lkMainBusinessCtry','lkAnyAppointerComboCtry','lkAnyBoardOfDirectorMemberComboCtry',
-'lkAnyMainClientComboCtry','lkAnyMainShareHolderComboCtry','lkAnyLegalAgentComboCtry', 'lkTaxEvasionBeneficialAddrHighTaxCountry')
-
-SELECT * FROM CIP_SCENARIO_LIBRARY_MakerChecker
-SELECT * FROM CIP_SCENARIO_LIBRARY_Pending WHERE  CONVERT(VARCHAR, LSTUPDATE_DATE_INDV , 112) = CONVERT(VARCHAR, getdate() , 112) OR CONVERT(VARCHAR, LSTUPDATE_DATE_BUSS , 112) = CONVERT(VARCHAR, getdate() , 112)
-
-SELECT * FROM HRS_QuerySyntaxes_CheckerMaker
-SELECT * FROM HRS_QuerySyntaxes_Pending WHERE  CONVERT(VARCHAR, LastModifiedDate , 112) = CONVERT(VARCHAR, getdate() , 112)
-
-
-
-可以幫我看一下為什麼分數都沒變
