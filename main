@@ -1,50 +1,6 @@
-是的，可以！
-分開寫的時候，只要改用 COUNT(DISTINCT p.CustomerNo)，就能確保只算唯一的 CustomerNo，避免 JOIN 造成的重複計算。
-✅ 分開寫的正確版本（推薦這樣改）
-1. Total（總數） （這個本來就沒問題）
-WITH PURE_TS AS
-(
-    SELECT CustomerNo    
-    FROM VERIFY..BSA_SUB_CUST_FACT
-    EXCEPT
-    SELECT a.CustomerNo    
-    FROM BSA_SUB_CUST_FACT a
-    JOIN CIF_Migrate_Mapping_TEMP b ON a.cif_key = b.NEW_CIF_KEY
-)
-SELECT COUNT(*) AS Total_Count FROM PURE_TS;
-2. Same（一樣的數量）
-WITH PURE_TS AS
-(
-    SELECT CustomerNo    
-    FROM VERIFY..BSA_SUB_CUST_FACT
-    EXCEPT
-    SELECT a.CustomerNo    
-    FROM BSA_SUB_CUST_FACT a
-    JOIN CIF_Migrate_Mapping_TEMP b ON a.cif_key = b.NEW_CIF_KEY
-)
-SELECT COUNT(DISTINCT p.CustomerNo) AS Same_Count
-FROM PURE_TS p
-LEFT JOIN VERIFY..BSA_SUB_CUST_FACT v ON p.CustomerNo = v.CustomerNo
-LEFT JOIN BSA_SUB_CUST_FACT b ON p.CustomerNo = b.CustomerNo
-WHERE ISNULL(CAST(v.IsSARFiled AS INT),0) = ISNULL(CAST(b.IsSARFiled AS INT),0);
-3. Different（不一樣的數量）
-WITH PURE_TS AS
-(
-    SELECT CustomerNo    
-    FROM VERIFY..BSA_SUB_CUST_FACT
-    EXCEPT
-    SELECT a.CustomerNo    
-    FROM BSA_SUB_CUST_FACT a
-    JOIN CIF_Migrate_Mapping_TEMP b ON a.cif_key = b.NEW_CIF_KEY
-)
-SELECT COUNT(DISTINCT p.CustomerNo) AS Different_Count
-FROM PURE_TS p
-LEFT JOIN VERIFY..BSA_SUB_CUST_FACT v ON p.CustomerNo = v.CustomerNo
-LEFT JOIN BSA_SUB_CUST_FACT b ON p.CustomerNo = b.CustomerNo
-WHERE ISNULL(CAST(v.IsSARFiled AS INT),0) <> ISNULL(CAST(b.IsSARFiled AS INT),0);
-
-為什麼要加 `COUNT(DISTINCT p.CustomerNo)`？
-因為 LEFT JOIN 後如果右邊表有重複的 CustomerNo，原本的 COUNT(*) 會把同一筆客戶算很多次。 加上 DISTINCT 後，就只計算唯一的 CustomerNo，結果就會跟 Total 一致。
-
-建議： 先用上面修改後的 Same_Count 和 Different_Count 再跑一次，看看現在三個數字是否一致。
-跑完後告訴我結果，如果 Still 不一致，或你想一次看到「不一樣的那些 CustomerNo 清單」，我再幫你加上。
+SELECT ANSWER_CD, INDV_SCORE, LSTUPDATE_DATE_INDV
+FROM CIP_SCENARIO_LIBRARY
+WHERE TEMPLATE_ID = 'CIPT1200059'
+  AND ANSWER_CD IN ('ZW', 'GN', 'PG', 'GW')  -- 舉例 Zimbabwe, Guinea 等
+  AND DELETEFLAG = 'N'
+ORDER BY LSTUPDATE_DATE_INDV DESC
