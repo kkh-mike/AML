@@ -1,7 +1,1 @@
-Hi Darren,
-
-We still need your team to provide the required column names or the Excel template before we can extract the data.
-
-Also, Account Information and Related Parties Information are one-to-many relationships, so they cannot be presented properly in a single Excel sheet.
-
-Please define the required fields and the expected Excel format, including whether these should be provided in separate Excel files. Once the format is confirmed, we’ll prepare the data accordingly.
+user 那邊回復是否可優化篩選邏輯或增加第二層條件，以降低 false positive 的情況。
