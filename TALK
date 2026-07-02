@@ -1,128 +1,146 @@
-SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw
+你這些 SQL 主要是在做 Swift MX False Hit 分析，可以依照用途整理成幾個區塊，比較容易之後查詢。
 
-
-SELECT * FROM SwiftMX_BasicInformation
-SELECT * FROM SwiftMX_DetectionResult 
-SELECT * FROM SwiftMX_MessageItemDetectionSettings
-
-SELECT * FROM BlackList_TrivialWord_List where trivial_word = 'Technology'
-
-SELECT * FROM BSADB.dbo.BlackList_TrivialWord_List where trivial_word = 'Technology'
-
-
-SELECT MessageItemPath ,count(*) FROM SwiftMX_DetectionResult  Group By  MessageItemPath order by 2 desc
-SELECT * FROM SwiftMX_DetectionResult  WHERE MessageItemPath ='Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
- 
-
- 
-
- SELECT * FROM SwiftMX_DetectionResult  WHERE SdnName like 'Hong%'
-
- SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw WHERE ID = '40FC9969-9511-ED11-AE2D-0050568A471B'
-
- 
- 
-
+/*********************************************************************
+* Swift MX False Hit Analysis
+*********************************************************************/
+------------------------------------------------------------
+-- 1. 原始資料
+------------------------------------------------------------
+-- SWIFT MX 原始訊息
+SELECT *
+FROM MESSAGEDATABASE..SwiftMX_Raw;
+-- 指定 Message ID
+SELECT *
+FROM MESSAGEDATABASE..SwiftMX_Raw
+WHERE ID = '40FC9969-9511-ED11-AE2D-0050568A471B';
+------------------------------------------------------------
+-- 2. 基本資料
+------------------------------------------------------------
+SELECT *
+FROM SwiftMX_BasicInformation;
+SELECT *
+FROM SwiftMX_DetectionResult;
+SELECT *
+FROM SwiftMX_MessageItemDetectionSettings;
+------------------------------------------------------------
+-- 3. Trivial Word 查詢
+------------------------------------------------------------
+-- 本機資料庫
+SELECT *
+FROM BlackList_TrivialWord_List
+WHERE Trivial_Word = 'Technology';
+-- BSA 資料庫
+SELECT *
+FROM BSADB.dbo.BlackList_TrivialWord_List
+WHERE Trivial_Word = 'Technology';
+------------------------------------------------------------
+-- 4. False Hit 熱點分析
+------------------------------------------------------------
+-- 各 MessageItemPath 被攔截次數
+SELECT
+    MessageItemPath,
+    COUNT(*) AS HitCount
+FROM SwiftMX_DetectionResult
+GROUP BY MessageItemPath
+ORDER BY HitCount DESC;
+------------------------------------------------------------
+-- 5. 指定欄位分析
+------------------------------------------------------------
+-- 查看指定欄位所有 Detection Result
+SELECT *
+FROM SwiftMX_DetectionResult
+WHERE MessageItemPath =
+'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm';
+------------------------------------------------------------
+-- 6. 指定名單查詢
+------------------------------------------------------------
+-- 查詢 Hong 開頭的 SDN
+SELECT *
+FROM SwiftMX_DetectionResult
+WHERE SdnName LIKE 'Hong%';
+------------------------------------------------------------
+-- 7. False Hit 名單統計
+------------------------------------------------------------
+-- 最常命中的 SDN 組合
 SELECT TOP 1
-    SdnType, 
-    SdnGrpNum, 
-    SdnName, 
-    EntNum, 
-    COUNT(*) AS Cnt
-FROM 
-    SwiftMX_DetectionResult
-WHERE 
-    MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
-GROUP BY 
-    SdnType, SdnGrpNum, SdnName, EntNum
-ORDER BY 
-    Cnt DESC
-
-
-
-
-SELECT TOP 1 SdnType, COUNT(*) AS cnt
+    SdnType,
+    SdnGrpNum,
+    SdnName,
+    EntNum,
+    COUNT(*) AS HitCount
 FROM SwiftMX_DetectionResult
-WHERE MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
-GROUP BY SdnType
-ORDER BY cnt DESC
-
-
-
-SELECT TOP 1 SdnGrpNum, COUNT(*) AS cnt
-FROM SwiftMX_DetectionResult
-WHERE MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
-GROUP BY SdnGrpNum
-ORDER BY cnt DESC
-
-
-
-SELECT TOP 1 SdnName, COUNT(*) AS cnt
-FROM SwiftMX_DetectionResult
-WHERE MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
-GROUP BY SdnName
-ORDER BY cnt DESC
-
-
-SELECT TOP 1 EntNum, COUNT(*) AS cnt
-FROM SwiftMX_DetectionResult
-WHERE MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
-GROUP BY EntNum
-ORDER BY cnt DESC
-
-
-
-
-
-SELECT TOP 1 SdnType, COUNT(*) AS cnt
-FROM SwiftMX_DetectionResult
-WHERE MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
-GROUP BY SdnType
-ORDER BY cnt DESC
-
-
-
-SELECT TOP 1 SdnGrpNum, COUNT(*) AS cnt
-FROM SwiftMX_DetectionResult
-WHERE MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
-GROUP BY SdnGrpNum
-ORDER BY cnt DESC
-
-
-
-SELECT TOP 1 SdnName, COUNT(*) AS cnt
-FROM SwiftMX_DetectionResult
-WHERE MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
-GROUP BY SdnName
-ORDER BY cnt DESC
-
-
-SELECT TOP 1 EntNum, COUNT(*) AS cnt
-FROM SwiftMX_DetectionResult
-WHERE MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
-GROUP BY EntNum
-ORDER BY cnt DESC
-
-
-
-
+WHERE MessageItemPath =
+'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
+GROUP BY
+    SdnType,
+    SdnGrpNum,
+    SdnName,
+    EntNum
+ORDER BY HitCount DESC;
+------------------------------------------------------------
+-- 8. 各欄位 Top 1 統計
+------------------------------------------------------------
+-- SdnType
 SELECT TOP 1
-    SdnType, 
-    SdnGrpNum, 
-    SdnName, 
-    EntNum, 
-    COUNT(*) AS Cnt
-FROM 
-    SwiftMX_DetectionResult
-WHERE 
-    MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
-GROUP BY 
-    SdnType, SdnGrpNum, SdnName, EntNum
-ORDER BY 
-    Cnt DESC
+    SdnType,
+    COUNT(*) AS HitCount
+FROM SwiftMX_DetectionResult
+WHERE MessageItemPath =
+'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
+GROUP BY SdnType
+ORDER BY HitCount DESC;
+-- SdnGrpNum
+SELECT TOP 1
+    SdnGrpNum,
+    COUNT(*) AS HitCount
+FROM SwiftMX_DetectionResult
+WHERE MessageItemPath =
+'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
+GROUP BY SdnGrpNum
+ORDER BY HitCount DESC;
+-- SdnName
+SELECT TOP 1
+    SdnName,
+    COUNT(*) AS HitCount
+FROM SwiftMX_DetectionResult
+WHERE MessageItemPath =
+'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
+GROUP BY SdnName
+ORDER BY HitCount DESC;
+-- EntNum
+SELECT TOP 1
+    EntNum,
+    COUNT(*) AS HitCount
+FROM SwiftMX_DetectionResult
+WHERE MessageItemPath =
+'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
+GROUP BY EntNum
+ORDER BY HitCount DESC;
 
+建議之後再補幾個常用查詢
 
+False Hit 分析通常還會固定查下面幾種：
 
-因為我在做false hit 的查詢
+-- 哪一天 False Hit 最多
+SELECT
+    CONVERT(date, CreateTime) AS TxnDate,
+    COUNT(*) AS HitCount
+FROM SwiftMX_DetectionResult
+GROUP BY CONVERT(date, CreateTime)
+ORDER BY TxnDate;
+-- 哪個 Sender 最容易觸發
+SELECT
+    SenderBIC,
+    COUNT(*) AS HitCount
+FROM SwiftMX_BasicInformation
+GROUP BY SenderBIC
+ORDER BY HitCount DESC;
+-- 哪個 Receiver 最容易觸發
+SELECT
+    ReceiverBIC,
+    COUNT(*) AS HitCount
+FROM SwiftMX_BasicInformation
+GROUP BY ReceiverBIC
+ORDER BY HitCount DESC;
 
-幫我整理
+另外，你目前有很多重複的 SQL（例如 SdnType、SdnGrpNum、SdnName、EntNum 那四段，以及整組 TOP 1 查詢重複了兩次），建議保留一份即可，整體會乾淨很多，也比較適合當作日後的 False Hit Investigation SQL Script。
