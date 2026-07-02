@@ -1,22 +1,197 @@
---預估 RM 起案數量
+這支 SQL 的目的，是預估各分行（RM）每個月份需要起案的 EDD 案件數量。
+
+它的邏輯可以拆成幾個部分：
+
+1. 資料來源
+
+主要資料表：
+
+* BSA_SUB_CUST_FACT A
+    * 客戶 AML 資料
+    * HIGHRISK：是否為 High Risk 客戶
+* PB_CUSTOMER_FACT D
+    * 客戶基本資料
+    * 取得：
+        * 分行 (BRNCH_NBR)
+        * 客戶狀態 (RecordStatus)
+        * 客戶類型 (Customer_Segment)
+* EDD_ReviewSchedule B
+    * EDD Review 排程
+    * Status='P'
+        * Pending 的 Review 排程
+    * ReviewDt
+        * 客戶預計 Review 日期
+* HRS_CUST_RISK_MGMT C
+    * 已經起案的案件
+
+⸻
+
+2. CaseDate 在算什麼？
+
+CONVERT(varchar(6), DATEADD(MM,-2,B.ReviewDt),112)
+
+意思是：
+
+Review Date 往前推 2 個月
+
+例如：
+
+ReviewDt	CaseDate
+2026/09/15	202607
+2026/10/01	202608
+2026/12/20	202610
+
+代表：
+
+RM 要在 Review 前兩個月開始起案。
+
+所以這不是 Review 月份，而是預估起案月份。
+
+⸻
+
+3. 為什麼 LEFT JOIN HRS_CUST_RISK_MGMT？
+
+LEFT JOIN ...
+WHERE C.CIF_KEY IS NULL
+
+代表
+
+還沒有建立 Risk Management 案件
+
+如果已經有案件：
+
+HRS_CUST_RISK_MGMT
+STATUS <>3
+
+就不需要再算。
+
+因此：
+
+只統計
+
+尚未起案 的客戶。
+
+⸻
+
+4. 客戶條件
+
+D.RecordStatus='O'
+
+只看
+
+Open Customer
+
+⸻
+
+Customer_Segment <> 'NCR'
+
+排除
+
+NCR 客戶
+
+⸻
+
+5. 最後 Group By
+
+依照
+
+CaseDate
+HighRisk
+Branch
+
+統計數量
+
+例如最後可能長這樣：
+
+CaseDate	HighRisk	Branch	CNT
+202607	Y	001	15
+202607	N	001	32
+202607	Y	002	8
+202608	Y	001	11
+
+意思就是：
+
+2026/07
+
+分行 001
+
+High Risk 客戶有 15 件需要 RM 起案。
+
+⸻
+
+這支 SQL 的核心用途
+
+一句話來說：
+
+依據 EDD Review 排程，預估各分行在每個月份需要建立多少 EDD/Risk Management 案件（尚未起案者），並依 High Risk 與分行統計數量。
+
+也就是提供 RM 或 AML 單位做案件量預估（Workload Forecast），方便提前安排人力與作業。
+
+
+
+
+
+
+？
+
+
+
+可以，以下是配合 SQL 程式碼的說明：
 
 USE BSADBTW
+SELECT
+    -- ReviewDt 往前 2 個月，作為預估起案月份
+    CONVERT(varchar(6), DATEADD(MM,-2,B.ReviewDt),112) AS CaseDate,
+    -- 是否為 High Risk 客戶
+    A.HIGHRISK,
+    -- 客戶所屬分行
+    '_' + D.BRNCH_NBR AS BRNCH_NBR,
+    -- 統計案件數
+    COUNT(*) AS CNT
+FROM BSA_SUB_CUST_FACT A WITH (NOLOCK)
+    -- 客戶基本資料（取得分行、客戶狀態等）
+    JOIN PB_CUSTOMER_FACT D WITH (NOLOCK)
+        ON A.CIF_KEY = D.CIF_KEY
+    -- EDD Review 排程（僅取 Pending）
+    JOIN EDD_ReviewSchedule B WITH (NOLOCK)
+        ON A.CIF_KEY = B.CIFKey
+       AND B.Status = 'P'
+    -- 已建立 Risk Management 案件
+    LEFT JOIN (
+        SELECT BATCHID, CIF_KEY, STATUS
+        FROM HRS_CUST_RISK_MGMT WITH (NOLOCK)
+        WHERE STATUS <> '3'
+    ) C
+        ON A.CIF_KEY = C.CIF_KEY
+WHERE
+    -- 只統計尚未起案的客戶
+    C.CIF_KEY IS NULL
+    -- 僅統計 Open Customer
+    AND D.RecordStatus = 'O'
+    -- 排除 NCR 客戶
+    AND D.Customer_Segment <> 'NCR'
+GROUP BY
+    CONVERT(varchar(6), DATEADD(MM,-2,B.ReviewDt),112),
+    A.HIGHRISK,
+    D.BRNCH_NBR
+ORDER BY
+    CaseDate,
+    D.BRNCH_NBR;
 
-SELECT CONVERT(varchar(6), DATEADD(MM,-2,B.ReviewDt),112) CaseDate
-      ,a.HIGHRISK
-      ,'_'+D.BRNCH_NBR BRNCH_NBR
-      ,COUNT(*) CNT
-FROM   BSADBTW..BSA_SUB_CUST_FACT A WITH (NOLOCK)
-       JOIN BSADBTW..PB_CUSTOMER_FACT D WITH (NOLOCK) on a.CIF_KEY = d.CIF_KEY
-       JOIN BSADBTW..EDD_ReviewSchedule B WITH (NOLOCK) on A.CIF_KEY = B.CIFKey and B.status = 'P' --and B.ReviewDt between '2022-09-01 00:00:00.000' and '2023-08-31 23:59:59.999'
-       LEFT JOIN (SELECT A.BATCHID, A.CIF_KEY, A.STATUS
-                  FROM   BSADBTW..HRS_CUST_RISK_MGMT A WITH (NOLOCK)
-                  WHERE  A.STATUS <> '3'
-                  ) C ON A.CIF_KEY = C.CIF_KEY
-WHERE  C.CIF_KEY is null and D.RecordStatus = 'O' and D.Customer_Segment <> 'NCR'
-GROUP BY CONVERT(varchar(6), DATEADD(MM,-2,B.ReviewDt),112), a.HIGHRISK, D.BRNCH_NBR
-ORDER BY CaseDate, D.BRNCH_NBR
+SQL 邏輯重點
 
+1. EDD_ReviewSchedule
+    * Status = 'P'：只抓 Pending 的 EDD Review。
+    * DATEADD(MM,-2,B.ReviewDt)：將 Review 日期往前 2 個月，作為 RM 預估起案月份 (CaseDate)。
+2. LEFT JOIN HRS_CUST_RISK_MGMT
+    * WHERE C.CIF_KEY IS NULL：只保留尚未建立 Risk Management 案件的客戶。
+3. 客戶篩選
+    * RecordStatus = 'O'：僅統計 Open Customer。
+    * Customer_Segment <> 'NCR'：排除 NCR 客戶。
+4. 統計方式
+    * GROUP BY CaseDate + HIGHRISK + BRNCH_NBR
+    * COUNT(*)：統計每個起案月份、分行、High Risk 類別需起案的案件數。
 
+核心目的
 
-這個資料再看什麼
+依據 EDD Review 排程，將 Review 日期往前 2 個月作為 RM 起案月份，排除已起案、非 Open 與 NCR 客戶後，統計各分行每月需起案的 EDD/Risk Management 案件數，供案件量預估與人力規劃使用。
