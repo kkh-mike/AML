@@ -1,0 +1,257 @@
+-- =============================================
+-- 作者 : [請填入你的名字 / Mike]
+-- 應用系統名稱 : AML / CFT
+-- Server名稱 : AMLDB1
+-- DataBase名稱 : BSADBTW (+ BatchJobDB)
+-- 提案單號 : [請填入]
+-- =============================================
+-- 查詢名稱 : 高風險個人客戶 - 分拆獨立查詢版本
+-- 建立/整理日期 : 2026-07-03
+-- 說明 : 
+--   原本的複雜 JOIN 查詢已拆成多個獨立、較簡單的查詢，
+--   方便：
+--     1. 單獨驗證各表格資料正確性
+--     2. 快速查某一部分資料（例如只想看 PEP 或只想看 SAR）
+--     3. 建立 View 或給不同角色使用
+--     4. 除錯時逐段確認資料
+-- 注意事項 :
+--   - 每個查詢都保留原本的篩選條件（個人客戶 + 有效 + 風險分數 70~99）
+--   - 大多數查詢都已加上 WITH (NOLOCK)
+--   - ID 欄位仍加 '_' 遮罩
+-- =============================================
+
+USE BSADBTW;
+GO
+
+PRINT '==================================================';
+PRINT 'Query 1: 客戶基本資訊 + 風險等級 + 是否久未往來 + SAR 通報';
+PRINT '==================================================';
+
+SELECT 
+    B.CUST_TYPE_CDE AS '客戶類型',
+    '_' + D.CUSTOMERNO AS 'CUSTOMERNO',
+    B.CUST_NME AS '姓名1',
+    B.NATIVE_CUST_NME AS '姓名2',
+    '_' + B.BRNCH_NBR AS '所屬分行',
+    CONVERT(CHAR(8), B.OPEN_DTE, 112) AS '開戶日期',
+    ISNULL(B.NATIONALITY_1, '') AS '國籍',
+    B.RECORDSTATUS AS '客戶狀態',
+    
+    -- 風險
+    D.HIGHRISK AS '風險等級',
+    D.RISKSCORE AS '風險分數',
+    CASE WHEN D.CUSTOMERLEVEL = '2' THEN 'Y' ELSE 'N' END AS '是否久未往來(超過12個月)',
+    
+    -- SAR
+    CASE WHEN ISNULL(D.IsSARFiled, '') = 1 THEN 'Y' ELSE 'N' END AS '是否通報SAR',
+    CASE 
+        WHEN ISNULL(D.IsSARFiled, '') = 1 AND K.SARFiled_Date IS NOT NULL 
+            THEN CONVERT(CHAR(8), K.SARFiled_Date, 112)
+        WHEN ISNULL(D.IsSARFiled, '') = 1 AND K.SARFiled_Date IS NULL 
+            THEN CONVERT(CHAR(8), D.IsSARFiled_LastUpdatedDate, 112)
+        ELSE '' 
+    END AS 'FileSAR日期',
+    
+    D.IsBelievedSuspicious AS '是否為高風險客戶',
+    D.IsBelievedSuspiciousRemark AS '高風險客戶備註',
+    CASE WHEN ISNULL(D.OBUFlag, '') <> 'Y' THEN 'N' ELSE D.OBUFlag END AS 'OBUFlag'
+
+FROM BSADBTW..PB_CUSTOMER_FACT B WITH (NOLOCK)
+INNER JOIN BSADBTW..BSA_SUB_CUST_FACT D WITH (NOLOCK) 
+    ON B.CIF_KEY = D.CIF_KEY
+LEFT JOIN (
+    SELECT CustomerNo, MIN(SARFiled_Date) AS SARFiled_Date
+    FROM BatchJobDB..SARFiledList
+    GROUP BY CustomerNo
+) K ON D.IDNUM = K.CUSTOMERNO
+WHERE B.RECORDSTATUS = 'O'
+  AND B.CUST_TYPE_CDE = 'P'
+  AND D.RISKSCORE BETWEEN 70 AND 99
+ORDER BY D.RISKSCORE DESC;
+GO
+
+PRINT '==================================================';
+PRINT 'Query 2: RM 工作群組 (HRS 未結案案件)';
+PRINT '==================================================';
+
+SELECT 
+    '_' + D.CUSTOMERNO AS 'CUSTOMERNO',
+    B.CUST_NME AS '姓名1',
+    '_' + B.BRNCH_NBR AS '所屬分行',
+    A.BATCHID,
+    A.STATUS AS '案件狀態',
+    A.QUEUENAME AS 'RM_工作群組'
+
+FROM BSADBTW..PB_CUSTOMER_FACT B WITH (NOLOCK)
+INNER JOIN BSADBTW..BSA_SUB_CUST_FACT D WITH (NOLOCK) 
+    ON B.CIF_KEY = D.CIF_KEY
+LEFT JOIN (
+    SELECT A.BATCHID, A.CIF_KEY, A.STATUS, B.QUEUENAME
+    FROM BSADBTW..HRS_CUST_RISK_MGMT A WITH (NOLOCK)
+    JOIN BSADBTW..WORKFLOW_MGMT_QUEUE B WITH (NOLOCK) 
+        ON A.QUEUEID = B.QUEUEID
+    WHERE A.STATUS <> '3' 
+      AND A.SRC = 'HRS'
+) A ON B.CIF_KEY = A.CIF_KEY
+WHERE B.RECORDSTATUS = 'O'
+  AND B.CUST_TYPE_CDE = 'P'
+  AND D.RISKSCORE BETWEEN 70 AND 99
+ORDER BY A.QUEUENAME;
+GO
+
+PRINT '==================================================';
+PRINT 'Query 3: 下次審核日期 (EDD ReviewSchedule)';
+PRINT '==================================================';
+
+SELECT 
+    '_' + D.CUSTOMERNO AS 'CUSTOMERNO',
+    B.CUST_NME AS '姓名1',
+    CONVERT(CHAR(8), E.ReviewDt, 112) AS '下次審核日期',
+    D.RISKSCORE AS '風險分數'
+
+FROM BSADBTW..PB_CUSTOMER_FACT B WITH (NOLOCK)
+INNER JOIN BSADBTW..BSA_SUB_CUST_FACT D WITH (NOLOCK) 
+    ON B.CIF_KEY = D.CIF_KEY
+LEFT JOIN (
+    SELECT DISTINCT C.CIFKEY, C.ReviewDt
+    FROM BSADBTW..EDD_ReviewSchedule C WITH (NOLOCK)
+    JOIN (
+        SELECT CIFKEY, MIN(ReviewDt) AS ReviewDt
+        FROM BSADBTW..EDD_ReviewSchedule WITH (NOLOCK)
+        WHERE STATUS = 'P'
+        GROUP BY CIFKEY
+    ) C2 ON C.CIFKey = C2.CIFKey AND C.ReviewDt = C2.ReviewDt
+) E ON B.CIF_KEY = E.CIFKEY
+WHERE B.RECORDSTATUS = 'O'
+  AND B.CUST_TYPE_CDE = 'P'
+  AND D.RISKSCORE BETWEEN 70 AND 99
+ORDER BY E.ReviewDt;
+GO
+
+PRINT '==================================================';
+PRINT 'Query 4: PEP / BlackList / Negative News 詳細標記 (Bitwise 解碼)';
+PRINT '==================================================';
+
+SELECT 
+    '_' + D.CUSTOMERNO AS 'CUSTOMERNO',
+    B.CUST_NME AS '姓名1',
+    D.RISKSCORE AS '風險分數',
+    
+    -- PEP 相關 (來自 Bitwise)
+    F.PEP AS 'PEP',
+    F.ForeignPEP AS 'ForeignPEP',
+    F.LocalPEP AS 'LocalPEP',
+    F.ForeignOrgPEP AS 'ForeignOrgPEP',
+    F.ExPEP AS 'ExPEP',
+    F.CustRPIsPEP AS 'RCA (CustRPIsPEP)',
+    
+    -- 其他風險標記
+    F.BlackList AS 'BlackList',
+    F.NN AS 'NegativeNews (負面新聞)',
+    F.IsBearerShares AS 'IsBearerShares (原始值)',
+    
+    -- 公司客戶特有 (雖然本查詢限個人，仍顯示供參考)
+    CASE WHEN B.CUST_TYPE_CDE = 'N' AND ISNULL(D.IsComplexStructure,'')=1 THEN 'Y' ELSE 'N' END AS '股權複雜度'
+
+FROM BSADBTW..PB_CUSTOMER_FACT B WITH (NOLOCK)
+INNER JOIN BSADBTW..BSA_SUB_CUST_FACT D WITH (NOLOCK) 
+    ON B.CIF_KEY = D.CIF_KEY
+LEFT JOIN (
+    SELECT CIF_KEY,
+           IsBearerShares,
+           CASE WHEN PEPBitwiseCode & 1 = 1 THEN 'Y' ELSE 'N' END AS BlackList,
+           CASE WHEN PEPBitwiseCode & 2 = 2 THEN 'Y' ELSE 'N' END AS PEP,
+           CASE WHEN PEPBitwiseCode & 8 = 8 THEN 'Y' ELSE 'N' END AS ForeignPEP,
+           CASE WHEN PEPBitwiseCode & 16 = 16 THEN 'Y' ELSE 'N' END AS LocalPEP,
+           CASE WHEN PEPBitwiseCode & 32 = 32 THEN 'Y' ELSE 'N' END AS ForeignOrgPEP,
+           CASE WHEN PEPBitwiseCode & 64 = 64 THEN 'Y' ELSE 'N' END AS ExPEP,
+           CASE WHEN PEPBitwiseCode & 128 = 128 THEN 'Y' ELSE 'N' END AS CustRPIsPEP,
+           CASE WHEN PEPBitwiseCode & 4 = 4 THEN 'Y' ELSE 'N' END AS NN
+    FROM BSADBTW..BSA_SUB_CUST_FACT_Extension
+) F ON B.CIF_KEY = F.CIF_KEY
+WHERE B.RECORDSTATUS = 'O'
+  AND B.CUST_TYPE_CDE = 'P'
+  AND D.RISKSCORE BETWEEN 70 AND 99
+ORDER BY D.RISKSCORE DESC;
+GO
+
+PRINT '==================================================';
+PRINT 'Query 5: 職業 / 職稱 / 任職機構 / 行業別';
+PRINT '==================================================';
+
+SELECT 
+    '_' + D.CUSTOMERNO AS 'CUSTOMERNO',
+    B.CUST_NME AS '姓名1',
+    D.RISKSCORE AS '風險分數',
+    
+    -- 職業
+    D.OCCUP AS '職業代碼',
+    RTRIM(G.OCCUPDESC) AS '職業描述',
+    D.OCCUP + '_' + RTRIM(G.OCCUPDESC) AS '職業(合併)',
+    
+    -- 職稱
+    H.JobTitle_Code AS '職稱代碼',
+    RTRIM(H.JobTitle_Desc) AS '職稱描述',
+    CASE 
+        WHEN H.JobTitle_Code IS NOT NULL 
+        THEN H.JobTitle_Code + '_' + RTRIM(H.JobTitle_Desc) 
+        ELSE '' 
+    END AS '職稱(合併)',
+    
+    -- 任職機構
+    ISNULL(D.SERVING_ENTITY, '') AS '任職機構',
+    
+    -- 行業別
+    B.NAICS_CDE AS 'NAICS代碼',
+    RTRIM(I.Description) AS '行業別描述',
+    ISNULL(B.NAICS_CDE, '') + '_' + RTRIM(I.Description) AS '行業別(合併)'
+
+FROM BSADBTW..PB_CUSTOMER_FACT B WITH (NOLOCK)
+INNER JOIN BSADBTW..BSA_SUB_CUST_FACT D WITH (NOLOCK) 
+    ON B.CIF_KEY = D.CIF_KEY
+LEFT JOIN BSADBTW..OCCUPATION_DIM G ON D.OCCUP = G.OCCUPCD
+LEFT JOIN BSADBTW..JobTitle_DIM H ON D.JobTitle = H.ID
+LEFT JOIN BSADBTW..FINCEN_NAICS_DIM I ON B.NAICS_CDE = I.NAICS_Code
+WHERE B.RECORDSTATUS = 'O'
+  AND B.CUST_TYPE_CDE = 'P'
+  AND D.RISKSCORE BETWEEN 70 AND 99
+ORDER BY D.RISKSCORE DESC;
+GO
+
+PRINT '==================================================';
+PRINT 'Query 6: SAR 通報歷史 (獨立查詢 BatchJobDB)';
+PRINT '==================================================';
+
+-- 這個查詢可以單獨在 BatchJobDB 執行，用來看某個客戶的 SAR 通報歷史
+SELECT 
+    CustomerNo AS 'CUSTOMERNO',
+    MIN(SARFiled_Date) AS '最早SAR通報日期',
+    COUNT(*) AS 'SAR通報次數',
+    MAX(SARFiled_Date) AS '最近SAR通報日期'
+FROM BatchJobDB..SARFiledList
+WHERE CustomerNo IN (
+    -- 只列出目前高風險個人客戶的 CUSTOMERNO
+    SELECT D.IDNUM
+    FROM BSADBTW..PB_CUSTOMER_FACT B WITH (NOLOCK)
+    INNER JOIN BSADBTW..BSA_SUB_CUST_FACT D WITH (NOLOCK) 
+        ON B.CIF_KEY = D.CIF_KEY
+    WHERE B.RECORDSTATUS = 'O'
+      AND B.CUST_TYPE_CDE = 'P'
+      AND D.RISKSCORE BETWEEN 70 AND 99
+)
+GROUP BY CustomerNo
+ORDER BY MIN(SARFiled_Date);
+GO
+
+PRINT '==================================================';
+PRINT '【參考】原本的完整 JOIN 版本（已整理過）';
+PRINT '==================================================';
+PRINT '如果需要一次跑完整資料，請使用 AML_HighRisk_Personal_Customer_Query.sql';
+GO
+
+
+
+
+------
+
+
