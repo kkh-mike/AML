@@ -1,34 +1,25 @@
-這個觀念非常正確！直接給對方一個明確的範例（Mockup）通常比用文字解釋一對多（one-to-many）的結構更有效。
-從你提供的 AML 系統截圖來看，一個客戶（Customer）會同時擁有多個「帳戶資料（Account Information）」與多個「關係人資料（Related Parties Information）」。如果硬要塞在同一個工作表，會造成資料重複或對齊混亂。
-為了讓對方一目了然，你可以建立一個 Excel 活頁簿（Workbook），裡面包含 **三個分頁（Tabs）**，並用 **「客戶編號（Customer Number）」** 作為關聯鍵。
-以下是你可以直接複製、貼進 Excel 製作範例的欄位結構：
-### Sheet 1: Customer_Profile (基本資料)
-*這是主表，一個客戶只有一列資料。*
-| Customer_Number (主鍵) | Customer_Name | Nationality | ID_Number | Risk_Ranking | Risk_Score | Last_Reviewed_Date |
-|---|---|---|---|---|---|---|
-| C2026070201 | 王大同 | Taiwan | A123456789 | Low Risk | 26.00 | 2025/06/01 |
-### Sheet 2: Account_Information (帳戶資料)
-*一對多分頁。同一個客戶編號在這裡可以對應多筆帳戶。*
-| Customer_Number (關聯鍵) | Account_No | Acct_Type | Account_Description | Branch_No | Account_Status | Account_Opening_Date |
-|---|---|---|---|---|---|---|
-| **C2026070201** | 925710000103000 | SAVINGS | SAV - SAVINGS | 0925 | Open | 2022/12/07 |
-| **C2026070201** | 925720000096000 | SAVINGS | SAV - SAVINGS | 0925 | Open | 2022/12/07 |
-### Sheet 3: Related_Parties (關係人資料)
-*另一個一對多分頁。如果該客戶有關係人，用同樣的客戶編號去對應；如果像截圖中一樣沒有紀錄，就留空或填入範例。*
-| Customer_Number (關聯鍵) | Party_Type (關係人類型) | Party_Name (關係人姓名) | ID_No / Tax_ID | Relationship_Status |
-|---|---|---|---|---|
-| **C2026070201** | Related Appointee | (範例) 李四 | B987654321 | Active |
-| **C2026070201** | Related Legal Agent | No Record Found | - | - |
-## 💡 給對方的回信建議
-把 Excel 檔案建好（裡面塞 1~2 筆像上面這樣的模擬資料）並附夾帶檔案後，你可以這樣回覆 Darren：
-> Dear Darren,
-> To clarify the "one-to-many" relationship data structure we discussed, I have created an example Excel template for your reference (please see attached).
-> As shown in the attachment, we propose dividing the data into **three separate tabs** linked by the **"Customer_Number"** to avoid data redundancy and formatting issues:
->  1. **Customer_Profile**: General identification and risk assessment info.
->  2. **Account_Information**: Multiple bank accounts under the same customer.
->  3. **Related_Parties**: Appointees, legal agents, or other related parties.
-> Please review the layout and columns in the attached file. If this structure and the proposed column names work for your audit purposes, please let us know, and we will proceed with the data extraction accordingly.
-> Best regards,
-> [你的名字]
-> 
-這樣一來，他只要打開 Excel 看到那三個分頁和對應的 Customer_Number，就能立刻明白為什麼不能硬塞在同一個 Sheet，也能更具體地確認這些欄位是不是他們稽核（Internal Audit）所需要的了！
+親愛的達倫：
+
+> 為了更清楚地說明我們討論過的「一對多」關係資料結構，我建立了一個範例 Excel 範本供您參考（請參閱附件）。
+
+> 如附件所示，我們建議將資料分成**三個獨立的工作表**，並透過**“客戶編號”**進行鏈接，以避免資料冗餘和格式問題：
+
+> 1. **客戶檔案**：一般識別和風險評估資訊。
+
+> 2. **帳戶資訊**：同一客戶名下的多個銀行帳戶。
+
+> 3. **關聯方**：受託人、法定代理人或其他關聯方。
+
+> 請查看附件中的版面配置和列。如果此結構和建議的列名符合您的審計需求，請告知我們，我們將據此進行資料提取。
+
+三個分頁代表著我們會下三個檔案給您
+你們可以依照對應的客戶去看，然後我需要知道的是欄位是否都是你要的有沒有缺少?
+例如
+Customer_Profile 
+有 
+Customer_Number 	Customer_Name 	Nationality 	ID_Number 	Risk_Ranking 	Risk_Score 	Last_Reviewed_Date 
+
+是否都是你要的還是有少資料?
+
+
+以上幫我用英文表達
