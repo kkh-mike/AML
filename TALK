@@ -1,27 +1,128 @@
-Dear Darren,
+SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw
 
-To make the one to many relationship easier to understand, I have prepared a sample Excel template for your reference (please see the attached file).
 
-As shown in the attachment, we will provide the data in three separate files, which can be linked together using Customer_Number:
+SELECT * FROM SwiftMX_BasicInformation
+SELECT * FROM SwiftMX_DetectionResult 
+SELECT * FROM SwiftMX_MessageItemDetectionSettings
 
-1. Customer_Profile: General customer identification and risk assessment information.
-2. Account_Information: Multiple bank accounts belonging to the same customer.
-3. Related_Parties: Trustees, legal representatives, or other related parties.
+SELECT * FROM BlackList_TrivialWord_List where trivial_word = 'Technology'
 
-You can review the information by matching the Customer_Number across the three files.
+SELECT * FROM BSADB.dbo.BlackList_TrivialWord_List where trivial_word = 'Technology'
 
-What we need you to confirm is whether the columns in each file meet your audit requirements, or if any required fields are missing.
 
-For example, the Customer_Profile file currently includes the following columns:
+SELECT MessageItemPath ,count(*) FROM SwiftMX_DetectionResult  Group By  MessageItemPath order by 2 desc
+SELECT * FROM SwiftMX_DetectionResult  WHERE MessageItemPath ='Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
+ 
 
-* Customer_Number
-* Customer_Name
-* Nationality
-* ID_Number
-* Risk_Ranking
-* Risk_Score
-* Last_Reviewed_Date
+ 
 
-Please let us know whether these are all the fields you require, or if there are any additional columns that should be included. Once the required columns are confirmed, we will proceed with the data extraction accordingly.
+ SELECT * FROM SwiftMX_DetectionResult  WHERE SdnName like 'Hong%'
 
-Thank you.
+ SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw WHERE ID = '40FC9969-9511-ED11-AE2D-0050568A471B'
+
+ 
+ 
+
+SELECT TOP 1
+    SdnType, 
+    SdnGrpNum, 
+    SdnName, 
+    EntNum, 
+    COUNT(*) AS Cnt
+FROM 
+    SwiftMX_DetectionResult
+WHERE 
+    MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
+GROUP BY 
+    SdnType, SdnGrpNum, SdnName, EntNum
+ORDER BY 
+    Cnt DESC
+
+
+
+
+SELECT TOP 1 SdnType, COUNT(*) AS cnt
+FROM SwiftMX_DetectionResult
+WHERE MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
+GROUP BY SdnType
+ORDER BY cnt DESC
+
+
+
+SELECT TOP 1 SdnGrpNum, COUNT(*) AS cnt
+FROM SwiftMX_DetectionResult
+WHERE MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
+GROUP BY SdnGrpNum
+ORDER BY cnt DESC
+
+
+
+SELECT TOP 1 SdnName, COUNT(*) AS cnt
+FROM SwiftMX_DetectionResult
+WHERE MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
+GROUP BY SdnName
+ORDER BY cnt DESC
+
+
+SELECT TOP 1 EntNum, COUNT(*) AS cnt
+FROM SwiftMX_DetectionResult
+WHERE MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
+GROUP BY EntNum
+ORDER BY cnt DESC
+
+
+
+
+
+SELECT TOP 1 SdnType, COUNT(*) AS cnt
+FROM SwiftMX_DetectionResult
+WHERE MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
+GROUP BY SdnType
+ORDER BY cnt DESC
+
+
+
+SELECT TOP 1 SdnGrpNum, COUNT(*) AS cnt
+FROM SwiftMX_DetectionResult
+WHERE MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
+GROUP BY SdnGrpNum
+ORDER BY cnt DESC
+
+
+
+SELECT TOP 1 SdnName, COUNT(*) AS cnt
+FROM SwiftMX_DetectionResult
+WHERE MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
+GROUP BY SdnName
+ORDER BY cnt DESC
+
+
+SELECT TOP 1 EntNum, COUNT(*) AS cnt
+FROM SwiftMX_DetectionResult
+WHERE MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
+GROUP BY EntNum
+ORDER BY cnt DESC
+
+
+
+
+SELECT TOP 1
+    SdnType, 
+    SdnGrpNum, 
+    SdnName, 
+    EntNum, 
+    COUNT(*) AS Cnt
+FROM 
+    SwiftMX_DetectionResult
+WHERE 
+    MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/IntrmyAgt1/FinInstnId/Nm'
+GROUP BY 
+    SdnType, SdnGrpNum, SdnName, EntNum
+ORDER BY 
+    Cnt DESC
+
+
+
+因為我在做false hit 的查詢
+
+幫我整理
