@@ -1,0 +1,11 @@
+use BSADBTW
+
+SELECT '_'+B.CUSTOMERNO 'ID'
+,ISNULL(O.AnswerCode,'N') '告誡戶註記'
+,P.RECORDSTATUS '客戶狀態'
+,P.CUST_NME '姓名'
+,P.NATIVE_CUST_NME '中文姓名'
+FROM BSA_SUB_CUST_FACT B
+JOIN PB_CUSTOMER_FACT  P ON P.CIF_KEY = B.CIF_KEY
+JOIN (SELECT CIFKey, AnswerCode FROM PB_CustomerOptionalAnswers WHERE HRSTemplateId = '10001')O ON O.CifKey = B.CIF_KEY
+WHERE P.Employee_Ind = 'Y' AND ISNULL(AnswerCode,'') = 'Y'
