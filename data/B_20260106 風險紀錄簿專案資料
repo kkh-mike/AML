@@ -1,0 +1,38 @@
+--應用系統名稱 : AML
+--Server名稱   : AMLDB1
+--DataBase名稱 : BSADBTW
+--提案單號     : 
+--Total 筆數   : 142
+--資料內容     : 全行高風險國家交易
+------------------------------
+
+USE BSADBTW;
+
+ --HIGHRISK TRXN
+
+ SELECT '_'+A.BR_OF_TRXN BR_OF_TRXN ,C.BRNCH_DESC 分行名稱,'匯款交易' AS TRANSACTONTYPE,A.WIRE_AMTIN H_WIRE_AMTIN,A.WIRE_AMTOT H_WIRE_AMTOUT, B.WIRE_AMTIN,B.WIRE_AMTOT
+  from (
+SELECT BR_OF_TRXN,SUM(WIRE_AMTIN) WIRE_AMTIN,SUM(WIRE_AMTOT) WIRE_AMTOT FROM WIRE_TXN_FACT A WITH (NOLOCK)
+WHERE TRANDT >= '2025-07-01 00:00:00.000' AND TRANDT < '2026-01-01 00:00:00.000' AND (
+    orgbankcountrycode IN 
+('AF','AL','DZ','AO','BY','BA','BO','BG','BI','KH',
+'CM','CF','TD','KM','CI','HR','CD','GQ','ER','ET',
+'GW','HT','IQ','KE','XK','LA','LB','LY','ML','MC',
+'ME','MM','NA','NP','NI','MK','PS','RU','RS','SI',
+'SO','SS','TJ','TM','UA','VE','VN','VG','YE','ZW')
+    OR  bnfbankcountrycode IN 
+('AF','AL','DZ','AO','BY','BA','BO','BG','BI','KH',
+'CM','CF','TD','KM','CI','HR','CD','GQ','ER','ET',
+'GW','HT','IQ','KE','XK','LA','LB','LY','ML','MC',
+'ME','MM','NA','NP','NI','MK','PS','RU','RS','SI',
+'SO','SS','TJ','TM','UA','VE','VN','VG','YE','ZW')
+  )
+GROUP BY BR_OF_TRXN
+) A
+JOIN
+(
+SELECT BR_OF_TRXN,SUM(WIRE_AMTIN) WIRE_AMTIN,SUM(WIRE_AMTOT) WIRE_AMTOT FROM WIRE_TXN_FACT A WITH (NOLOCK)
+WHERE TRANDT >= '2025-07-01 00:00:00.000' AND TRANDT < '2026-01-01 00:00:00.000'
+GROUP BY BR_OF_TRXN
+) B on a.BR_OF_TRXN = b.BR_OF_TRXN
+LEFT JOIN BRANCH_DIM C on a.BR_OF_TRXN = C.BRNCH_NBR
