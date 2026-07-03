@@ -1,0 +1,264 @@
+USE BSADBTW;
+
+--drop table #Merge_Purpose
+--drop table #Acct_key
+
+--合併開戶目的
+SELECT
+    a.cif_key,
+    STUFF((
+        SELECT ',' + b.CODE
+        FROM PB_CustPurposeOfAcc b
+        WHERE b.cif_key = a.cif_key
+        FOR XML PATH('')
+    ), 1, 1, '') AS code
+INTO #Merge_Purpose
+FROM PB_CustPurposeOfAcc a
+JOIN BSA_SUB_CUST_FACT C ON A.CIF_KEY = C.CIF_KEY
+WHERE C.CUST_TYPE_CDE = 'N'
+GROUP BY a.cif_key
+
+--最近一次帳戶資訊
+SELECT * 
+into #Acct_key
+FROM (
+select groupid = ROW_NUMBER() over (partition by  A.CIF_KEY  order by A.CIF_KEY, ADTOPN DESC ),A.* from ACCT_XREF_DIM A 
+JOIN BSA_SUB_CUST_FACT B ON A.CIF_KEY = B.CIF_KEY
+WHERE B.CUST_TYPE_CDE = 'N' and a.ADTOPN <> '1900-01-01 00:00:00.000' AND APPL = 'SAV'
+) A
+where  groupid = 1
+
+
+ SELECT A.CUST_TYPE_CDE AS '客戶類型','_'+B.CUSTOMERNO AS 'CUSTOMERNO',A.CUST_NME '姓名_1',A.NATIVE_CUST_NME AS '姓名_2','_'+A.BRNCH_NBR AS '所屬分行',
+ --CONVERT(CHAR(8),C.ReviewDt,112) 下次審核日期,
+ B.HIGHRISK 風險等級,
+ D.PEP as PEP,D. ForeignPEP AS  ForeignPEP,D.ForeignOrgPEP AS ForeignOrgPEP,D.LocalPEP AS LocalPEP,D.ExPEP AS ExPEP,
+ D.BlackList AS BlackList,D.NN as NegativeNews,CONVERT(CHAR(8),A.OPEN_DTE,112) 開戶日期,A.NATIONALITY_1 國籍,
+--CASE WHEN A.CUST_TYPE_CDE ='P' THEN B.OCCUP + '_' + RTRIM(E.OCCUPDESC) ELSE '' END OCCUP,
+--CASE WHEN A.CUST_TYPE_CDE ='P' AND F.JobTitle_Code IS NOT NULL THEN F.JobTitle_Code + '_' + RTRIM(F.JobTitle_Desc) ELSE '' END '職稱', 
+--ISNULL(B.SERVING_ENTITY,'') '任職機構',
+ISNULL(A.NAICS_CDE,'')  + '_' + RTRIM(G.Description) '行業別',
+CASE WHEN A.CUST_TYPE_CDE ='N' THEN ISNULL(B.Main_Business_Country,'') ELSE '' END '主要營業國家',
+CASE WHEN A.CUST_TYPE_CDE ='N' AND  ISNULL(D.IsBearerShares,0) = 1 THEN 'Y' ELSE 'N' END '無記名股票',
+CASE WHEN A.CUST_TYPE_CDE ='N' AND  ISNULL(B.IsComplexStructure,'') = 1 THEN 'Y' ELSE 'N' END '股權複雜度',
+--CASE WHEN INVST_AMT IS NULL THEN 0 ELSE INVST_AMT END AUM,
+ISNULL(OBUFlag,'N') OBU,
+'_' + b.BizOwnershipCode 企業型態,
+ISNULL(Warn_Restrict_Account,'N') 警示戶,
+ISNULL(L.AnswerCode,'N') '告誡戶註記',
+'_' + ISNULL(M.code,'')  開戶目的,
+'_' + ISNULL(N.CODE,'')  資金來源,
+CONVERT(CHAR(8),O.ADTOPN,112) 帳戶開戶日 , O.APPL, '_' + O.ACCT_KEY ACCT_KEY
+ FROM BSADBTW..PB_CUSTOMER_FACT A  WITH (NOLOCK)  
+INNER JOIN BSADBTW..BSA_SUB_CUST_FACT B  WITH (NOLOCK)  ON A.CIF_KEY = B.CIF_KEY
+/*LEFT JOIN (
+  SELECT C.ID,C.CIFKEY,C.ReviewDt FROM BSADBTW..EDD_ReviewSchedule C WITH (NOLOCK) 
+  INNER JOIN (
+             SELECT CIFKEY,MAX(ID) ID FROM BSADBTW..EDD_ReviewSchedule WITH (NOLOCK) WHERE Status ='P'
+             GROUP BY CIFKEY) C2 ON C.CIFKey = C2.CIFKey AND C.ID = C2.ID
+ )  C ON A.CIF_KEY = C.CIFKEY*/
+ INNER JOIN (
+ SELECT CIF_KEY,IsBearerShares,
+ CASE WHEN PEPBitwiseCode & 1=1 THEN 'Y' ELSE 'N' END BlackList,
+ CASE WHEN PEPBitwiseCode & 2=2 THEN 'Y' ELSE 'N' END PEP,
+ CASE WHEN PEPBitwiseCode & 8=8 THEN 'Y' ELSE 'N' END ForeignPEP,
+ CASE WHEN PEPBitwiseCode & 16=16 THEN 'Y' ELSE 'N' END LocalPEP,
+ CASE WHEN PEPBitwiseCode & 32=32 THEN 'Y' ELSE 'N' END ForeignOrgPEP,
+ CASE WHEN PEPBitwiseCode & 64=64 THEN 'Y' ELSE 'N' END ExPEP,
+ CASE WHEN PEPBitwiseCode & 128=128 THEN 'Y' ELSE 'N' END CustRPIsPEP ,
+ CASE WHEN PEPBitwiseCode & 4=4 THEN 'Y' ELSE 'N' END NN
+ FROM BSADBTW..BSA_SUB_CUST_FACT_Extension
+ ) D ON A.CIF_KEY = D.CIF_KEY
+-- LEFT JOIN BSADBTW..OCCUPATION_DIM E ON B.OCCUP = E.OCCUPCD 
+-- LEFT JOIN BSADBTW..JobTitle_DIM F ON B.JobTitle = F.ID
+ LEFT JOIN BSADBTW..FINCEN_NAICS_DIM G ON A.NAICS_CDE = G.NAICS_Code
+--LEFT JOIN BATCHJOBDB..DXDMB_DORMANT_CUST I ON B.CustomerNo = I.CUST_ID
+--LEFT JOIN (SELECT CUST_ID,INVST_AMT FROM BATCHJOBDB..DXDMB_CUST_AUM WHERE INVST_AMT IS NOT NULL) J ON B.CUSTOMERNO = J.CUST_ID
+LEFT JOIN (
+SELECT CIF_KEY FROM  BSADBTW..CIP_CUST_RISK_MGMT 
+WHERE STATUS <>'3'
+) K ON A.CIF_KEY = K.CIF_KEY 
+LEFT JOIN (SELECT CIFKey, AnswerCode FROM PB_CustomerOptionalAnswers WHERE HRSTemplateId = '10001') L ON L.CifKey = B.CIF_KEY
+LEFT JOIN #Merge_Purpose M on M.CIF_KEY = B.CIF_KEY
+LEFT JOIN PB_SourceOfFunds N on N.CIF_KEY = B.CIF_KEY
+LEFT JOIN #Acct_key O on O.CIF_KEY = B.CIF_KEY
+WHERE A.RecordStatus='O' and a.CUST_TYPE_CDE = 'N'
+
+drop table #Merge_Purpose
+drop table #Acct_key
+
+
+use BSADBTW
+
+SELECT A.CIF_KEY 
+INTO #NCIF_KEY
+FROM BSA_SUB_CUST_FACT A 
+JOIN PB_CUSTOMER_FACT B ON A.CIF_KEY = B.CIF_KEY 
+WHERE A.CUST_TYPE_CDE = 'N' AND B.RecordStatus = 'O'
+
+--近一年客戶最新的RM batch
+DECLARE @BATCHID_10 INT = (SELECT min(id) FROM HRS_DETECTIONBATCH  WHERE DetectionType = 2 and convert (varchar,CREATEDDT,112) >= '20250601')
+
+SELECT B.*
+INTO #lastYear_RM
+FROM #NCIF_KEY A join HRS_DetectionDetails B WITH (NOLOCK) on a.CIF_KEY = b.CIFKey
+where B.batchid > @BATCHID_10
+
+SELECT CIFKEY, max(BatchId) batchid
+INTO #NewestBatchByCif
+FROM #lastYear_RM 
+group by cifkey
+
+
+--取有註記的情境
+select B.*
+INTO #RM_details
+from #NewestBatchByCif A
+join #lastYear_RM b on a.cifkey = b.cifkey and a.batchid = b.batchid
+WHERE TemplateId IN (SELECT HRSTemplateId FROM HRS_CIP_TemplateMappings WHERE HRSQueryId IN ('HRST0824','HRST1044','HRST1050','SDST0007','SDST0008','SDST0009','SDST00010')) 
+
+--開立的帳戶類型
+select distinct A.CIF_KEY , A.APPL 
+into #APPLS
+from ACCT_XREF_DIM A 
+JOIN BSA_SUB_CUST_FACT B ON A.CIF_KEY = B.CIF_KEY
+JOIN PB_CUSTOMER_FACT C ON A.CIF_KEY = C.CIF_KEY
+WHERE  C.RecordStatus = 'O' and B.CUST_TYPE_CDE = 'N' and a.ADTOPN <> '1900-01-01 00:00:00.000'
+
+SELECT
+    a.cif_key,
+    STUFF((
+        SELECT ',' + b.APPL
+        FROM #APPLS b
+        WHERE b.cif_key = a.cif_key
+        FOR XML PATH('')
+    ), 1, 1, '') AS APPL
+INTO #Merge_APPLS
+FROM #APPLS a
+GROUP BY a.cif_key
+
+SELECT
+'_'+A.CUSTOMERNO AS 'CUSTOMERNO',
+C.Parameter1 其他銀行拒絕金融業務往來,
+D.Parameter1 開三個帳號以上,
+E.Parameter1 不同OBU帳戶留存相同通訊,
+F.Parameter1 第三方支付業者,
+G.Parameter1 虛擬資產,
+H.Parameter1 P2P業者,
+I.Parameter1 保全業者,
+J.APPL 開立的帳戶類型
+FROM BSA_SUB_CUST_FACT A 
+JOIN PB_CUSTOMER_FACT B  ON A.CIF_KEY = B.CIF_KEY
+LEFT JOIN  #RM_details C on C.CIFKey = a.CIF_KEY and c.TemplateId = (SELECT HRSTemplateId FROM HRS_CIP_TemplateMappings WHERE HRSQueryId ='HRST0824' and CIP_CustomerType = 'N')
+LEFT JOIN  #RM_details D on D.CIFKey = a.CIF_KEY and D.TemplateId = (SELECT HRSTemplateId FROM HRS_CIP_TemplateMappings WHERE HRSQueryId ='HRST1044' and CIP_CustomerType = 'N')
+LEFT JOIN  #RM_details E on E.CIFKey = a.CIF_KEY and E.TemplateId = (SELECT HRSTemplateId FROM HRS_CIP_TemplateMappings WHERE HRSQueryId ='HRST1050' and CIP_CustomerType = 'N')
+LEFT JOIN  #RM_details F on F.CIFKey = a.CIF_KEY and F.TemplateId = (SELECT HRSTemplateId FROM HRS_CIP_TemplateMappings WHERE HRSQueryId ='SDST0007' and CIP_CustomerType = 'N')
+LEFT JOIN  #RM_details G on G.CIFKey = a.CIF_KEY and G.TemplateId = (SELECT HRSTemplateId FROM HRS_CIP_TemplateMappings WHERE HRSQueryId ='SDST0008' and CIP_CustomerType = 'N')
+LEFT JOIN  #RM_details H on H.CIFKey = a.CIF_KEY and H.TemplateId = (SELECT HRSTemplateId FROM HRS_CIP_TemplateMappings WHERE HRSQueryId ='SDST0009' and CIP_CustomerType = 'N')
+LEFT JOIN  #RM_details I on I.CIFKey = a.CIF_KEY and I.TemplateId = (SELECT HRSTemplateId FROM HRS_CIP_TemplateMappings WHERE HRSQueryId ='SDST00010' and CIP_CustomerType = 'N')
+LEFT JOIN  #Merge_APPLS J on J.CIF_Key = a.CIF_KEY
+WHERE b.RecordStatus = 'O' and A.CUST_TYPE_CDE = 'N'
+
+drop table #NCIF_KEY
+drop table #lastYear_RM
+drop table #NewestBatchByCif
+drop table #RM_details
+drop table #APPLS
+drop table #Merge_APPLS
+
+
+USE BSADBTW;
+
+--drop table #Merge_Purpose
+--drop table #Acct_key
+
+--合併開戶目的
+SELECT
+    a.cif_key,
+    STUFF((
+        SELECT ',' + b.CODE
+        FROM PB_CustPurposeOfAcc b
+        WHERE b.cif_key = a.cif_key
+        FOR XML PATH('')
+    ), 1, 1, '') AS code
+INTO #Merge_Purpose
+FROM PB_CustPurposeOfAcc a
+JOIN BSA_SUB_CUST_FACT C ON A.CIF_KEY = C.CIF_KEY
+WHERE C.CUST_TYPE_CDE = 'N'
+GROUP BY a.cif_key
+
+--最近一次帳戶資訊
+SELECT * 
+into #Acct_key
+FROM (
+select groupid = ROW_NUMBER() over (partition by  A.CIF_KEY  order by A.CIF_KEY, ADTOPN DESC ),A.* from ACCT_XREF_DIM A 
+JOIN BSA_SUB_CUST_FACT B ON A.CIF_KEY = B.CIF_KEY
+WHERE B.CUST_TYPE_CDE = 'N' and a.ADTOPN <> '1900-01-01 00:00:00.000' AND APPL = 'SAV'
+) A
+where  groupid = 1
+
+
+ SELECT A.CUST_TYPE_CDE AS '客戶類型','_'+B.CUSTOMERNO AS 'CUSTOMERNO',A.CUST_NME '姓名_1',A.NATIVE_CUST_NME AS '姓名_2','_'+A.BRNCH_NBR AS '所屬分行',
+ --CONVERT(CHAR(8),C.ReviewDt,112) 下次審核日期,
+ B.HIGHRISK 風險等級, B.RiskScore 風險分數,
+ D.PEP as PEP,D. ForeignPEP AS  ForeignPEP,D.ForeignOrgPEP AS ForeignOrgPEP,D.LocalPEP AS LocalPEP,D.ExPEP AS ExPEP,
+ D.BlackList AS BlackList,D.NN as NegativeNews,CONVERT(CHAR(8),A.OPEN_DTE,112) 開戶日期,A.NATIONALITY_1 國籍,
+--CASE WHEN A.CUST_TYPE_CDE ='P' THEN B.OCCUP + '_' + RTRIM(E.OCCUPDESC) ELSE '' END OCCUP,
+--CASE WHEN A.CUST_TYPE_CDE ='P' AND F.JobTitle_Code IS NOT NULL THEN F.JobTitle_Code + '_' + RTRIM(F.JobTitle_Desc) ELSE '' END '職稱', 
+--ISNULL(B.SERVING_ENTITY,'') '任職機構',
+ISNULL(A.NAICS_CDE,'')  + '_' + RTRIM(G.Description) '行業別',
+CASE WHEN A.CUST_TYPE_CDE ='N' THEN ISNULL(B.Main_Business_Country,'') ELSE '' END '主要營業國家',
+CASE WHEN A.CUST_TYPE_CDE ='N' AND  ISNULL(D.IsBearerShares,0) = 1 THEN 'Y' ELSE 'N' END '無記名股票',
+CASE WHEN A.CUST_TYPE_CDE ='N' AND  ISNULL(B.IsComplexStructure,'') = 1 THEN 'Y' ELSE 'N' END '股權複雜度',
+--CASE WHEN INVST_AMT IS NULL THEN 0 ELSE INVST_AMT END AUM,
+ISNULL(OBUFlag,'N') OBU,
+'_' + b.BizOwnershipCode 企業型態,
+ISNULL(Warn_Restrict_Account,'N') 警示戶,
+ISNULL(L.AnswerCode,'N') '告誡戶註記',
+'_' + ISNULL(M.code,'')  開戶目的,
+'_' + ISNULL(N.CODE,'')  資金來源,
+CONVERT(CHAR(8),O.ADTOPN,112) 帳戶開戶日 , O.APPL, '_' + O.ACCT_KEY ACCT_KEY,
+CASE WHEN ISNULL(B.IsSARFiled,'') = 1 THEN 'Y'
+     WHEN ISNULL(B.IsSARFiled,'') = 0 THEN 'N'
+  ELSE '' END '是否通報SAR',
+A.CUSTOMER_SEGMENT 客戶群體
+ FROM BSADBTW..PB_CUSTOMER_FACT A  WITH (NOLOCK)  
+INNER JOIN BSADBTW..BSA_SUB_CUST_FACT B  WITH (NOLOCK)  ON A.CIF_KEY = B.CIF_KEY
+/*LEFT JOIN (
+  SELECT C.ID,C.CIFKEY,C.ReviewDt FROM BSADBTW..EDD_ReviewSchedule C WITH (NOLOCK) 
+  INNER JOIN (
+             SELECT CIFKEY,MAX(ID) ID FROM BSADBTW..EDD_ReviewSchedule WITH (NOLOCK) WHERE Status ='P'
+             GROUP BY CIFKEY) C2 ON C.CIFKey = C2.CIFKey AND C.ID = C2.ID
+ )  C ON A.CIF_KEY = C.CIFKEY*/
+ INNER JOIN (
+ SELECT CIF_KEY,IsBearerShares,
+ CASE WHEN PEPBitwiseCode & 1=1 THEN 'Y' ELSE 'N' END BlackList,
+ CASE WHEN PEPBitwiseCode & 2=2 THEN 'Y' ELSE 'N' END PEP,
+ CASE WHEN PEPBitwiseCode & 8=8 THEN 'Y' ELSE 'N' END ForeignPEP,
+ CASE WHEN PEPBitwiseCode & 16=16 THEN 'Y' ELSE 'N' END LocalPEP,
+ CASE WHEN PEPBitwiseCode & 32=32 THEN 'Y' ELSE 'N' END ForeignOrgPEP,
+ CASE WHEN PEPBitwiseCode & 64=64 THEN 'Y' ELSE 'N' END ExPEP,
+ CASE WHEN PEPBitwiseCode & 128=128 THEN 'Y' ELSE 'N' END CustRPIsPEP ,
+ CASE WHEN PEPBitwiseCode & 4=4 THEN 'Y' ELSE 'N' END NN
+ FROM BSADBTW..BSA_SUB_CUST_FACT_Extension
+ ) D ON A.CIF_KEY = D.CIF_KEY
+-- LEFT JOIN BSADBTW..OCCUPATION_DIM E ON B.OCCUP = E.OCCUPCD 
+-- LEFT JOIN BSADBTW..JobTitle_DIM F ON B.JobTitle = F.ID
+ LEFT JOIN BSADBTW..FINCEN_NAICS_DIM G ON A.NAICS_CDE = G.NAICS_Code
+--LEFT JOIN BATCHJOBDB..DXDMB_DORMANT_CUST I ON B.CustomerNo = I.CUST_ID
+--LEFT JOIN (SELECT CUST_ID,INVST_AMT FROM BATCHJOBDB..DXDMB_CUST_AUM WHERE INVST_AMT IS NOT NULL) J ON B.CUSTOMERNO = J.CUST_ID
+LEFT JOIN (
+SELECT CIF_KEY FROM  BSADBTW..CIP_CUST_RISK_MGMT 
+WHERE STATUS <>'3'
+) K ON A.CIF_KEY = K.CIF_KEY 
+LEFT JOIN (SELECT CIFKey, AnswerCode FROM PB_CustomerOptionalAnswers WHERE HRSTemplateId = '10001') L ON L.CifKey = B.CIF_KEY
+LEFT JOIN #Merge_Purpose M on M.CIF_KEY = B.CIF_KEY
+LEFT JOIN PB_SourceOfFunds N on N.CIF_KEY = B.CIF_KEY
+LEFT JOIN #Acct_key O on O.CIF_KEY = B.CIF_KEY
+WHERE A.RecordStatus='O' and a.CUST_TYPE_CDE = 'N'
+
+drop table #Merge_Purpose
+drop table #Acct_key
+
+
+
