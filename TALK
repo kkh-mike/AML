@@ -1,329 +1,137 @@
-USE [BSADB]
-GO
-/****** Object:  StoredProcedure [dbo].[OFACTDB_GetSpecialList]    Script Date: 2026/7/6 上午 11:27:29 ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROCEDURE [dbo].[OFACTDB_GetSpecialList] 
-@p_SEARCH  NVARCHAR(200),  
-@p_SEARCHGRP  NVARCHAR(200),  
-@p_SEARCHFLAG CHAR(1),
-@p_EntNo  NVARCHAR(200),  
-@p_TYPE CHAR(1),
-@STARTINDEX NVARCHAR(10) = '0',
-@ROWCOUNT NVARCHAR(10) = '10',
-@SORTEXPRESSION NVARCHAR(255) = NULL,
-@TOTALROWS INT = 0 OUTPUT,
-@CultureName varchar(5) = NULL,  
-@DebugMode BIT = 0,
-@GroupType INTEGER = 0,
-@NamePropertyBitCode INTEGER = 0
-AS  
-DECLARE
-@BANKNO VARCHAR(10)        
+從這支 SP 來看，GROUPDESCR 並不是存在 OFAC_SPEC 裡面，而是透過 GROUPID 去 Join 另外一張 Table。
 
-BEGIN  
-  
- SET NOCOUNT ON  
-  SET LANGUAGE US_ENGLISH;
-  DECLARE @IdentDescCol NVARCHAR(128);  
-  DECLARE @CtryDescCol NVARCHAR(128);  
-  SET @IdentDescCol = N'IDENTDESC';  
-  SET @CtryDescCol = N'ISO_COUNTRYDESCRIPTION';
-  SELECT @BANKNO = REPLACE(DB_NAME(), 'BSADB','')
- /*  
-  if culture name is not null  
-   construct column name with postfix  
- */  
- IF @CultureName IS NOT NULL  
- BEGIN  
-  DECLARE @CULTURE_POSTFIX VARCHAR(6) --MAX IS 6 CHARACTERS  
-  SET @CULTURE_POSTFIX = '_' + REPLACE(@CULTURENAME, '-', '_')  
-  SET @IdentDescCol = N'IDENTDESC' + @CULTURE_POSTFIX;  
-  SET @CtryDescCol = N'ISO_COUNTRYDESCRIPTION' + @CULTURE_POSTFIX;  
- END  
- 
-IF COL_LENGTH ('IDENTMTHD_DIM', @IdentDescCol) IS NULL   
-  BEGIN    
-   SET @IdentDescCol = N'IDENTDESC';    
-  END      
- 
-IF COL_LENGTH ('country_dim', @CtryDescCol) IS NULL   
-  BEGIN    
-   SET @CtryDescCol = N'ISO_COUNTRYDESCRIPTION';    
-  END  
-  
- DECLARE 
- @SQL_STRING1 NVARCHAR(MAX),
- @SQL_STRING2 NVARCHAR(MAX),  
- @SQL_STRING3 NVARCHAR(MAX),
- @SQL_STRING4 NVARCHAR(MAX),
- @SQL_STRING5 NVARCHAR(MAX),
- @SQL_STRING6 NVARCHAR(MAX), 
- @SQL_STRING7 NVARCHAR(MAX),
- @SQL_STRING8 NVARCHAR(MAX),
- @SQL_STRING9 NVARCHAR(MAX) = N' ',
- @LowRiskListGroup NVARCHAR(10),
- @ENDINDEX INT,
- @VAL INT  
- 
- SELECT @LowRiskListGroup = [ID] FROM dbo.BlackList_Dim WHERE LIST = 'SPEC' 
- SET @ENDINDEX = CONVERT(INT,@STARTINDEX) + CONVERT(INT,@ROWCOUNT)
-  
-IF @SORTEXPRESSION = 'GROUPDESCR'
-	SET @SORTEXPRESSION = '(SELECT GROUPDESCR FROM dbo.lowrisklistgroups WHERE A.GROUPID = GROUPID AND LowRiskListGroup = ''' + @LowRiskListGroup + ''')'
-ELSE IF @SORTEXPRESSION = 'GROUPDESCR DESC'
-	SET @SORTEXPRESSION = '(SELECT GROUPDESCR FROM dbo.lowrisklistgroups WHERE A.GROUPID = GROUPID AND LowRiskListGroup = ''' + @LowRiskListGroup + ''') DESC '
-
-IF @p_SEARCHGRP <> ''
-	SELECT @SQL_STRING2 = N' AND A.GROUPID = ''' + @p_SEARCHGRP + ''''
-ELSE
-	SELECT @SQL_STRING2 = N' '
- 
-IF @p_SEARCHFLAG <> ''
-	SELECT @SQL_STRING3 = N' AND A.ENTERFLAG = ''' + @p_SEARCHFLAG + ''''
-ELSE
-	SELECT @SQL_STRING3 = N' '
-	
-IF @p_EntNo <> ''
-	SELECT @SQL_STRING4 = N' AND A.ENT_NUM = ''' + @p_EntNo  + ''' '
-ELSE
-	SELECT @SQL_STRING4 = N' '
-	
-IF @p_TYPE = 'A'
-	BEGIN
-		SELECT @SQL_STRING5 = N' AND DInd = ''N'' AND ISNULL(ApprovedBy,'''') <> '''' '
-		SELECT @SQL_STRING6 = N' ) SPEC_TABLE WHERE ROWID > ''' + @STARTINDEX + ''' AND ROWID <= ''' + CONVERT(VARCHAR(10),@ENDINDEX) + ''' '
-		SELECT @SQL_STRING7 = N' ORDER BY ApprovedDate DESC, ENT_NUM '
-	END
-ELSE IF @p_TYPE = 'B'	
-	BEGIN
-		SELECT @SQL_STRING5 = N' AND DInd = ''P'' AND ISNULL(ApprovedBy,'''') <> '''' '
-		SELECT @SQL_STRING6 = N' ) SPEC_TABLE WHERE ROWID > ''' + @STARTINDEX + ''' AND ROWID <= ''' + CONVERT(VARCHAR(10),@ENDINDEX) + ''' '
-		SELECT @SQL_STRING7 = N' ORDER BY DelDate DESC, ENT_NUM '
-	END
-ELSE IF @p_TYPE = 'C'
-	BEGIN
-		SELECT @SQL_STRING5 = N' AND DInd = ''N'' AND ISNULL(ApprovedBy,'''') = '''' '	
-		SELECT @SQL_STRING6 = N' ) SPEC_TABLE WHERE ROWID > ''' + @STARTINDEX + ''' AND ROWID <= ''' + CONVERT(VARCHAR(10),@ENDINDEX) + ''' '
-		SELECT @SQL_STRING7 = N' ORDER BY updated_date DESC, ENT_NUM '
-	END
-	
-IF @NamePropertyBitCode <> 0
-	BEGIN
-		IF dbo.GM_ParsePEPBitwiseCode(@NamePropertyBitCode, 'Blacklist') = 'Y'
-			SELECT @SQL_STRING9 = @SQL_STRING9 + N' AND IsBlacklist = ''Y'' '
-			
-		IF dbo.GM_ParsePEPBitwiseCode(@NamePropertyBitCode, 'NegativeNews') = 'Y'
-			SELECT @SQL_STRING9 = @SQL_STRING9 + N' AND HasNegativeNews = ''Y'' '
-			
-		IF dbo.GM_ParsePEPBitwiseCode(@NamePropertyBitCode, 'PEP') = 'Y'
-			SELECT @SQL_STRING9 = @SQL_STRING9 + N' AND IsPEP= ''Y'' '
-	END
-
-IF OBJECT_ID('tempdb..#TEMP_lowrisklistgroups') IS NOT NULL 
-	DROP TABLE #TEMP_lowrisklistgroups
+關鍵在這段：
 
 CREATE TABLE #TEMP_lowrisklistgroups
 (
-	[GROUPID] INT,
-	[SOURCE] NVARCHAR(MAX),
-	[CycleDate] NVARCHAR(1000),
-	[GROUPDESCR] NVARCHAR(500),
-	[SpecType] INT, 
-	[IsBlacklist] CHAR(2),
-	[HasNegativeNews] CHAR(2),
-	[IsPEP] CHAR(2),
-	[Individual] CHAR(2),
-	[Entity] CHAR(2),
-	[Vessel] CHAR(2),
-	[Website] CHAR(2),
-	[Other] CHAR(2)
+    GROUPID INT,
+    SOURCE NVARCHAR(MAX),
+    CycleDate NVARCHAR(1000),
+    GROUPDESCR NVARCHAR(500),
+    ...
 )
 
-INSERT INTO #TEMP_lowrisklistgroups([GROUPID], [SOURCE], [CycleDate], [GROUPDESCR], [SpecType],
-									[IsBlacklist], [HasNegativeNews], [IsPEP], [Individual], [Entity], 
-									[Vessel], [Website], [Other])
-SELECT GROUPID, [SOURCE], CycleDate, GROUPDESCR, SpecType,
-	   dbo.GM_ParsePEPBitwiseCode(NamePropertyBitCode, 'BlackList') AS IsBlacklist, 
-	   dbo.GM_ParsePEPBitwiseCode(NamePropertyBitCode, 'NegativeNews') AS HasNegativeNews,
-	   dbo.GM_ParsePEPBitwiseCode(NamePropertyBitCode, 'PEP') AS IsPEP, 
-	   dbo.GM_ParseNameCategoryBitwiseCode(NameCategoryBitCode, 'Individual') AS Individual, 
-	   dbo.GM_ParseNameCategoryBitwiseCode(NameCategoryBitCode, 'Entity') AS Entity, 
-	   dbo.GM_ParseNameCategoryBitwiseCode(NameCategoryBitCode, 'Vessel') AS Vessel, 
-	   dbo.GM_ParseNameCategoryBitwiseCode(NameCategoryBitCode, 'Website') AS Website, 
-	   dbo.GM_ParseNameCategoryBitwiseCode(NameCategoryBitCode, 'Other') AS Other 
+接著：
+
+INSERT INTO #TEMP_lowrisklistgroups
+SELECT
+    GROUPID,
+    SOURCE,
+    CycleDate,
+    GROUPDESCR,
+    ...
 FROM lowrisklistgroups WITH(NOLOCK)
 
-IF @p_SEARCH = '' 
-	BEGIN 
-		SET @SQL_STRING1 = CAST('' AS NVARCHAR(MAX)) +  N'SELECT * FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY ' + @SORTEXPRESSION + ') AS ROWID FROM 
-			  (
-			  SELECT C.Source, C.CycleDate,EnterFlag, ApprovedBy, 
-					 (SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM dbo.UserAccounts WHERE USERID = ApprovedBy AND DELETED <> ''1'') ApprovedBy_UserName, 
-					 C.GROUPDESCR,  A.GROUPID, ISNULL([SPEC_NAME],'''') + ''<BR>'' + ISNULL([SPEC_NAME_CN],'''') [SPEC_NAME],  ENT_NUM, Remark, TaxIDCD, TaxID, (CASE WHEN IDENT = ''4'' THEN ' + QUOTENAME(@IdentDescCol) + 
-					 ' + '' - '' + ISNULL(IDENTO,'''') ELSE ' + QUOTENAME(@IdentDescCol) + ' END) AS IDENTDESC, 
-					 IDNum, IssBy,ISSBY_STATE, creUserID, (SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM dbo.UserAccounts WHERE USERID = creUserID AND DELETED <> ''1'') creUser_UserName, 
-					 creUserID USERID, DelUserID, (SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM dbo.UserAccounts WHERE USERID = DelUserID AND DELETED <> ''1'') DelUser_UserName, 
-					 DelDate, ApproveDelUserID, ApproveDelDate, creDate, ApprovedDate, 
-					 [Address], [State], Country = (select ' + QUOTENAME(@CtryDescCol) + ' AS IDENTDESC from dbo.country_dim where a.country = country_dim.ISO_2_CountryCode),
-					 convert(varchar,convert(datetime,updated_date),112) updated_date, C.SpecType, '''' AS RestrictedCountryDescription, '''' AS RestrictedCountryCode, 
-					 A.DOB, A.GoodsCodes_1, C.IsBlacklist, C.HasNegativeNews, C.IsPEP, 
-					 C.Individual, C.Entity, C.Vessel, C.Website, C.Other, '''' As BankBIC
-			 FROM dbo.OFAC_SPEC A WITH (NOLOCK)
-			 INNER JOIN #TEMP_lowrisklistgroups C ON  A.GROUPID = C.GROUPID
-			 LEFT OUTER JOIN dbo.IDENTMTHD_DIM B WITH (NOLOCK) ON A.IDENT = B.IDENTCODE 
-			 WHERE (' + CAST(@GroupType AS NVARCHAR(12)) + ' = 0 OR C.SpecType = ' + CAST(@GroupType AS NVARCHAR(12)) + ') 
-				AND ([SPEC_NAME] <> '''' OR [SPEC_NAME_CN] <> '''') ' +  @SQL_STRING2 + @SQL_STRING3 + @SQL_STRING4 + @SQL_STRING5 + @SQL_STRING9 +
-			 N'UNION ALL
-			 SELECT B.Source ,B.CycleDate ,A.EnterFlag ,ApprovedBy ,
-					(SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM dbo.UserAccounts WHERE USERID = A.ApprovedBy AND DELETED <> ''1'') AS ApprovedBy_UserName ,
-					B.GROUPDESCR, A.GROUPID , '''' AS [SPEC_NAME],  A.ENT_NUM ,'''' AS Remark ,'''' AS TaxIDCD ,
-					'''' AS TaxID , '''' AS IDENTDESC ,'''' AS IDNum ,'''' AS IssBy ,'''' AS ISSBY_STATE ,A.CreatedBy AS creUserID ,
-					(SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM dbo.UserAccounts WHERE USERID = A.CreatedBy AND DELETED <> ''1'') AS creUser_UserName ,
-					A.CreatedBy AS USERID ,DeletedBy AS DelUserID ,
-					(SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM dbo.UserAccounts WHERE USERID = A.DeletedBy AND DELETED <> ''1'') AS DelUser_UserName ,
-					DeletedDate AS DelDate ,ApproveDeletedRecordBy AS ApproveDelUserID ,ApproveDeletedRecordDate AS ApproveDelDate ,
-					CreatedDate AS creDate ,ApprovedDate ,'''' AS [Address] ,'''' AS [State] ,'''' AS Country ,
-					convert(varchar,convert(datetime,UpdatedDate),112) AS updated_date, B.SpecType, A.CountryDescription as RestrictedCountryDescription, A.CountryCode AS ''RestrictedCountryCode'', 
-					'''' AS DOB, '''' AS GoodsCodes_1, B.IsBlacklist, B.HasNegativeNews, B.IsPEP, 
-					 B.Individual, B.Entity, B.Vessel, B.Website, B.Other, '''' As BankBIC			
-			 FROM dbo.OFAC_SPEC_RestrictedCountry A
-			 INNER JOIN #TEMP_lowrisklistgroups B ON A.GroupID = B.GroupID
-			 WHERE (' + CAST(@GroupType AS NVARCHAR(12)) + ' = 0 OR B.SpecType = ' + CAST(@GroupType AS NVARCHAR(12)) + ') 
-				AND 1 = 1 ' +  @SQL_STRING2 + @SQL_STRING3 + @SQL_STRING4 + @SQL_STRING5 + @SQL_STRING9 +
-			 N'UNION ALL
-			 SELECT B.Source ,B.CycleDate ,A.EnterFlag ,ApprovedBy ,
-				    (SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM dbo.UserAccounts WHERE USERID = A.ApprovedBy AND DELETED <> ''1'') AS ApprovedBy_UserName ,
-					B.GROUPDESCR, A.GROUPID, A.BANK_NAME AS [SPEC_NAME], A.ENT_NUM ,'''' AS Remark ,'''' AS TaxIDCD,
-					'''' AS TaxID , '''' AS IDENTDESC ,'''' AS IDNum ,'''' AS IssBy ,'''' AS ISSBY_STATE ,A.CreatedBy AS creUserID ,
-					(SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM dbo.UserAccounts WHERE USERID = A.CreatedBy AND DELETED <> ''1'') AS creUser_UserName ,
-					A.CreatedBy AS USERID ,DeletedBy AS DelUserID ,
-					(SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM dbo.UserAccounts WHERE USERID = A.DeletedBy AND DELETED <> ''1'') AS DelUser_UserName ,
-					DeletedDate AS DelDate ,ApproveDeletedRecordBy AS ApproveDelUserID ,ApproveDeletedRecordDate AS ApproveDelDate ,
-					CreatedDate AS creDate ,ApprovedDate ,'''' AS [Address] ,'''' AS [State] ,'''' AS Country ,
-					convert(varchar,convert(datetime,UpdatedDate),112) AS updated_date, B.SpecType, '''' as RestrictedCountryDescription,'''' AS ''RestrictedCountryCode'', 
-					'''' AS DOB, '''' AS GoodsCodes_1, B.IsBlacklist, B.HasNegativeNews, B.IsPEP, 
-					 B.Individual, B.Entity, B.Vessel, B.Website, B.Other, A.BIC As BankBIC			
-			 FROM dbo.OFAC_SPEC_BankBIC A INNER JOIN #TEMP_lowrisklistgroups B ON A.GroupID = B.GroupID
-			 WHERE (' + CAST(@GroupType AS NVARCHAR(12)) + ' = 0 OR B.SpecType = ' + CAST(@GroupType AS NVARCHAR(12)) + ') 
-				AND 1 = 1 '+  @SQL_STRING2 + @SQL_STRING3 + @SQL_STRING4 + @SQL_STRING5 + @SQL_STRING9 +
-			 ') A ' +
-			 @SQL_STRING6 + @SQL_STRING7
-			 
-		SET @SQL_STRING8 = N'SELECT @result = COUNT(1) FROM
-					 (
-					 SELECT ent_num
-					 FROM dbo.OFAC_SPEC A WITH (NOLOCK) 
-					 INNER JOIN #TEMP_lowrisklistgroups C ON  A.GROUPID = C.GROUPID
-					 LEFT OUTER JOIN dbo.IDENTMTHD_DIM B WITH (NOLOCK) ON A.IDENT = B.IDENTCODE 
-					 WHERE (' + CAST(@GroupType AS NVARCHAR(12)) + ' = 0 OR C.SpecType = ' + CAST(@GroupType AS NVARCHAR(12)) + ') 
-						AND ([SPEC_NAME] <> '''' OR [SPEC_NAME_CN] <> '''')  ' +  @SQL_STRING2 + @SQL_STRING3 + @SQL_STRING4 + @SQL_STRING5 +  @SQL_STRING9 +
-					 'UNION ALL
-					 SELECT ent_num
-					 FROM dbo.OFAC_SPEC_RestrictedCountry A
-					 INNER JOIN #TEMP_lowrisklistgroups B ON A.GroupID = B.GroupID
-					 WHERE (' + CAST(@GroupType AS NVARCHAR(12)) + ' = 0 OR B.SpecType = ' + CAST(@GroupType AS NVARCHAR(12)) + ') 
-						AND 1 = 1 ' +  @SQL_STRING2 + @SQL_STRING3 + @SQL_STRING4 + @SQL_STRING5 + @SQL_STRING9 + 
-					'UNION ALL
-					 SELECT ent_num
-					 FROM dbo.OFAC_SPEC_BankBIC A
-					 INNER JOIN #TEMP_lowrisklistgroups B ON A.GroupID = B.GroupID
-					 WHERE (' + CAST(@GroupType AS NVARCHAR(12)) + ' = 0 OR B.SpecType = ' + CAST(@GroupType AS NVARCHAR(12)) + ') 
-						AND 1 = 1 ' +  @SQL_STRING2 + @SQL_STRING3 + @SQL_STRING4 + @SQL_STRING5 + @SQL_STRING9 + ') A'
-					 
-	END
-ELSE
-	BEGIN
-		SET @SQL_STRING1 = CAST('' AS NVARCHAR(MAX)) + N'SELECT * FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY ' + @SORTEXPRESSION + ') AS ROWID FROM 
-			(SELECT C.Source, C.CycleDate,EnterFlag, ApprovedBy,
-					(SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM UserLicense' + @BANKNO + '.dbo.UserAccounts WHERE USERID = ApprovedBy AND DELETED <> ''1'') ApprovedBy_UserName, 
-					C.GROUPDESCR, A.GROUPID, ISNULL([SPEC_NAME],'''') + ''<BR>'' + ISNULL([SPEC_NAME_CN],'''') [SPEC_NAME],  ENT_NUM, Remark, TaxIDCD, TaxID,
-					(CASE WHEN IDENT = ''4'' THEN ' + QUOTENAME(@IdentDescCol) + ' + '' - '' + ISNULL(IDENTO,'''') ELSE ' + QUOTENAME(@IdentDescCol) + ' END) AS IDENTDESC ,
-					IDNum, IssBy, ISSBY_STATE,creUserID, 
-					(SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM dbo.UserAccounts WHERE USERID = creUserID AND DELETED <> ''1'') creUser_UserName, 
-					creUserID USERID, DelUserID, 
-					(SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM dbo.UserAccounts WHERE USERID = DelUserID AND DELETED <> ''1'') DelUser_UserName, 
-					DelDate, ApproveDelUserID, ApproveDelDate, creDate, ApprovedDate, [Address], [State], 
-					Country = (select ' + QUOTENAME(@CtryDescCol) + ' AS IDENTDESC from dbo.country_dim where a.country = country_dim.ISO_2_CountryCode) , 
-					convert(varchar,convert(datetime,updated_date),112) updated_date, C.SpecType, '''' as RestrictedCountryDescription, '''' AS RestrictedCountryCode, 
-					A.DOB, A.GoodsCodes_1, C.IsBlacklist, C.HasNegativeNews, C.IsPEP, 
-					 C.Individual, C.Entity, C.Vessel, C.Website, C.Other, '''' As BankBIC	
-			FROM dbo.OFAC_SPEC A WITH (NOLOCK) 
-			INNER JOIN #TEMP_lowrisklistgroups C ON  A.GROUPID = C.GROUPID
-			LEFT OUTER JOIN dbo.IDENTMTHD_DIM B WITH (NOLOCK) ON A.IDENT = B.IDENTCODE
-			WHERE (' + CAST(@GroupType AS NVARCHAR(12)) + ' = 0 OR C.SpecType = ' + CAST(@GroupType AS NVARCHAR(12)) + ') 
-				AND ([SPEC_NAME] LIKE N''%' + @p_SEARCH  + '%'' OR [SPEC_NAME_CN] LIKE N''%' + @p_SEARCH  + '%'')  AND DInd = ''N'' ' +  
-				@SQL_STRING2 + @SQL_STRING3 + @SQL_STRING4 + @SQL_STRING5 + @SQL_STRING9 +
-		  N'UNION ALL
-			SELECT B.Source ,B.CycleDate ,A.EnterFlag ,ApprovedBy ,
-					(SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM dbo.UserAccounts WHERE USERID = A.ApprovedBy AND DELETED <> ''1'') AS ApprovedBy_UserName ,
-					B.GROUPDESCR, A.GROUPID , '''' AS [SPEC_NAME],  A.ENT_NUM ,'''' AS Remark ,'''' AS TaxIDCD ,
-					'''' AS TaxID , '''' AS IDENTDESC ,'''' AS IDNum ,'''' AS IssBy ,'''' AS ISSBY_STATE ,A.CreatedBy AS creUserID ,
-					(SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM dbo.UserAccounts WHERE USERID = A.CreatedBy AND DELETED <> ''1'') AS creUser_UserName ,
-					A.CreatedBy AS USERID ,DeletedBy AS DelUserID ,
-					(SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM dbo.UserAccounts WHERE USERID = A.DeletedBy AND DELETED <> ''1'') AS DelUser_UserName ,
-					DeletedDate AS DelDate ,ApproveDeletedRecordBy AS ApproveDelUserID ,ApproveDeletedRecordDate AS ApproveDelDate ,
-					CreatedDate AS creDate ,ApprovedDate ,'''' AS [Address] ,'''' AS [State] ,'''' AS Country ,
-					convert(varchar,convert(datetime,UpdatedDate),112) AS updated_date, B.SpecType, A.CountryDescription as RestrictedCountryDescription, A.CountryCode AS ''RestrictedCountryCode'',
-					'''' AS DOB, '''' AS GoodsCodes_1, B.IsBlacklist, B.HasNegativeNews, B.IsPEP, 
-					 B.Individual, B.Entity, B.Vessel, B.Website, B.Other, '''' As BankBIC	
-			 FROM dbo.OFAC_SPEC_RestrictedCountry A
-			 INNER JOIN #TEMP_lowrisklistgroups B ON A.GroupID = B.GroupID
-			 WHERE (' + CAST(@GroupType AS NVARCHAR(12)) + ' = 0 OR B.SpecType = ' + CAST(@GroupType AS NVARCHAR(12)) + ')
-				AND CountryDescription LIKE N''%' + @p_SEARCH  + '%'' AND DInd = ''N'' ' +  
-				@SQL_STRING2 + @SQL_STRING3 + @SQL_STRING4 + @SQL_STRING5 + @SQL_STRING9 + 
-			N'UNION ALL
-			 SELECT B.Source ,B.CycleDate ,A.EnterFlag ,ApprovedBy ,
-				    (SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM dbo.UserAccounts WHERE USERID = A.ApprovedBy AND DELETED <> ''1'') AS ApprovedBy_UserName ,
-					B.GROUPDESCR, A.GROUPID, A.BANK_NAME AS [SPEC_NAME], A.ENT_NUM ,'''' AS Remark ,'''' AS TaxIDCD,
-					'''' AS TaxID , '''' AS IDENTDESC ,'''' AS IDNum ,'''' AS IssBy ,'''' AS ISSBY_STATE ,A.CreatedBy AS creUserID ,
-					(SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM dbo.UserAccounts WHERE USERID = A.CreatedBy AND DELETED <> ''1'') AS creUser_UserName ,
-					A.CreatedBy AS USERID ,DeletedBy AS DelUserID ,
-					(SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM dbo.UserAccounts WHERE USERID = A.DeletedBy AND DELETED <> ''1'') AS DelUser_UserName ,
-					DeletedDate AS DelDate ,ApproveDeletedRecordBy AS ApproveDelUserID ,ApproveDeletedRecordDate AS ApproveDelDate ,
-					CreatedDate AS creDate ,ApprovedDate ,'''' AS [Address] ,'''' AS [State] ,'''' AS Country ,
-					convert(varchar,convert(datetime,UpdatedDate),112) AS updated_date, B.SpecType, '''' as RestrictedCountryDescription,'''' AS ''RestrictedCountryCode'', 
-					'''' AS DOB, '''' AS GoodsCodes_1, B.IsBlacklist, B.HasNegativeNews, B.IsPEP, 
-					 B.Individual, B.Entity, B.Vessel, B.Website, B.Other, A.BIC As BankBIC			
-			 FROM dbo.OFAC_SPEC_BankBIC A INNER JOIN #TEMP_lowrisklistgroups B ON A.GroupID = B.GroupID
-			 WHERE (' + CAST(@GroupType AS NVARCHAR(12)) + ' = 0 OR B.SpecType = ' + CAST(@GroupType AS NVARCHAR(12)) + ') 
-				AND 1 = 1 '+  @SQL_STRING2 + @SQL_STRING3 + @SQL_STRING4 + @SQL_STRING5 + @SQL_STRING9 +
-			') A ' + 
-			@SQL_STRING6 + @SQL_STRING7
-			
-		SET @SQL_STRING8 = N'SELECT @result = COUNT(1) FROM (
-					 SELECT ent_num 
-					 FROM dbo.OFAC_SPEC A WITH (NOLOCK) 
-					 INNER JOIN #TEMP_lowrisklistgroups C ON  A.GROUPID = C.GROUPID
-					 LEFT OUTER JOIN dbo.IDENTMTHD_DIM B WITH (NOLOCK) ON A.IDENT = B.IDENTCODE
-					 WHERE (' + CAST(@GroupType AS NVARCHAR(12)) + ' = 0 OR C.SpecType = ' + CAST(@GroupType AS NVARCHAR(12)) + ')
-						AND ([SPEC_NAME] LIKE N''%' + @p_SEARCH  + '%'' OR [SPEC_NAME_CN] LIKE N''%' + @p_SEARCH  + '%'')  AND DInd = ''N'' ' +  
-						@SQL_STRING2 + @SQL_STRING3 + @SQL_STRING4 + @SQL_STRING5 + @SQL_STRING9 + ' 
-					 UNION ALL
-					 SELECT ent_num 
-					 FROM dbo.OFAC_SPEC_RestrictedCountry A WITH (NOLOCK) 
-					 INNER JOIN #TEMP_lowrisklistgroups B ON A.GroupID = B.GroupID
-					 WHERE (' + CAST(@GroupType AS NVARCHAR(12)) + ' = 0 OR B.SpecType = ' + CAST(@GroupType AS NVARCHAR(12)) + ') 
-						AND CountryDescription LIKE N''%' + @p_SEARCH  + '%'' AND DInd = ''N'' ' +  
-						@SQL_STRING2 + @SQL_STRING3 + @SQL_STRING4 + @SQL_STRING5 + @SQL_STRING9 + 'UNION ALL
-					 SELECT ent_num
-					 FROM dbo.OFAC_SPEC_BankBIC A
-					 INNER JOIN #TEMP_lowrisklistgroups B ON A.GroupID = B.GroupID
-					 WHERE (' + CAST(@GroupType AS NVARCHAR(12)) + ' = 0 OR B.SpecType = ' + CAST(@GroupType AS NVARCHAR(12)) + ') 
-						AND 1 = 1 ' +  @SQL_STRING2 + @SQL_STRING3 + @SQL_STRING4 + @SQL_STRING5 + @SQL_STRING9 + ') A'
-	END 
+也就是說：
 
-EXEC sp_executesql @SQL_STRING8, N'@result int output' , @VAL OUTPUT  
-SET @TOTALROWS = @VAL
+lowrisklistgroups
+      │
+      │ GROUPID
+      ▼
+#TEMP_lowrisklistgroups
+      │
+      │ GROUPID
+      ▼
+OFAC_SPEC
+OFAC_SPEC_RestrictedCountry
+OFAC_SPEC_BankBIC
 
-IF @DebugMode = 1  
-  PRINT @SQL_STRING1
-  
-EXEC sp_executesql @SQL_STRING1 
-   
-END  
+後面查詢都是：
 
+INNER JOIN #TEMP_lowrisklistgroups C
+    ON A.GROUPID = C.GROUPID
 
-我要找 group description 可能在哪個table 因為它可能是 GROUPID 去串某個TABLE
+然後直接取
+
+C.GROUPDESCR
+
+⸻
+
+所以 GROUPDESCR 真正來源就是
+
+lowrisklistgroups
+
+你可以直接查：
+
+SELECT *
+FROM lowrisklistgroups
+
+或
+
+SELECT
+    GROUPID,
+    GROUPDESCR
+FROM lowrisklistgroups
+ORDER BY GROUPID;
+
+⸻
+
+另外 SP 裡也有兩個地方可以證明
+
+1. 排序
+
+IF @SORTEXPRESSION = 'GROUPDESCR'
+    SET @SORTEXPRESSION =
+    '(SELECT GROUPDESCR
+      FROM dbo.lowrisklistgroups
+      WHERE A.GROUPID = GROUPID
+        AND LowRiskListGroup = ''' + @LowRiskListGroup + ''')'
+
+代表它就是去 lowrisklistgroups 找 GROUPDESCR。
+
+⸻
+
+2. 一開始建立 Temp Table
+
+INSERT INTO #TEMP_lowrisklistgroups
+SELECT
+    GROUPID,
+    SOURCE,
+    CycleDate,
+    GROUPDESCR,
+    ...
+FROM lowrisklistgroups
+
+之後所有查詢都是拿 Temp Table 的 GROUPDESCR。
+
+⸻
+
+GROUPID 是哪裡來？
+
+例如：
+
+SELECT
+    A.ENT_NUM,
+    A.GROUPID,
+    C.GROUPDESCR
+FROM OFAC_SPEC A
+INNER JOIN lowrisklistgroups C
+    ON A.GROUPID = C.GROUPID;
+
+另外兩張也是一樣：
+
+OFAC_SPEC_RestrictedCountry.GROUPID
+            │
+            ▼
+lowrisklistgroups.GROUPID
+OFAC_SPEC_BankBIC.GROUPID
+            │
+            ▼
+lowrisklistgroups.GROUPID
+
+⸻
+
+建議你快速確認
+
+如果你要找某個 GROUPID 對應的 Description，可以直接：
+
+SELECT
+    GROUPID,
+    GROUPDESCR,
+    SOURCE,
+    CycleDate,
+    SpecType
+FROM lowrisklistgroups
+WHERE GROUPID = 123;   -- 換成你的 GROUPID
+
+結論： 這支 SP 中的 GROUPDESCR 是來自 lowrisklistgroups table，並透過 GROUPID 與 OFAC_SPEC、OFAC_SPEC_RestrictedCountry、OFAC_SPEC_BankBIC 進行關聯。
