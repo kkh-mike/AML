@@ -1,13 +1,13 @@
-The Labuan branch’s complete customer list includes the following information: (Account opening date, previous KYC/AML Inspection, AML Risk rating, etc.) [Please use Excel Format supply].
-Data period: 1 Jun 2025 to 30 Jun 2026
+你可以把簽核意見寫得明確一點，重點是要求對方提供所需欄位清單（Data Dictionary），避免我們無法正確撈資料。
 
+可參考：
 
-他寫的不清楚
+請申請單位補充完整資料需求，並提供欲匯出的 Excel 欄位清單（Field List），例如 Customer Number、Customer Name、Account Number、Account Opening Date、Previous KYC/AML Inspection Date、AML Risk Rating 等。
 
-我需要請他列出
-需要什麼資料
-例如 Customer_Name  、Customer_Number  等等
-需要什麼要列出來說清楚
-需要一個清單
+目前需求僅以 “etc.” 表示，欄位內容不明確，無法確認實際需提供之資料範圍，請逐一列明所有所需欄位，以利後續資料擷取及避免交付內容落差。
 
-我的簽核意見要怎麼寫
+如果想再精簡一點，也可以寫：
+
+請補充 Excel 所需欄位清單（Field List），目前需求以 “etc.” 表示，無法確認完整資料內容。請明確列出所有需提供之欄位（如 Customer Number、Customer Name、Account Opening Date、AML Risk Rating 等），以利資料擷取。
+
+這種寫法在簽核意見中比較正式，也能清楚表達是因為需求不明確，而不是系統無法提供。
