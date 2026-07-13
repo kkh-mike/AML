@@ -1,23 +1,41 @@
-我問
-Dear Darren,
-Thank you for your explanation.
-Just to confirm, is my understanding correct?
+不是全部都撈，他補充了一個例外條件。
 
-1. Open date ≤ 2026/06/30 
-2. The account is still open as at 30 Jun 2026.
-3. Open date ≥  2021/01/01
+你們目前確認的是：
 
-Thank you.
+1. Open Date ≥ 2021/01/01
+2. Open Date ≤ 2026/06/30
+3. 截至 2026/06/30 還是 Open → 要包含
 
+他又補充：
 
-他說
-Dear 
-That is correct.
-Just another thing, an account that is open from 2021 but closed from 1 Jun 2025 to 30 June 2026 must be shown too, if any.
-Hence, we need an account closure date or account status: closed
-Thank you.
-Regards
-Darren
+an account that is open from 2021 but closed from 1 Jun 2025 to 30 June 2026 must be shown too
 
+意思是：
 
-那這樣不就是直接撈資料 20260630以前所有的開或關的全撈?
+如果帳戶是在 2021 年以後開戶，但在 2025/06/01 到 2026/06/30 之間關戶，也要包含。
+
+所以真正的條件比較像：
+
+Open Date
+
+* 2021/01/01 ≤ Open Date ≤ 2026/06/30
+
+而且符合以下任一：
+
+* ✅ 2026/06/30 時仍然是 Open
+* ✅ Close Date 在 2025/06/01 ~ 2026/06/30 之間
+
+例如：
+
+Open Date	Close Date	要不要
+2021/03	NULL (Open)	✅
+2022/05	2025/08	✅
+2024/10	2026/06/15	✅
+2021/02	2024/12	❌（關戶太早）
+2023/06	2027/01	✅（2026/06/30 還是 Open）
+
+所以不是「2026/06/30 前所有開過又關過的都撈」。
+
+如果一個帳戶在 2024 年就已經關戶，它不在稽核期間內關戶，依 Darren 的說法，就不用包含。
+
+換句話說，Darren 要的是 截至 2026/06/30 仍存在的帳戶，再加上 稽核期間（2025/06/01 ~ 2026/06/30）內關戶的帳戶。這樣就能涵蓋稽核期間結束時仍開啟的帳戶，以及稽核期間內已結束的帳戶。
