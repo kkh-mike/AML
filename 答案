@@ -1,17 +1,19 @@
-你可以寫得簡潔一點，方便對方直接回答 Yes 或 No。
+可以，用更簡單、自然的英文：
 
 Dear Darren,
 
-Thank you for your clarification.
+Thank you for your explanation.
 
-Just to confirm my understanding, should we select customers based on the following criteria?
+Just to confirm, is my understanding correct?
 
-1. The account opening date is on or before 30 Jun 2026.
-2. The account was still open as at 30 Jun 2026.
-3. The account opening date is on or after 1 Jan 2021.
-
-Is my understanding correct?
+1. Open date is on or before 30 Jun 2026.
+2. The account is still open as at 30 Jun 2026.
+3. Open date is on or after 1 Jan 2021.
 
 Thank you.
 
-這封信的重點是請他確認你的理解，而不是重新解釋需求，通常對方回覆會很直接。
+1. Open Date ≤ 2026/06/30
+2. 截至 2026/06/30 帳戶仍然是 Open（沒有關戶）
+3. 如果他說 since 2021，那 Open Date 應該還要 ≥ 2021/01/01
+
+用這條件幫我寫一封信問他對不對
