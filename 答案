@@ -1,19 +1,23 @@
-可以，用更簡單、自然的英文：
-
+我問
 Dear Darren,
-
 Thank you for your explanation.
-
 Just to confirm, is my understanding correct?
 
-1. Open date is on or before 30 Jun 2026.
+1. Open date ≤ 2026/06/30 
 2. The account is still open as at 30 Jun 2026.
-3. Open date is on or after 1 Jan 2021.
+3. Open date ≥  2021/01/01
 
 Thank you.
 
-1. Open Date ≤ 2026/06/30
-2. 截至 2026/06/30 帳戶仍然是 Open（沒有關戶）
-3. 如果他說 since 2021，那 Open Date 應該還要 ≥ 2021/01/01
 
-用這條件幫我寫一封信問他對不對
+他說
+Dear 
+That is correct.
+Just another thing, an account that is open from 2021 but closed from 1 Jun 2025 to 30 June 2026 must be shown too, if any.
+Hence, we need an account closure date or account status: closed
+Thank you.
+Regards
+Darren
+
+
+那這樣不就是直接撈資料 20260630以前所有的開或關的全撈?
