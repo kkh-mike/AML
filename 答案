@@ -1,13 +1,51 @@
-我問他
-Dear Darren
-Could you please confirm whether the data period from 1 Jun 2025 to 30 Jun 2026 refers to the account opening date?
+他的意思其實是在澄清，你理解成「開戶日期區間」是不對的。
 
-Thank you
+他回覆的重點可以拆成兩部分：
 
-他回我
-This is the audit period from 1 Jun 2025 to 30 Jun 2026, meaning the auditor will only check the data within this period. This may not be relevant for you.
+This is the audit period from 1 Jun 2025 to 30 Jun 2026, meaning the auditor will only check the data within this period.
 
-The information would be just as at the end of Jun 2026. This means that all the branch customers since 2021 should be captured by the end of Jun 2026, if the accounts are still open. 
+意思是：
 
+2025/6/1 到 2026/6/30 是稽核（audit）的期間，不是開戶日期的範圍。
+稽核人員只會檢查這段期間內的資料。
 
-所以他在說什麼?
+接著他又說：
+
+The information would be just as at the end of Jun 2026.
+
+這句的 as at the end of Jun 2026 是會計很常用的說法，意思是：
+
+資料是以 2026 年 6 月底的狀態為準（snapshot）。
+
+也就是說，他們看的是 2026/6/30 當下的資料。
+
+最後一句：
+
+This means that all the branch customers since 2021 should be captured by the end of Jun 2026, if the accounts are still open.
+
+意思是：
+
+因此，只要是 2021 年以來開戶，而且截至 2026 年 6 月底帳戶仍然是開啟（still open）的客戶，都應該包含在資料裡。
+
+換句話說：
+
+* ❌ 不是只抓 2025/6/1 ~ 2026/6/30 開戶的人。
+* ✅ 而是抓 截至 2026/6/30 仍存在的帳戶。
+* 所以 2021、2022、2023、2024、2025 開戶都可能會在資料裡，只要 到 2026/6/30 還沒關戶。
+
+⸻
+
+用一個例子：
+
+開戶日期	2026/6/30 是否仍開戶	是否會在資料中
+2021/03	✅ 是	✅ 會
+2023/08	✅ 是	✅ 會
+2025/12	✅ 是	✅ 會
+2020/05	✅ 是	他說 since 2021，所以理論上不包含
+2022/10	❌ 已關戶	❌ 不會
+
+所以，他最後那句 “This may not be relevant for you.” 的意思大概是：
+
+「你剛剛問的『是不是 account opening date』這件事，其實跟這次需要提供的資料沒有直接關係。」
+
+如果你的工作是在撈 SQL，我也可以幫你推論他真正希望你撈的是哪一批資料。
