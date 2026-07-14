@@ -1,92 +1,19 @@
-改完後的驗測建議（重點整理）
-你這次改動主要是新增了「Sanctions IDs 分離到 GROUPID=29」的邏輯。這段新程式碼有明顯 Bug，建議先修正再進行驗測。
-1. 先修正明顯 Bug（非常重要）
-在新增的 Sanctions IDs 區塊，發現以下錯誤：
-Bug 1：INSERT 時 remark 欄位少寫 S.
--- 錯誤（目前寫法）
-VALUES(S.IdentificationNumber, S.UpdatedDate, EntNum, '', ...)
+[‎2026/‎7/‎14 下午 02:35]  
+HI 貫軒，我待會會再轉一封跟海外AML系統有關的事情給你們，主要是AU、JP、MY分行目前針對通匯行的RM案件都是採人工起案，他們想改成系統批次自動起案
+你再幫忙看一下需要怎麼進行調整，確定可行的話他們再開單出來~
+感謝
+ 
 
--- 正確寫法
-VALUES(S.IdentificationNumber, S.UpdatedDate, S.EntNum, '', ...)
-這會導致 remark 欄位寫入錯誤的值，進而影響後續 MERGE 的比對，務必先改掉。
-其他建議改善點：
-	•	#tempDJBlacklistDetailsSID 同時有 IdentificationNumber 和 IdentNumber，容易搞混，建議統一命名。
-	•	TempNUM 裡把 ADDRESS 欄位 REPLACE 後當 IdentificationType 用，邏輯不太合理，容易造成比對錯誤。
+Dear 貫軒，
 
-2. 建議驗測流程（分階段執行）
-階段一：基本執行測試（先確保不會噴錯）
--- 1. 先備份（強烈建議）
-SELECT * INTO OFAC_SPEC_BAK_20260706 FROM BSADBJP.dbo.OFAC_SPEC
-SELECT * INTO OFAC_SPEC_LOG_BAK_20260706 FROM BSADBJP.dbo.OFAC_SPEC_LOG
+法作詢問有關AU、JP、MY三間分行之存同/通匯行RM起案方式問題。
 
--- 2. 執行預存程序
-EXEC dbo.GLSPEC_SyncDJToInternalList @GroupId = 1   -- 替換成你要測試的 GroupId
-執行後檢查：
-	•	是否有錯誤訊息？
-	•	Temp Table 是否有正確 DROP？
-階段二：Sanctions IDs（GROUPID=29）正確性驗測
--- 檢查 GROUPID=29 目前筆數
-SELECT COUNT(*) AS Target29_Cnt 
-FROM BSADBJP.dbo.OFAC_SPEC 
-WHERE GROUPID = 29 AND DInd = 'N'
+目前上述海外分行存同/通匯行RM起案方式是採人工起案，如果要比照總行改採批次自動起案，請幫我們確認一下是否可行、相關調整該如何進行，以利需求單位撰寫提案單。
 
--- 檢查最新 Log 的 ActionCD 分布（01=新增、02=更新、03=軟刪除）
-SELECT ActionCD, COUNT(*) AS Cnt
-FROM BSADBJP.dbo.OFAC_SPEC_LOG
-WHERE ActionDT >= DATEADD(MINUTE, -10, GETUTCDATE())
-GROUP BY ActionCD
-ORDER BY ActionCD
-階段三：資料比對驗測（最重要）
--- 抽樣驗證某個 EntNum 的資料是否正確搬過去
-DECLARE @TestEntNum INT = 12345678   -- 請換成實際有 Sanctions ID 的 EntNum
+另請同步幫我們確認一下，假設分行對於存同/通匯行之審查週期與一般客戶不同，此部分是否會有問題？
 
--- 來源端（Dow Jones）
-SELECT EntityId, IdentificationType, IdentificationNumber, UpdatedDate
-FROM BSADB.dbo.DJ_IdentificationTypeInfo 
-WHERE EntityId = @TestEntNum AND Deleted = 0
-  AND IdentificationType IN ('Passport No.', 'LEI', 'National ID', ...)
+如有需業務端先行釐清之處，也再請跟我們說一聲，感謝！
 
--- 目標端（GROUPID=29）
-SELECT ent_num, spec_name, remark, IDENT, IDNUM, ADDRESS, DInd, updated_date, IdentificationType
-FROM BSADBJP.dbo.OFAC_SPEC 
-WHERE GROUPID = 29 
-  AND remark = CAST(@TestEntNum AS VARCHAR(100))
-  AND DInd = 'N'
-階段四：MERGE 三大情境測試
-測試情境
-作法
-預期結果
-新增
-在 Dow Jones 新增一筆符合條件的 Identification
-GROUPID=29 應新增，Log ActionCD = ‘01’
-更新
-修改該筆的 UpdatedDate
-目標 updated_date 更新，DInd 維持 ‘N’
-軟刪除
-把 Dow Jones 該筆 Identification 設為 Deleted=1
-目標 DInd 變 ‘Y’，Log ActionCD = ‘03’
-階段五：重複執行測試（Idempotent）
--- 重複執行兩次，檢查筆數是否維持不變
-EXEC dbo.GLSPEC_SyncDJToInternalList @GroupId = 1
-EXEC dbo.GLSPEC_SyncDJToInternalList @GroupId = 1
 
-SELECT COUNT(*) FROM BSADBJP.dbo.OFAC_SPEC WHERE GROUPID = 29 AND DInd = 'N'
 
-3. 完整驗測檢查清單
-	•	SP 執行無錯誤
-	•	GROUPID=29 只納入指定的 IdentificationType（Passport、LEI、National ID 等）
-	•	remark 欄位正確寫入 EntNum（這是剛剛那個 Bug 要驗證的重點）
-	•	新增 / 更新 / 軟刪除三種情境的 Log ActionCD 正確
-	•	重複執行不會產生重複資料
-	•	不會影響原本的 @GroupId sync 和 Japanese Finance (GROUPID=5) 的資料
-	•	大量資料時效能可接受（建議在 UAT 環境跑計時）
-
-4. 建議後續改善方向
-	1	把三個流程拆開：目前一個 SP 裡面塞了三個完全不同的 sync 邏輯（一般 GroupId、日本 Finance、Sanctions IDs），耦合度太高，建議拆成三個獨立的預存程序。
-	2	建立測試資料集（Fixture），方便以後回歸測試。
-	3	把要 sync 的 IdentificationType 清單做成參數或設定表，不要寫死在 SP 裡。
-
-需要我幫你：
-	•	直接給修正後的完整新版 SP？
-	•	還是幫你寫更完整的驗測 Script（包含自動比對來源與目標）？
-告訴我你要哪一種，我再幫你準備。
+幫我整理一下
