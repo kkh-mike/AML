@@ -2,3 +2,103 @@
 把 Dow Jones（DJ） 的制裁名單同步到內部兩個不同的制裁名單表格：
 主要黑名單 → BSADB.dbo.OFAC_GLSpec（根據傳入的 @GroupId）
 制裁控制與所有權名單（SCO）→ BSADBTW.dbo.OFAC_SPEC（固定寫到 Group 27）
+
+
+
+
+**是的，你理解得沒錯。**
+
+這支 Stored Procedure **主要就靠傳入 `@GroupId` 這個變數**來決定它的行為和影響範圍。
+
+---
+
+### **為什麼需要 @GroupId 這個參數？**
+
+`OFAC_GLSpec` 這張表並不是只有一組制裁名單，而是**可能存放多組不同的名單**（例如：不同客戶、不同國家、不同類型的制裁名單）。
+
+所以設計上讓你**傳入不同的 `@GroupId`**，就可以把 Dow Jones 的資料同步到**指定的那一組名單**裡。
+
+簡單來說：
+
+| 傳入的 @GroupId | 這次同步會影響的資料範圍 |
+|------------------|--------------------------|
+| 例如 10         | 只會對 `OFAC_GLSpec` 裡 `GROUPID = 10` 的資料做新增、更新、軟刪除 |
+| 例如 25         | 只會對 `GROUPID = 25` 的資料做處理 |
+| 沒傳（或傳錯）   | 會報錯（因為這個參數沒有預設值） |
+
+---
+
+### **@GroupId 具體影響了哪些地方？**
+
+在程式碼裡，`@GroupId` 主要用在以下兩個關鍵位置：
+
+1. **決定 TargetTable 的範圍**（影響 MERGE 的比對範圍）
+   ```sql
+   WHERE A.GROUPID = @GroupId
+   ```
+
+2. **新增資料時寫入的 GROUPID**
+   ```sql
+   INSERT ... VALUES(..., @GroupId, ...)
+   ```
+
+3. **軟刪除的範圍**
+   ```sql
+   WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN
+       UPDATE SET T.DInd = 'Y' ...
+   ```
+   → 只會把 **該 GroupId 底下**、來源已經不存在的資料設為軟刪除。
+
+**結論**：`@GroupId` 就像是「指定要同步到哪一個抽屜」，不會影響到其他 Group 的資料。
+
+---
+
+### **實際怎麼呼叫這支 SP？**
+
+最基本的呼叫方式如下：
+
+```sql
+-- 範例：把 DJ 名單同步到 GROUPID = 10
+EXEC [dbo].[GLSPEC_SyncDJToInternalList] @GroupId = 10;
+```
+
+你也可以這樣寫（比較清楚）：
+
+```sql
+DECLARE @GID BIGINT = 10;
+
+EXEC [dbo].[GLSPEC_SyncDJToInternalList] 
+    @GroupId = @GID;
+```
+
+---
+
+### **這支 SP 通常怎麼被使用？**
+
+根據你們 AML/CFT 系統的常見做法，通常有以下幾種呼叫情境：
+
+| 呼叫方式 | 說明 | 常見情境 |
+|----------|------|----------|
+| **SQL Agent Job** | 設定每天/每小時自動執行 | 最常見的定期同步 |
+| **後台程式呼叫** | .NET / Java 程式定時呼叫 | 需要傳入不同 GroupId 的情況 |
+| **手動執行** | DBA 或開發人員手動執行 | 第一次建立名單、或補同步資料時 |
+| **多個 Job 分別執行** | 不同 GroupId 分開排成不同的 Job | 避免單一 Job 執行時間太長 |
+
+---
+
+### **小提醒**
+
+- **SCO 的部分是寫死的**：這支 SP 裡面第二段（Sanctions Control & Ownership）的資料，是**固定寫到 `BSADBTW` 的 GroupId = 27**，不受你傳入的 `@GroupId` 影響。
+- 如果你們有好幾個不同的制裁名單 Group，通常會**為每個 Group 建立一個對應的 SQL Agent Job**，各自傳入不同的 `@GroupId`。
+
+---
+
+**想再深入了解哪一部分？**
+
+請告訴我：
+
+1. 你是想知道「怎麼排 SQL Agent Job 來定期執行」嗎？
+2. 還是想看「從 .NET / Python 怎麼呼叫這支 SP」？
+3. 或者想了解不同 GroupId 在你們系統裡分別代表什麼意義？
+
+告訴我你的需求，我再針對性說明。
