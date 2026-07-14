@@ -1,0 +1,4 @@
+這支 SP 的名稱是 GLSPEC_SyncDJToInternalList，主要功能是：
+把 Dow Jones（DJ） 的制裁名單同步到內部兩個不同的制裁名單表格：
+主要黑名單 → BSADB.dbo.OFAC_GLSpec（根據傳入的 @GroupId）
+制裁控制與所有權名單（SCO）→ BSADBTW.dbo.OFAC_SPEC（固定寫到 Group 27）
