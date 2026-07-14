@@ -1,65 +1,74 @@
-可以，英文可以寫得簡單又清楚：
+Dear 貫軒，
 
-Dear Darren,
+港行近期接受HKIA查核，有一項查核意見可能會涉及到系統面，如下：
+(i)	Sections 3.11.5, 5.4.1, 5.5.1, 5.5.2, 5.5.3, 12.5.4 of the Company’s Anti-Money Laundering and Counter-Terrorist Financing Policy (version 8) ("AML Policy") stipulates that the Company's Customer Data Check ("客戶資料檢核") module of the Company's AML name checking system is used to perform batch screening on existing customer database to identify PEPs and sanctioned parties . However, it seems that this batch screening process only covers existing customers, beneficial owners, connected parties and PPTAs etc., who maintains a banking relationship with the Company.    It should be noted that even the customers closed their bank accounts with the Company, the Company is still acting as an insurance agency of those customers who still have inforce insurance policy (ies).  
 
-Thank you for your clarification.
+In this connection, the Company should ensure that, even the customers closed the bank account, where an insurance policy remains in force, the relevant policyholders and beneficial owners remain subject to ongoing sanctions and PEP screening.  The ongoing sanctions screening should extend to connected parties and PPTAs of insurance customers using a risk- based approach for the Company’s insurance agency business.
 
-My understanding is:
+主要是說港行純保代客戶沒有掃CDC批次（因為無帳戶資料，系統中非有效客戶），之前我有聽說港行的改善方向是把有效保單建在帳戶層，你們後續可能會再收到相關討論，先同步消息給你們參考。
 
-* 2021/01/01 ≤ Open Date ≤ 2026/06/30
+謝謝
 
-And either:
+幫我說明一下 要幹嘛
+2026-07-14 11:17:48
 
-* The account was still open as at 30 Jun 2026, or
-* The Close Date was between 1 Jun 2025 and 30 Jun 2026.
+AI
 
-Is this correct?
+可以，這段查核意見的重點，其實是在講：
 
-Thank you.
+港行目前的 AML／制裁／PEP 定期批次掃描，可能只涵蓋「仍有銀行帳戶關係」的對象；但對於「銀行帳戶已結清、仍有有效保單」的純保代客戶，系統上可能沒有持續納入 screening。這會被認為有 AML/CFT 控管缺口。
 
-Regards,
-3333333
+而且這個方向跟監理近年的關注是一致的：監理機關特別在意 in-force business 是否有被持續監控，不只看新戶，也看既有與持續有效的保單客戶；若 AML 系統或演算法導致部分 PEP 或相關對象未被持續辨識，會被視為系統與控制缺失。另外，香港監理框架本來就要求金融機構依 AMLO 建立足夠的 AML/CFT 系統與控制。
+
+我幫你拆成「這件事在說什麼」跟「接下來要幹嘛」。
+
+項目	說明
+查核意見核心	只要客戶和公司之間還存在保險代理業務關係，例如保單仍有效，即使銀行帳戶已關閉，也不能因為不再是「有效銀行客戶」就退出 ongoing sanctions / PEP screening 範圍。
+目前疑似缺口	CDC 批次掃描的母體，是建立在「銀行帳戶有效戶」上；因此純保代、無帳戶但有有效保單的客戶，可能沒被帶入。
+監理期待	有效保單客戶仍屬 ongoing relationship，應持續做 sanctions screening；PEP screening 也應持續涵蓋。對 connected parties、PPTAs，則採 risk-based approach 納入。
+為何會被挑出	因為業務實質上關係還在，不能只用「是否有帳戶」判斷是否需要 AML 監控。
+系統面暗示	要調整 screening population 的來源，不可以只吃 account-based active customer，還要把 in-force insurance population 帶進來。
+你可以把它理解成一句話：
+
+不是看「有沒有帳戶」，而是看「有沒有仍在持續中的業務關係」。
+
+接下來要幹嘛，通常可分成 4 塊：
+
+面向	要做的事	目的
+1. 先確認缺口	盤點目前 CDC 批次掃描名單的母體來源，確認是否真的只抓有效帳戶客戶，是否漏掉已銷戶但仍有有效保單的保代客戶、其 BO、connected parties、PPTAs。	先證明 gap 在哪裡、影響範圍多大。
+2. 定義補掃對象	明確定義哪些人要納入：保單持有人、實益擁有人、connected parties、PPTAs，以及哪些採全量、哪些採風險基礎。	建立 remediation scope。
+3. 系統改造	若目前 CDC 是帳戶層驅動，就要評估把「有效保單」建在帳戶層，或建立另一個可餵入 CDC 的客戶主檔／關係標記，讓純保代客戶也能進入 batch screening。	讓系統可持續、自動化運作，而不是人工補。
+4. 制度與文件更新	更新 AML Policy、作業程序、screening coverage 說明、例外處理、補掃機制、MIS / oversight。必要時補做歷史回溯掃描。	回應查核，不只修系統，也補治理。
+比較實務地說，你們後面大概會被拉去討論這幾個問題：
+
+問題	實務上要回答的內容
+哪些客戶目前沒被掃到？	已結清帳戶但保單仍有效的客戶清單、人數、保單數、是否含 BO / connected parties / PPTAs。
+現行系統為何漏掉？	因 CDC 批次母體綁定 active banking relationship，未把 insurance in-force relationship 視為 active screening population。
+要怎麼補？	短期人工或半自動補掃；中長期把 in-force policy relationship 餵入系統。
+補掃範圍多大？	現況存量 + 未來新增 + 狀態變更機制。
+何時完成？	通常要有 target timeline：gap assessment、臨時控制、系統上線、回溯補掃、政策修訂。
+誰負責？	業務、作業、IT、AML compliance、資料治理要分工清楚。
+如果你是要對內快速說明，我建議你可以這樣講：
+
+對內白話版	內容
+這個意見在講什麼	港行現在的 AML 批次掃描可能只看有帳戶的客戶，沒把「已銷戶但仍有有效保單」的純保代客戶納入。
+為什麼有問題	因為這些人雖然沒帳戶，但保險代理關係還在，仍屬 ongoing business relationship，理論上要持續做 sanctions / PEP screening。
+需要做什麼	先確認漏網名單與規模，再補上短期控管，後續從系統面把有效保單客戶納入 CDC 或其他 batch screening 母體。
+可能的系統方向	將有效保單關係建到帳戶層或建立可被 CDC 識別的 active relationship 標記，讓純保代客戶也會被批次掃描。
+若你要更進一步，這封信其實隱含兩個整改要求：
+
+整改要求	說明
+Ongoing sanctions / PEP screening 要覆蓋純保代 in-force 客戶	不能因帳戶關閉就停止。
+Screening universe 要從「帳戶導向」改成「關係導向」	只要仍有有效保單，就應留在持續監控範圍。
+我也幫你整理成你接下來可以追問內部的清單：
+
+建議追問	目的
+CDC 現在的 batch population 是從哪個 table / status 抓？	確認技術根因。
+純保代且保單有效的客戶，在主系統有沒有唯一客戶編號？	確認能不能餵入 screening。
+BO / connected parties / PPTAs 在保代資料裡是否有結構化欄位？	確認延伸對象能不能一起掃。
+短期能否先做一次性回溯補掃？	先止血。
+長期是否要把有效保單建在帳戶層？	對應你提到的改善方向。
+policy / SOP / control evidence 是否要同步修？	因查核不只看系統，也看制度與證據。
 
 
-
-不是全部都撈，他補充了一個例外條件。
-
-你們目前確認的是：
-
-1. Open Date ≥ 2021/01/01
-2. Open Date ≤ 2026/06/30
-3. 截至 2026/06/30 還是 Open → 要包含
-
-他又補充：
-
-an account that is open from 2021 but closed from 1 Jun 2025 to 30 June 2026 must be shown too
-
-意思是：
-
-如果帳戶是在 2021 年以後開戶，但在 2025/06/01 到 2026/06/30 之間關戶，也要包含。
-
-所以真正的條件比較像：
-
-Open Date
-
-* 2021/01/01 ≤ Open Date ≤ 2026/06/30
-
-而且符合以下任一：
-
-* ✅ 2026/06/30 時仍然是 Open
-* ✅ Close Date 在 2025/06/01 ~ 2026/06/30 之間
-
-例如：
-
-Open Date	Close Date	要不要
-2021/03	NULL (Open)	✅
-2022/05	2025/08	✅
-2024/10	2026/06/15	✅
-2021/02	2024/12	❌（關戶太早）
-2023/06	2027/01	✅（2026/06/30 還是 Open）
-
-所以不是「2026/06/30 前所有開過又關過的都撈」。
-
-如果一個帳戶在 2024 年就已經關戶，它不在稽核期間內關戶，依 Darren 的說法，就不用包含。
-
-換句話說，Darren 要的是 截至 2026/06/30 仍存在的帳戶，再加上 稽核期間（2025/06/01 ~ 2026/06/30）內關戶的帳戶。這樣就能涵蓋稽核期間結束時仍開啟的帳戶，以及稽核期間內已結束的帳戶。
+幫我整理重點
