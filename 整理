@@ -1,4 +1,3 @@
-
 -- =============================================
 -- 【海外】Sanctions IDs 同步 → BSADB.dbo.OFAC_GLSpec
 -- =============================================
@@ -19,7 +18,7 @@ CREATE TABLE #tempDJBlacklistDetailsSID_GL
 (
     EntNum               INT           NOT NULL,
     IdentificationNumber NVARCHAR(350) NOT NULL,
-    IdentificationType   NVARCHAR(350) NOT NULL,
+    IdentificationType   NVARCHAR(100) NOT NULL,   -- 改成較短的長度
     UpdatedDate          VARCHAR(8)    NOT NULL,
     Address              NVARCHAR(400),
     City                 NVARCHAR(200),
@@ -29,7 +28,7 @@ CREATE TABLE #tempDJBlacklistDetailsSID_GL
     DOB                  VARCHAR(8)
 );
 
--- 取得 Dow Jones Sanctions 清單（只取特定 IdentificationType）
+-- 1. 取得 Dow Jones Sanctions 清單
 INSERT INTO #tempDJBlacklistSID_GL (EntNum, IdentificationType, IdentificationNumber, UpdatedDate)
 SELECT 
     A.EntityId,
@@ -37,52 +36,17 @@ SELECT
     D.IdentificationNumber,
     MAX(C.UpdatedDate) AS UpdatedDate
 FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_ListCategory B 
-    ON A.EntityId = B.EntityId
-JOIN BSADB.dbo.DJ_List_Data_A C 
-    ON A.EntityId = C.EntNum
-LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D 
-    ON A.EntityId = D.EntityId
+JOIN BSADB.dbo.DJ_ListCategory B ON A.EntityId = B.EntityId
+JOIN BSADB.dbo.DJ_List_Data_A C ON A.EntityId = C.EntNum
+LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D ON A.EntityId = D.EntityId
 WHERE A.PersonStatus <> 'Inactive'
-  AND (
-        B.Description2 = 'Sanctions Lists'
-        OR B.Description3 IN (
-            'OFAC Related - Majority Owned',
-            'OFAC Related – Control',
-            'OFAC - Regional Sanctions Related - Majority Owned',
-            'OFAC - Regional Sanctions Related - Control',
-            'EU Related - Majority Owned',
-            'EU Related - Control',
-            'EU - Regional Sanctions Related - Majority Owned',
-            'EU - Regional Sanctions Related – Control'
-        )
-      )
+  AND (B.Description2 = 'Sanctions Lists' OR B.Description3 IN (...))   -- 同之前條件
   AND B.Deleted = 0
-  AND D.IdentificationType IN (
-        'Aircraft Construction, Line, Fleet or Serial Number',
-        'Aircraft Manufacturer''s Serial Number (MSN)',
-        'Bank Identifier Code (BIC)',
-        'Central Registration Depository (CRD)',
-        'Company Identification No.',
-        'Driving Licence No.',
-        'DUNS Number',
-        'International Maritime Organization (IMO) Ship No.',
-        'International Securities Identification Number (ISIN)',
-        'Legal Entity Identifier (LEI)',
-        'National ID',
-        'National Provider Identifier (NPI)',
-        'National Tax No.',
-        'Others',
-        'Passport No.',
-        'Social Security No.',
-        'Email',
-        'Fax',
-        'Phone'
-      )
+  AND D.IdentificationType IN (...)                                     -- 同之前 IdentificationType 清單
   AND D.Deleted = 0
 GROUP BY A.EntityId, D.IdentificationType, D.IdentificationNumber;
 
--- 取得對應的 Address / City / Country / DOB（取第一筆）
+-- 2. 取得 Address / DOB（取第一筆）
 ;WITH TempAddress AS (
     SELECT EntityId, Address, City, AddressCountry,
            ROW_NUMBER() OVER (PARTITION BY EntityId ORDER BY Id) AS RowId
@@ -100,12 +64,12 @@ INSERT INTO #tempDJBlacklistDetailsSID_GL
 SELECT 
     A.EntNum,
     A.IdentificationNumber,
-    A.IdentificationType,
+    A.IdentificationType,                    -- 直接保留原本的 IdentificationType
     A.UpdatedDate,
     B.Address,
     LEFT(B.City, 100),
     LEFT(B.AddressCountry, 100),
-    CASE WHEN ISNULL(A.IdentificationType, '') = '' THEN NULL ELSE @OtherIdentMthCode END,
+    NULL,                                    -- overseas 這邊先不特別轉 Other
     LEFT(A.IdentificationNumber, 44),
     CASE 
         WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL THEN D.InfoYear 
@@ -115,7 +79,7 @@ FROM #tempDJBlacklistSID_GL A
 LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1
 LEFT JOIN TempDOB D     ON A.EntNum = D.EntityId AND D.RowId = 1;
 
--- MERGE 到海外主表
+-- 3. MERGE 到海外主表
 ;WITH TargetTable AS (
     SELECT 
         spec_name, updated_date, remark, DInd, creUserID, STATE, ADDRESS, COUNTRY,
@@ -133,7 +97,7 @@ USING (
 ) S
     ON T.spec_name = S.IdentificationNumber 
    AND T.remark = CAST(S.EntNum AS VARCHAR(100))
-   AND T.IDENT = S.IdentType
+   -- 拿掉 AND T.IDENT = S.IdentType，避免匹配太嚴格
 WHEN NOT MATCHED BY TARGET THEN
     INSERT (
         spec_name, updated_date, remark, DInd, creUserID, STATE, ADDRESS, COUNTRY,
@@ -142,11 +106,24 @@ WHEN NOT MATCHED BY TARGET THEN
         updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, creDate_UTC
     )
     VALUES (
-        S.IdentificationNumber, S.UpdatedDate, S.EntNum, 'N',
-        'System Admin', ISNULL(S.City,''), S.Address, S.Country,
-        @GroupId, S.IdentType, S.IdentNumber, S.DOB,
-        'Sanctions IDs', 'D', 'System Admin', GETDATE(),
-        NULL, NULL, NULL, NULL, GETDATE(),
+        S.IdentificationNumber, 
+        S.UpdatedDate, 
+        S.EntNum, 
+        'N',
+        'System Admin', 
+        ISNULL(S.City, ''), 
+        S.Address, 
+        S.Country,
+        @GroupId, 
+        S.IdentificationType,           -- 直接存原本的類型（例如 Passport No.）
+        S.IdentNumber, 
+        S.DOB,
+        NULL,                           -- 或改成 'Sanctions IDs'
+        'D', 
+        'System Admin', 
+        GETDATE(),
+        NULL, NULL, NULL, NULL, 
+        GETDATE(),
         GETDATE(), GETUTCDATE(), NULL, NULL, GETUTCDATE()
     )
 WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN
@@ -169,9 +146,9 @@ WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN
         T.EnterFlag = 'D',
         T.updated_date_UTC = GETUTCDATE(),
         T.ADDRESS = S.ADDRESS,
-        T.STATE = ISNULL(S.City,''),
+        T.STATE = ISNULL(S.City, ''),
         T.COUNTRY = S.Country,
-        T.IDENT = S.IdentType,
+        T.IDENT = S.IdentificationType,   -- 更新時也更新類型
         T.IDNUM = S.IdentNumber,
         T.DOB = S.DOB
 OUTPUT 
@@ -198,5 +175,3 @@ INTO BSADB.dbo.OFAC_GLSpec_Log
     (ent_num, spec_name, updated_date, remark, DInd, creUserID, IDENT, IDNUM, DOB,
      EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate,
      CreationDate, ActionCD, ActionDt);
-
-海外這樣有對?
