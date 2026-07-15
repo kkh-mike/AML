@@ -1,0 +1,50 @@
+-- 1. 建立「我的通訊錄」（目標表）
+CREATE TABLE MyFriends (
+    FriendID INT PRIMARY KEY,
+    Name NVARCHAR(50),
+    Phone VARCHAR(20),
+    IsActive CHAR(1) DEFAULT 'Y' -- Y: 啟用, N: 停用 (邏輯刪除)
+);
+
+-- 2. 建立「最新名單」（來源表）
+CREATE TABLE NewList (
+    FriendID INT PRIMARY KEY,
+    Name NVARCHAR(50),
+    Phone VARCHAR(20)
+);
+
+-- 3. 塞入舊資料
+INSERT INTO MyFriends (FriendID, Name, Phone, IsActive) VALUES
+(1, '張三', '0911-111111', 'Y'), -- 資料沒變
+(2, '李四', '0922-222222', 'Y'), -- 電話變了，需要更新
+(3, '王五', '0933-333333', 'N'); -- 之前被停用，但新名單還有他，需要重新啟用
+
+-- 4. 塞入新資料
+INSERT INTO NewList (FriendID, Name, Phone) VALUES
+(1, '張三', '0911-111111'), -- 一模一樣
+(2, '李四', '0922-999999'), -- 電話改了 (Update)
+(3, '王五', '0933-333333'), -- 重新啟用 (Update Active)
+(4, '趙六', '0944-444444'); -- 全新的人 (Insert)
+                             -- 註：原本的「張三、李四、王五、趙六」在新名單。
+                             -- 我們故意不把「某個舊人」放進來，來模擬「被除名（Delete）」的情境。
+
+
+
+MERGE MyFriends AS T -- Target: 目標表
+USING NewList AS S   -- Source: 來源表
+ON T.FriendID = S.FriendID -- 比對條件：用會員 ID 對齊
+
+-- 情況 1：新名單有，我沒有 -> 新增 (Insert)
+WHEN NOT MATCHED BY TARGET THEN
+    INSERT (FriendID, Name, Phone, IsActive)
+    VALUES (S.FriendID, S.Name, S.Phone, 'Y')
+
+-- 情況 2：新名單沒有，但我有 -> 邏輯刪除 (Soft Delete)
+WHEN NOT MATCHED BY SOURCE AND T.IsActive = 'Y' THEN
+    UPDATE SET T.IsActive = 'N'
+
+-- 情況 3：兩邊都有，且電話變了，或是原本被停用 -> 更新 (Update)
+WHEN MATCHED AND (T.Phone <> S.Phone OR T.IsActive = 'N') THEN
+    UPDATE SET 
+        T.Phone = S.Phone,
+        T.IsActive = 'Y'; -- 確保被重新啟用
