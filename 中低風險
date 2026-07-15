@@ -1,44 +1,29 @@
-問題原因： 你的 SQL Server 版本比較舊，TRIM() 函數不支援（SQL Server 2017 才開始有）。
 
-✅ 修正後的 SQL（相容舊版本）
-WITH SplitValues AS (
-    SELECT 
-        b.CustPurposeOfAcc,
-        a.NEW_CIF_KEY,
-        a.SOURCE_CIF_KEY,
-        LTRIM(RTRIM(value)) AS single_code
-    FROM CIF_Migrate_Mapping_TEMP a
-    JOIN Customer_Migrate_buffer b 
-        ON a.SOURCE_CIF_KEY = b.CIF_KEY
-    CROSS APPLY STRING_SPLIT(b.CustPurposeOfAcc, '|') 
-    WHERE b.CustPurposeOfAcc IS NOT NULL
-)
-SELECT 
-    CustPurposeOfAcc,
-    NEW_CIF_KEY,
-    SOURCE_CIF_KEY,
-    single_code,
-    '❌ 不合法代碼' AS 問題
-FROM SplitValues
-WHERE single_code NOT IN ('01','03','04','06','10','11','15','21','38','99')
-  AND single_code <> ''
-ORDER BY CustPurposeOfAcc;
+再打擾一個問題
 
-如果還是出現錯誤，請試下面這個更保守的版本（不用 WITH）：
-SELECT 
-    b.CustPurposeOfAcc,
-    a.NEW_CIF_KEY,
-    a.SOURCE_CIF_KEY,
-    LTRIM(RTRIM(value)) AS single_code,
-    '❌ 不合法代碼' AS 問題
-FROM CIF_Migrate_Mapping_TEMP a
-JOIN Customer_Migrate_buffer b 
-    ON a.SOURCE_CIF_KEY = b.CIF_KEY
-CROSS APPLY STRING_SPLIT(b.CustPurposeOfAcc, '|') 
-WHERE b.CustPurposeOfAcc IS NOT NULL
-  AND LTRIM(RTRIM(value)) NOT IN ('01','03','04','06','10','11','15','21','38','99')
-  AND LTRIM(RTRIM(value)) <> ''
-ORDER BY b.CustPurposeOfAcc;
+最後要弄一個 SID 名單分流（Sanctions IDs）
 
-請直接複製上面第一個修正版執行看看。
-如果還是報錯，請把完整錯誤訊息貼給我，我再繼續調整（例如改用 XML 方法拆分，適用更舊的版本）。
+我看台灣是
+
+
+寫入目標：BSADBTW..OFAC_SPEC
+
+
+
+>>
+
+我的理解是
+
+新加坡 : BSADBSG..OFAC_SPEC
+日本: BSADBJP..OFAC_SPEC
+
+其他海外? 名單分流（Sanctions IDs）
+是都做?
+
+還是寫到主表就好 ?
+BSADB.dbo.OFAC_GLSpec 
+
+
+這邊需要在跟你確認一下 抱歉
+
+
