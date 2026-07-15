@@ -1,0 +1,308 @@
+USE [BSADB]
+GO
+
+ALTER PROCEDURE [dbo].[GLSPEC_SyncDJToInternalList]
+    @GroupId BIGINT
+AS
+BEGIN
+    DECLARE @OtherIdentMthCode VARCHAR(2),
+            @Filter_Alt_Str INT
+
+    SELECT @OtherIdentMthCode = IDENTCODE
+    FROM dbo.IDENTMTHD_DIM
+    WHERE OTHIND = 'Y'
+
+    SELECT @Filter_Alt_Str = CtrlVal
+    FROM dbo.PO_DIMData
+    WHERE Module = 'DJ'
+    AND CtrlKey = 'DJ_ToGLSPEC_ALT_STR'
+
+    
+    IF OBJECT_ID('tempdb..#tempDJBlacklist') IS NOT NULL
+        DROP TABLE #tempDJBlacklist
+
+    IF OBJECT_ID('tempdb..#tempDJBlacklistDetails') IS NOT NULL
+        DROP TABLE #tempDJBlacklistDetails
+
+    CREATE TABLE #tempDJBlacklist (
+    EntNum INT NOT NULL,
+    SdnName NVARCHAR(350) NOT NULL,
+    UpdatedDate VARCHAR(8) NOT NULL
+    )
+
+    CREATE TABLE #tempDJBlacklistDetails(
+        EntNum INT NOT NULL,
+        SdnName NVARCHAR(350) NOT NULL,
+        UpdatedDate VARCHAR(8) NOT NULL,
+        Address NVARCHAR(400),
+        City NVARCHAR(200),
+        Country NVARCHAR(100),
+        IdentType VARCHAR(2),
+        IdentNumber NVARCHAR(44),
+        DOB VARCHAR(8),
+        Gender NVARCHAR(7)
+    )
+
+    --3. 取得主要黑名單
+    INSERT INTO #tempDJBlacklist
+    (
+        EntNum,
+        SdnName,
+        UpdatedDate
+    )
+    SELECT
+        A.EntNum,
+        A.SdnName,
+        MAX(A.UpdatedDate)
+    FROM BSADB.dbo.DJ_List_Data_A A
+    WHERE
+        A.NamePropertyBitCode & 1 > 0
+        AND A.AltStrengthBitCode & @Filter_Alt_Str <> 0
+    GROUP BY
+        A.EntNum,
+        A.SdnName
+
+
+    -- 第四區塊：用 CTE 取得地址、證件、出生日期、性別（只取第一筆）
+    ;WITH TempAddress AS (
+        SELECT 
+            A.EntityId, 
+            A.Address, 
+            A.City, 
+            A.AddressCountry, 
+            ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
+        FROM BSADB.dbo.DJ_Address A WITH(NOLOCK) 
+        WHERE A.Deleted = 0  
+        AND EXISTS (SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
+    ), 
+    TempIdent AS (
+        SELECT 
+            A.EntityId, -- 補上明確的資料表別名 A.
+            CASE 
+                WHEN ISNULL(A.IdentificationType, '') = '' THEN NULL 
+                ELSE @OtherIdentMthCode 
+            END AS IdentificationType, 
+            A.IdentificationNumber, 
+            ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
+        FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH(NOLOCK) 
+        WHERE A.Deleted = 0 
+        AND EXISTS (SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
+    ), 
+    TempDOB AS (
+        SELECT 
+            A.EntityId, 
+            A.InfoDay, 
+            A.InfoMonth, 
+            A.InfoYear, 
+            ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) AS RowId 
+        FROM BSADB.dbo.DJ_DateTypeInfo A WITH(NOLOCK) 
+        WHERE A.DateType = 'Date of Birth' 
+        AND A.Deleted = 0 
+        AND EXISTS (SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
+    ), 
+    TempGender AS (
+        SELECT 
+            A.EntityId, 
+            CASE 
+                WHEN ISNULL(A.Gender, '') = '' THEN NULL 
+                WHEN A.Gender = 'Male' THEN 'M' -- 既然前面過濾了空值，這裡直接比對即可
+                WHEN A.Gender = 'Female' THEN 'F'
+            END AS Gender, 
+            -- 修正：PARTITION BY EntityId 時，ORDER BY 也用 EntityId 會失去排序效果
+            -- 建議改用 A.Id 或其他唯一的基準欄位來確保排序穩定
+            ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) AS RowId 
+        FROM BSADB.dbo.DJ_Entity A WITH(NOLOCK)
+        WHERE A.Deleted = 0 
+        AND EXISTS (SELECT 1 FROM #tempDJBlacklist X WITH(NOLOCK) WHERE A.EntityId = X.EntNum)
+    )
+
+    -- 第五區塊：把詳細資料組起來（#tempDJBlacklistDetails）
+    INSERT INTO #tempDJBlacklistDetails (
+        EntNum, 
+        SdnName, 
+        UpdatedDate, 
+        Address, 
+        City, 
+        Country, 
+        IdentType, 
+        IdentNumber, 
+        DOB, 
+        Gender
+    )
+    SELECT 
+        A.EntNum, 
+        A.SdnName, 
+        A.UpdatedDate, 
+        B.Address, 
+        LEFT(B.City, 100) AS City, 
+        LEFT(B.AddressCountry, 100) AS Country,
+        C.IdentificationType, 
+        LEFT(C.IdentificationNumber, 44) AS IdentNumber, 
+        -- 修正：使用 CONCAT_WS 避免因數值欄位與字串相加導致的轉換失敗（Conversion Failure）
+        CASE 
+            WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL THEN D.InfoYear 
+            ELSE CONVERT(VARCHAR(8), dbo.TryParseDate(CONCAT_WS(' ', D.InfoYear, D.InfoMonth, D.InfoDay)), 112) 
+        END AS DOB, 
+        E.Gender
+    FROM #tempDJBlacklist A 
+    LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1 
+    LEFT JOIN TempIdent   C ON A.EntNum = C.EntityId AND C.RowId = 1 
+    LEFT JOIN TempDOB     D ON A.EntNum = D.EntityId AND D.RowId = 1 
+    LEFT JOIN TempGender  E ON A.EntNum = E.EntityId AND E.RowId = 1
+
+
+    	
+	-- 第六區塊：核心 MERGE（寫入 OFAC_GLSpec + 記 Log）
+	/*
+	來源（Source / S）：你的最新黑名單暫存表 #tempDJBlacklistDetails。
+	目標（Target / T）：你的正式黑名單資料表 OFAC_GLSpec。
+	*/
+    ;WITH TargetTable AS (
+        SELECT 
+            spec_name, updated_date, remark, TaxID, IDENT, IDENTO, TaxIDCD, IDNUM, DInd, creUserID, STATE, ADDRESS, COUNTRY,
+            GROUPID, SOURCE, EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, creDate,
+            updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, creDate_UTC, ent_num, DOB, Gender
+        FROM BSADB.dbo.OFAC_GLSpec 
+        WHERE GROUPID = @GroupId
+    )
+    MERGE TargetTable AS T 
+    USING (
+        SELECT EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB, Gender 
+        FROM #tempDJBlacklistDetails
+    ) AS S
+    ON T.spec_name = S.SdnName AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+
+    -- 1. 新增黑名單資料
+	-- 當來源表（S）有這筆資料，但目標表（T）找不到時，要做什麼事。
+    WHEN NOT MATCHED BY TARGET THEN
+        INSERT ( 
+            spec_name, 
+            updated_date, 
+            remark, 
+            DInd, 
+            creUserID, 
+            STATE, 
+            ADDRESS, 
+            COUNTRY, 
+            GROUPID, 
+            IDENT, 
+            IDNUM, 
+            DOB, 
+            Gender,
+            SOURCE, 
+            EnterFlag, 
+            ApprovedBy, 
+            ApprovedDate, 
+            DelUserID, 
+            DelDate, 
+            ApproveDelUserID, 
+            ApproveDelDate, 
+            creDate, 
+            updated_date_UTC,
+            ApprovedDate_UTC, 
+            DelDate_UTC, 
+            ApproveDelDate_UTC, 
+            creDate_UTC
+        )
+        VALUES (
+            S.SdnName, 
+            S.UpdatedDate, 
+            S.EntNum, 
+            'N', 
+            'System Admin', 
+            ISNULL(S.City, ''), 
+            S.Address, 
+            S.Country, 
+            @GroupId, 
+            S.IdentType, 
+            S.IdentNumber, 
+            S.DOB, 
+            S.Gender,
+            NULL, 
+            'D', 
+            'System Admin', 
+            GETDATE(), 
+            'System Admin', 
+            GETDATE(), 
+            'System Admin', 
+            GETDATE(), 
+            GETDATE(), 
+            GETUTCDATE(), -- 修正：原本是 GETDATE()，改為符合 UTC 欄位定義的 GETUTCDATE()
+            GETUTCDATE(), 
+            NULL, 
+            NULL, 
+            GETUTCDATE()
+        )
+
+    -- 2. 邏輯刪除（黑名單已移除的資料，將 DInd 改為 Y）
+	-- 當正式表（T）裡有這筆資料，但最新的黑名單（S）裡已經找不到它了，而且它目前的狀態是啟用中（DInd = 'N'）時，要做什麼事。
+    WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN 
+        UPDATE SET 
+            T.DInd = 'Y', 
+            T.DelUserID = 'System Admin', 
+            T.DelDate = GETDATE(), 
+            T.ApproveDelUserID = 'System Admin', 
+            T.ApproveDelDate = GETDATE(),
+            T.DelDate_UTC = GETUTCDATE()
+
+    -- 3. 資料異動或重新啟用（原本標記刪除，但再次出現在黑名單中）
+	/*
+	「當最新黑名單（S）與正式表（T）裡都有這筆資料（同一個人），而且滿足以下其中一個條件時，就進行更新（Update）：
+
+	這個人之前在正式表裡被停用了（DInd = 'Y'），但現在又出現在最新黑名單中，必須重新啟用。
+
+	這個人的基本資料有變動（最新黑名單的更新日期 S.UpdatedDate 與正式表 T.updated_date 不同）。」
+	*/
+    WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN 
+        UPDATE SET 
+            T.DInd = 'N', 
+            T.updated_date = S.UpdatedDate, 
+            T.DelUserID = NULL, 
+            T.DelDate = NULL, 
+            T.ApproveDelUserID = NULL, 
+            T.ApproveDelDate = NULL,
+            T.DelDate_UTC = NULL, 
+            T.EnterFlag = 'D', 
+            T.updated_date_UTC = GETUTCDATE(),
+            T.ADDRESS = S.ADDRESS, 
+            T.STATE = ISNULL(S.City, ''), 
+            T.COUNTRY = S.Country, 
+            T.IDENT = S.IdentType, 
+            T.IDNUM = S.IdentNumber, 
+            T.DOB = S.DOB, 
+            T.Gender = S.Gender; -- 加上終止號
+	
+	OUTPUT CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ent_num ELSE Deleted.ent_num END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.spec_name ELSE Deleted.spec_name END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date ELSE Deleted.updated_date END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.remark ELSE Deleted.remark END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DInd ELSE Deleted.DInd END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creUserID ELSE Deleted.creUserID END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENTO ELSE Deleted.IDENTO END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.STATE ELSE Deleted.STATE END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ADDRESS ELSE Deleted.ADDRESS END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.COUNTRY ELSE Deleted.COUNTRY END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.GROUPID ELSE Deleted.GROUPID END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENT ELSE Deleted.IDENT END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDNUM ELSE Deleted.IDNUM END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DOB ELSE Deleted.DOB END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.Gender ELSE Deleted.Gender END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.EnterFlag ELSE Deleted.EnterFlag END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedBy ELSE Deleted.ApprovedBy END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate ELSE Deleted.ApprovedDate END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelUserID ELSE Deleted.DelUserID END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate ELSE Deleted.DelDate END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelUserID ELSE Deleted.ApproveDelUserID END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate ELSE Deleted.ApproveDelDate END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creDate ELSE Deleted.creDate END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date_UTC ELSE Deleted.updated_date_UTC END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate_UTC ELSE Deleted.ApprovedDate_UTC END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate_UTC ELSE Deleted.DelDate_UTC END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate_UTC ELSE Deleted.ApproveDelDate_UTC END,
+		CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creDate_UTC ELSE Deleted.creDate_UTC END,
+		CASE WHEN $ACTION = 'INSERT' OR ($ACTION = 'UPDATE' AND Deleted.DInd = 'Y' AND Inserted.DInd = 'N') THEN '01' WHEN $ACTION = 'UPDATE' AND Inserted.DInd = 'Y' THEN '03' ELSE '02' END, 
+		GETUTCDATE()
+	INTO BSADB.dbo.OFAC_GLSpec_Log (ent_num, spec_name, updated_date, remark, DInd, creUserID, IDENTO, STATE, ADDRESS, COUNTRY, GROUPID, IDENT, IDNUM, DOB,Gender,
+                EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, CreationDate, updated_date_UTC,
+                ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, CreationDate_UTC, ActionCD, ActionDt);
+
