@@ -1,0 +1,93 @@
+Click links/Open attachments of this email only from trusted sender! 
+  
+Dear James,
+
+As requested, please find the attached our response to your further enquiries (Excel) and the supporting documents for your review.
+The password (including supporting documents) is the same as previous one.
+
+Thanks.
+
+
+Dear Responsible Officer(s)/AML Compliance Officer,
+
+Taishin International Bank Co., Ltd., HK Branch (“the Company”)
+
+Further to our off-site review of the Company, which was conducted based on the Company’s internal policies, procedures, and relevant documentation relating to Anti-Money Laundering and Counter-Terrorist Financing (“AML/CTF”) provided to us, as well as the Company’s responses to our enquiries, we would like to draw your attention to the following observation(s) in respect of compliance with the GL3: –
+
+Sanctions and PEP Screening
+
+(i)	According to the Company’s existing control framework, identified third party payors are subject to sanctions screening before submission of the application documents to its principal (s), where such payors are identified.  However, it was not clearly stated in the Company’s AML Policy and Procedures that identified third party payors of life insurances are subject to sanctions screening.  
+
+In this connection, for clarity enhancement, the Company should update the relevant internal policy and procedure wording to expressly state that identified third party payors are included among the connected parties subject to sanctions screening.
+
+(ii)	Sections 3.11.5, 5.4.1, 5.5.1, 5.5.2, 5.5.3, 12.5.4 of the Company’s Anti-Money Laundering and Counter-Terrorist Financing Policy (version 8) ("AML Policy") stipulates that the Company's Customer Data Check ("客戶資料檢核") module of the Company's AML name checking system is used to perform batch screening on existing customer database to identify PEPs and sanctioned parties . However, it seems that this batch screening process only covers existing customers, beneficial owners, connected parties and PPTAs etc., who maintains a banking relationship with the Company.    It should be noted that even the customers closed their bank accounts with the Company, the Company is still acting as an insurance agency of those customers who still have inforce insurance policy (ies).  
+
+In this connection, the Company should ensure that, even the customers closed the bank account, where an insurance policy remains in force, the relevant policyholders and beneficial owners remain subject to ongoing sanctions and PEP screening.  The ongoing sanctions screening should extend to connected parties and PPTAs of insurance customers using a risk- based approach for the Company’s insurance agency business.
+
+Identification and Verification of Beneficiary 
+
+(iii)	According to page 14 of the Company's AML Policy, an Insurance Institution (“II”), including a licensed insurance agency, should be required to (a) inform senior management before payout of the policy proceeds, (b) conduct enhanced scrutiny on the whole business relationship with the policyholder and (c) consider making a suspicious transaction report if the beneficiary or beneficial owner(s) of the beneficiary is determined as PEP where higher risks are identified.  However, it seems that the subject requirements were not incorporated in 《保險代理業務作業流程說明書》.  
+
+In this connection, the Company should enhance relevant SOP wording to more explicitly reflect the relevant AML/CFT operational requirements.
+
+Record Keeping
+
+(iv)	Paragraph 8.3(d) of the GL3 requires an II, including a licensed insurance agency, to keep the original or copy of the records and documents relating to the customer’s account (e.g. account opening form, insurance application form or risk assessment form) and business correspondence with the customer and any beneficial owner of the customer (which at a minimum should include business correspondence material to CDD measures or significant changes to the operation of the account). Paragraph 8.4 of the GL3 further states that all documents and records mentioned in paragraph 8.3 should be kept throughout the continuance of the business relationship with the customer and for a period of at least five years after the end of the business relationship.
+
+The Company’s 《保險代理業務作業流程說明書》currently provides a seven-year retention period for insurance applications and supporting documents following policy termination.  It appears that this practice fell short of the GL3 requirements, as retention must be maintained for at least five years after the termination of the business relationship, not merely after policy termination.  Consequently, under the Company’s current record-keeping procedures, where a policyholder (who is also a bank account holder of the Company) maintains multiple insurance policies, records relating to a policy that terminated seven years earlier than another may have already been disposed of.  Only records associated with the later-terminating policy, including application forms, claim forms, and servicing forms, would be kept by the Company, which constitutes a gap in compliance with the GL3.  
+
+In this connection, the Company should enhance the relevant internal policy and procedural wording to make this retention arrangement for terminated policies under an ongoing insurance agency relationship more explicit.
+
+Please note that the observations mentioned above are based on the documents and information supplied to us.  They may not cover all areas in your Company’s compliance with the GL3.  
+
+Please review the aforesaid observation(s) and submit your Company’s action plan developed with the way and the timeline under which your Company intends to address the observation(s) for our review by 5 August 2026 (Wed).
+
+Should you have any queries concerning the above, please contact me at 3899 9752 or James Luo at 3899 9773. Thank you.
+
+
+港行近期接受HKIA查核，有一項查核意見可能會涉及到系統面，如下：
+(i)	Sections 3.11.5, 5.4.1, 5.5.1, 5.5.2, 5.5.3, 12.5.4 of the Company’s Anti-Money Laundering and Counter-Terrorist Financing Policy (version 8) ("AML Policy") stipulates that the Company's Customer Data Check ("客戶資料檢核") module of the Company's AML name checking system is used to perform batch screening on existing customer database to identify PEPs and sanctioned parties . However, it seems that this batch screening process only covers existing customers, beneficial owners, connected parties and PPTAs etc., who maintains a banking relationship with the Company.    It should be noted that even the customers closed their bank accounts with the Company, the Company is still acting as an insurance agency of those customers who still have inforce insurance policy (ies).  
+
+In this connection, the Company should ensure that, even the customers closed the bank account, where an insurance policy remains in force, the relevant policyholders and beneficial owners remain subject to ongoing sanctions and PEP screening.  The ongoing sanctions screening should extend to connected parties and PPTAs of insurance customers using a risk- based approach for the Company’s insurance agency business.
+
+主要是說港行純保代客戶沒有掃CDC批次（因為無帳戶資料，系統中非有效客戶），之前我有聽說港行的改善方向是把有效保單建在帳戶層，你們後續可能會再收到相關討論，先同步消息給你們參考。
+
+謝謝
+
+
+
+
+項目	意思
+查核發現了什麼	HKIA 認為港行目前 AML 系統的 CDC 批次掃描，只涵蓋「仍有銀行往來的有效客戶」
+問題在哪裡	有些客戶雖然已經結清銀行帳戶，但如果仍有「有效保單」，港行還是在扮演保險代理人角色，這些人不應該被排除在持續性制裁／PEP 篩查之外
+查核要求是什麼	即使銀行帳戶已關閉，只要保單仍有效，相關保戶、受益人/實益擁有人，還有 connected parties、PPTAs，也應納入 ongoing sanctions screening 與 PEP screening
+為什麼提到系統	因為目前系統邏輯可能是用「是否為有效帳戶客戶」決定要不要進 CDC batch screening，導致純保代客戶沒被掃到
+他提到的改善方向	他聽說港行可能打算把「有效保單」建在帳戶層，讓這些純保代客戶能被系統視為有效對象，納入批次檢核
+他現在找你們的目的	先同步這個風險/議題給你們，讓你們有心理準備，之後可能會拉你們一起討論系統調整方案
+簡單講，他不是單純在抱怨，也不是只是資訊分享而已， 他其實是在：
+
+提醒你們這是一個可能落到系統面的缺口
+先讓你們知道之後可能會找你們支援
+暗示你們可以先思考系統如何把「無帳戶但有有效保單」的人納入 AML 批次掃描
+如果你要更白話地回答「他要幹嘛」：
+
+他是在先打預防針，意思是： 「這個查核意見很可能會變成系統需求，你們先知道一下，之後可能要請你們一起評估怎麼改。」
+
+如果你要，我也可以幫你進一步整理成：
+
+可協助內容	說明
+一句話摘要版	適合你內部轉述
+回信範本	如果你要回覆對方
+系統影響分析框架	幫你列出後續要問的需求與風險點
+以下提供完整文字內容，您可自行複製使用。
+
+如您希望調整報告格式、簡報大綱、表格架構或其他需求，我也可以協助優化。
+
+2026-07-15 16:35:37
+
+
+
+
+
+
+幫我整理我要幹嘛他們需求又是什麼?
