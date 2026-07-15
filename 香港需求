@@ -1,79 +1,36 @@
-✅ 已幫你整理清楚：監理要求是什麼 + 你接下來要幹嘛
-以下內容直接對應你貼的 email，聚焦 observation (ii) 這項最可能落在系統面的查核意見。我把「需求」和「你要做的行動」拆得很清楚，方便你內部轉述、開會討論或回覆同事。
-一、一句話摘要版（適合直接 copy 給同事或主管）
-HKIA 指出：即使客戶已結清銀行帳戶，只要仍有有效保單，港行仍以保險代理人角色服務，相關的保戶、實益擁有人、connected parties 及 PPTAs 就應以「風險為本」方式持續納入 sanctions 與 PEP screening。目前 CDC 批次掃描只看「有效銀行客戶」，把純保代客戶排除在外，這是 compliance gap。 這項意見很可能轉化為系統需求，建議 AML 團隊先評估影響、準備解決方案，後續會拉大家討論調整方向。
-二、監理要求到底是什麼？（白話 + 精準版）
-查核發現的問題：
-	•	港行現行 AML Policy 及 CDC（客戶資料檢核）模組的批次篩選，只涵蓋「仍有銀行往來」的有效客戶（existing customers, beneficial owners, connected parties, PPTAs 等）。
-	•	但現實情況是：有些客戶雖然已經把銀行帳戶結清，卻仍然持有有效保單（in-force insurance policy）。港行對這些客戶仍扮演保險代理人角色，依法仍需履行 AML/CFT 義務。
-監理要求（GL3 及 observation (ii)）： 即使客戶已無銀行帳戶，只要保單仍然有效，以下對象仍需持續接受 ongoing sanctions screening 與 PEP screening：
-	•	Policyholders（保單持有人）
-	•	Beneficial owners（實益擁有人）
-	•	Connected parties
-	•	PPTAs
-並且要採用 risk-based approach（風險為本），針對保險代理業務的保險客戶執行。
-簡單說：不能因為「沒有銀行帳戶」就把這些人從 AML 持續檢核中排除。
-三、為什麼這會變成系統需求？（你最關心的部分）
-目前 CDC batch screening 的邏輯，很可能是用「是否為有效銀行帳戶客戶」或「是否有 banking relationship」當作篩選條件，導致純保代客戶完全沒被掃到。
-同事聽到的改善方向是：把「有效保單」資訊建在 account layer，讓這些客戶在 AML 系統中能被視為需要持續檢核的對象，進而納入批次掃描。
-這就是為什麼他先打預防針給你們：這個 observation 很大機會會變成正式的系統調整需求，他不是只在分享資訊，而是在提醒你們「之後可能要一起想方案、評估、實作」。
-四、你 / AML 系統團隊接下來要幹嘛？（分階段行動清單）
-Phase 1：本週內先搞清楚現況與影響範圍（最優先）
-	1	確認 CDC 模組現行批次篩選的條件與資料來源：
-	◦	SQL 邏輯怎麼寫？是用 customer status、account active flag、還是其他條件決定要不要進 batch？
-	◦	有沒有已經在處理 insurance-related parties 的機制？
-	2	跟保單系統 / 保險業務團隊對接（這步很重要）：
-	◦	純保代客戶的資料目前存在哪個系統 / 哪張表？
-	◦	「有效保單」（in-force）的判斷條件是什麼？（policy status、premium status、maturity date 等）
-	◦	Connected parties、PPTAs、beneficial owners 的資料怎麼關聯到保單？
-	3	粗估規模與影響：
-	◦	大約有多少筆此類「無有效 bank account 但有 inforce policy」的客戶及相關 party 需要額外納入？
-	◦	對現有 batch job 的效能、執行時間有什麼影響？
-Phase 2：下週前整理解決方案，準備討論（建議做成表格）
-建議你整理以下 2–3 個方案選項，列出優缺點與粗估時程，方便後續會議討論：
-方案
-簡要描述
-優點
-挑戰 / 風險
-粗估時程
-A. Account Layer 關聯有效保單
-在 account / customer master 新增或同步「有效保險代理關係」旗標，讓 CDC 邏輯能涵蓋這些對象
-邏輯較統一、維護成本較低、audit 較容易
-需要跨系統資料同步、可能影響多個介接
-中
-B. 獨立 Insurance Screening Pipeline
-從保單系統建立獨立資料來源或 view，只抽取 inforce policy 相關 parties 進入 CDC（或另一個 job）
-對現有 banking customer 影響最小、可獨立控管
-需額外維護 job、資料一致性、可能有重複 screening
-中高
-C. Risk-Based 差異化處理
-只針對高風險類別的保險客戶 / connected parties 執行 screening，或調整頻率
-短期影響範圍較小
-可能仍無法完全滿足 HKIA 期望，需先定義 risk criteria
-較低
-每個方案都要再補充：資料整合點、batch job 修改範圍、logging/audit 需求、UAT 與 rollback 考量。
-Phase 3：支援 Compliance 團隊撰寫 Action Plan（8/5 前要交）
-公司必須在 2026 年 8 月 5 日（三）前 回覆 HKIA，說明「用什麼方式、在什麼時程內」解決此 observation。
-你們可以提供：
-	•	High-level remediation approach（例如：將透過系統調整，把有效保單的保險代理客戶納入 ongoing batch screening，並採用 risk-based approach）
-	•	Tentative timeline（Impact assessment → Solution design → Development & UAT → Go-live）
-	•	任何 interim measure（例如先針對高風險案件做 ad-hoc screening）
-我可以幫你把這段英文寫得專業一點（因為回 HKIA 應該是英文）。
-五、其他 observations 快速補充（非系統面為主）
-	•	(i) 第三人付款人（third party payors）的制裁篩查要在 AML Policy 明確寫出來。主要由 compliance / policy 團隊處理。
-	•	(iii) 《保險代理業務作業流程說明書》要補強 beneficiary 是 PEP 時的 senior management notification、enhanced scrutiny、STR consideration。偏 SOP 面。
-	•	(iv) Record Keeping：目前 SOP 是「保單終止後保留 7 年」，但 GL3 要求「business relationship 結束後至少保留 5 年」。若客戶有多張保單，較早終止的那張可能已提前銷毀。這部分若涉及系統的 retention / archiving / disposal job，建議也同步確認「business relationship end date」的定義。
-六、建議回覆同事的範本（直接 copy 改姓名即可）
-親愛的 [同事姓名]，
-感謝你同步港行 HKIA 查核的 observation 及背景說明，尤其是 (ii) 這項可能涉及系統調整的部分。
-我已詳細閱讀相關內容。目前我會先著手了解 CDC batch screening 的現行篩選邏輯與條件，並與保單系統團隊確認純保代客戶的資料結構與「有效保單」判斷方式。預計本週內完成初步影響評估與規模估算，然後整理可能的解決方案選項，供後續內部討論使用。
-如果之後需要我準備資料、參加會議，或協助撰寫 action plan 中的系統相關段落，請隨時告訴我。謝謝！
-Mike
+     B.Description2 = 'Sanctions Lists'
+        OR B.Description3 IN (
+            'OFAC Related - Majority Owned',
+            'OFAC Related – Control',
+            'OFAC - Regional Sanctions Related - Majority Owned',
+            'OFAC - Regional Sanctions Related - Control',
+            'EU Related - Majority Owned',
+            'EU Related - Control',
+            'EU - Regional Sanctions Related - Majority Owned',
+            'EU - Regional Sanctions Related – Control'
+        )
+      )
+  AND B.Deleted = 0
+  AND D.IdentificationType IN (
+        'Aircraft Construction, Line, Fleet or Serial Number',
+        'Aircraft Manufacturer''s Serial Number (MSN)',
+        'Bank Identifier Code (BIC)',
+        'Central Registration Depository (CRD)',
+        'Company Identification No.',
+        'Driving Licence No.',
+        'DUNS Number',
+        'International Maritime Organization (IMO) Ship No.',
+        'International Securities Identification Number (ISIN)',
+        'Legal Entity Identifier (LEI)',
+        'National ID',
+        'National Provider Identifier (NPI)',
+        'National Tax No.',
+        'Others',
+        'Passport No.',
+        'Social Security No.',
+        'Email',
+        'Fax',
+        'Phone'
 
-需要我再幫你做什麼？
-	•	把上面內容輸出成 Word 文件（含表格、格式化），方便你存檔或分享給團隊
-	•	幫你把 Action Plan 的英文段落 寫得更專業、自然
-	•	整理一份給保單系統 owner 的 clarification questions 清單
-	•	做成更簡短的「一句話版 + 行動清單」給主管看
-	•	其他任何調整
-直接告訴我你要哪一種，我馬上幫你處理！
+
+這些是不是都不用改 跟台灣的一樣就好
