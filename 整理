@@ -1,14 +1,13 @@
-以下是日本 Sanctions IDs 完整版的 MERGE + OUTPUT（已補齊所有欄位）
-你可以直接複製替換之前我給你的「日本 Sanctions IDs」那一段。
--- =============================================
--- 【日本】Sanctions IDs 同步 → BSADBJP..OFAC_SPEC
--- =============================================
-IF OBJECT_ID('tempdb..#tempDJBlacklistSID_JP') IS NOT NULL
-    DROP TABLE #tempDJBlacklistSID_JP;
-IF OBJECT_ID('tempdb..#tempDJBlacklistDetailsSID_JP') IS NOT NULL
-    DROP TABLE #tempDJBlacklistDetailsSID_JP;
 
-CREATE TABLE #tempDJBlacklistSID_JP
+-- =============================================
+-- 【海外】Sanctions IDs 同步 → BSADB.dbo.OFAC_GLSpec
+-- =============================================
+IF OBJECT_ID('tempdb..#tempDJBlacklistSID_GL') IS NOT NULL
+    DROP TABLE #tempDJBlacklistSID_GL;
+IF OBJECT_ID('tempdb..#tempDJBlacklistDetailsSID_GL') IS NOT NULL
+    DROP TABLE #tempDJBlacklistDetailsSID_GL;
+
+CREATE TABLE #tempDJBlacklistSID_GL
 (
     EntNum               INT           NOT NULL,
     IdentificationType   NVARCHAR(100) NOT NULL,
@@ -16,9 +15,8 @@ CREATE TABLE #tempDJBlacklistSID_JP
     UpdatedDate          VARCHAR(8)    NOT NULL
 );
 
-CREATE TABLE #tempDJBlacklistDetailsSID_JP
+CREATE TABLE #tempDJBlacklistDetailsSID_GL
 (
-    Num                  INT,
     EntNum               INT           NOT NULL,
     IdentificationNumber NVARCHAR(350) NOT NULL,
     IdentificationType   NVARCHAR(350) NOT NULL,
@@ -31,8 +29,8 @@ CREATE TABLE #tempDJBlacklistDetailsSID_JP
     DOB                  VARCHAR(8)
 );
 
--- 1. 取得 Dow Jones Sanctions 清單（只取特定 IdentificationType）
-INSERT INTO #tempDJBlacklistSID_JP (EntNum, IdentificationType, IdentificationNumber, UpdatedDate)
+-- 取得 Dow Jones Sanctions 清單（只取特定 IdentificationType）
+INSERT INTO #tempDJBlacklistSID_GL (EntNum, IdentificationType, IdentificationNumber, UpdatedDate)
 SELECT 
     A.EntityId,
     D.IdentificationType,
@@ -84,218 +82,108 @@ WHERE A.PersonStatus <> 'Inactive'
   AND D.Deleted = 0
 GROUP BY A.EntityId, D.IdentificationType, D.IdentificationNumber;
 
--- 2. 建立對照用 CTE（抓出日本 OFAC_SPEC 已存在的資料，用來取得 ent_num）
-;WITH TempNUM AS (
-    SELECT 
-        A.spec_name,
-        A.updated_date,
-        A.remark,
-        A.TaxID,
-        A.IDENT,
-        A.IDENTO,
-        A.TaxIDCD,
-        A.IDNUM,
-        A.issBy,
-        A.DInd,
-        A.creUserID,
-        A.STATE,
-        A.ADDRESS,
-        A.COUNTRY,
-        A.GROUPID,
-        A.SOURCE,
-        A.EnterFlag,
-        A.ApprovedBy,
-        A.ApprovedDate,
-        A.DelUserID,
-        A.DelDate,
-        A.ApproveDelUserID,
-        A.ApproveDelDate,
-        A.creDate,
-        A.updated_date_UTC,
-        A.ApprovedDate_UTC,
-        A.DelDate_UTC,
-        A.ApproveDelDate_UTC,
-        A.creDate_UTC,
-        A.ent_num,
-        A.DOB,
-        REPLACE(A.ADDRESS, '; Please go to Dowjones website for more detail', '') AS IdentificationType
-    FROM BSADBJP..OFAC_SPEC A
-    WHERE A.GROUPID = 5 
-      AND A.DInd = 'N'
+-- 取得對應的 Address / City / Country / DOB（取第一筆）
+;WITH TempAddress AS (
+    SELECT EntityId, Address, City, AddressCountry,
+           ROW_NUMBER() OVER (PARTITION BY EntityId ORDER BY Id) AS RowId
+    FROM BSADB.dbo.DJ_Address WITH(NOLOCK)
+    WHERE Deleted = 0
+),
+TempDOB AS (
+    SELECT EntityId, InfoDay, InfoMonth, InfoYear,
+           ROW_NUMBER() OVER (PARTITION BY EntityId ORDER BY Id) AS RowId
+    FROM BSADB.dbo.DJ_DateTypeInfo WITH(NOLOCK)
+    WHERE DateType = 'Date of Birth' AND Deleted = 0
 )
-INSERT INTO #tempDJBlacklistDetailsSID_JP 
-    (Num, EntNum, IdentificationNumber, IdentificationType, UpdatedDate, Address)
+INSERT INTO #tempDJBlacklistDetailsSID_GL
+    (EntNum, IdentificationNumber, IdentificationType, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB)
 SELECT 
-    E.ent_num,
     A.EntNum,
     A.IdentificationNumber,
     A.IdentificationType,
     A.UpdatedDate,
-    A.IdentificationType + '; Please go to Dowjones website for more detail'
-FROM #tempDJBlacklistSID_JP A
-LEFT JOIN TempNUM E 
-    ON A.EntNum = E.remark 
-   AND A.IdentificationNumber = E.spec_name 
-   AND A.IdentificationType = E.IdentificationType;
+    B.Address,
+    LEFT(B.City, 100),
+    LEFT(B.AddressCountry, 100),
+    CASE WHEN ISNULL(A.IdentificationType, '') = '' THEN NULL ELSE @OtherIdentMthCode END,
+    LEFT(A.IdentificationNumber, 44),
+    CASE 
+        WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL THEN D.InfoYear 
+        ELSE CONVERT(VARCHAR(8), dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) 
+    END
+FROM #tempDJBlacklistSID_GL A
+LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1
+LEFT JOIN TempDOB D     ON A.EntNum = D.EntityId AND D.RowId = 1;
 
--- 3. 為新資料產生連續的 ent_num
-DECLARE @MAXNoJP INT;
-SELECT @MAXNoJP = MAX(ent_num) FROM BSADBJP..OFAC_SPEC;
-
-UPDATE #tempDJBlacklistDetailsSID_JP
-SET @MAXNoJP = @MAXNoJP + 1,
-    Num = @MAXNoJP
-WHERE Num IS NULL;
-
--- 4. MERGE 主邏輯
+-- MERGE 到海外主表
 ;WITH TargetTable AS (
     SELECT 
-        A.spec_name,
-        A.updated_date,
-        A.remark,
-        A.TaxID,
-        A.IDENT,
-        A.IDENTO,
-        A.TaxIDCD,
-        A.IDNUM,
-        A.issBy,
-        A.DInd,
-        A.creUserID,
-        A.STATE,
-        A.ADDRESS,
-        A.COUNTRY,
-        A.GROUPID,
-        A.SOURCE,
-        A.EnterFlag,
-        A.ApprovedBy,
-        A.ApprovedDate,
-        A.DelUserID,
-        A.DelDate,
-        A.ApproveDelUserID,
-        A.ApproveDelDate,
-        A.creDate,
-        A.updated_date_UTC,
-        A.ApprovedDate_UTC,
-        A.DelDate_UTC,
-        A.ApproveDelDate_UTC,
-        A.creDate_UTC,
-        A.ent_num,
-        A.DOB,
-        REPLACE(A.ADDRESS, '; Please go to Dowjones website for more detail', '') AS IdentificationType
-    FROM BSADBJP..OFAC_SPEC A
-    WHERE A.GROUPID = 5
+        spec_name, updated_date, remark, DInd, creUserID, STATE, ADDRESS, COUNTRY,
+        GROUPID, IDENT, IDNUM, DOB, SOURCE, EnterFlag, ApprovedBy, ApprovedDate,
+        DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, creDate,
+        updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, creDate_UTC, ent_num
+    FROM BSADB.dbo.OFAC_GLSpec 
+    WHERE GROUPID = @GroupId
 )
 MERGE TargetTable T
 USING (
-    SELECT 
-        NUM,
-        EntNum,
-        IdentificationNumber,
-        IdentificationType,
-        UpdatedDate,
-        Address,
-        City,
-        Country,
-        IdentType,
-        IdentNumber,
-        DOB
-    FROM #tempDJBlacklistDetailsSID_JP
+    SELECT EntNum, IdentificationNumber, IdentificationType, UpdatedDate, 
+           Address, City, Country, IdentType, IdentNumber, DOB 
+    FROM #tempDJBlacklistDetailsSID_GL
 ) S
     ON T.spec_name = S.IdentificationNumber 
    AND T.remark = CAST(S.EntNum AS VARCHAR(100))
-   AND T.IdentificationType = S.IdentificationType
-
+   AND T.IDENT = S.IdentType
 WHEN NOT MATCHED BY TARGET THEN
     INSERT (
-        spec_name, updated_date, remark, TaxID, IDENT, IDENTO, TaxIDCD, IDNUM, IssBy, DInd,
-        creUserID, STATE, ADDRESS, COUNTRY, GROUPID, SOURCE, EnterFlag, ApprovedBy, ApprovedDate,
-        DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, creDate, updated_date_UTC,
-        ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, creDate_UTC, ent_num, DOB
+        spec_name, updated_date, remark, DInd, creUserID, STATE, ADDRESS, COUNTRY,
+        GROUPID, IDENT, IDNUM, DOB, SOURCE, EnterFlag, ApprovedBy, ApprovedDate,
+        DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, creDate,
+        updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, creDate_UTC
     )
     VALUES (
-        S.IdentificationNumber, 
-        S.UpdatedDate, 
-        S.EntNum, 
-        '', 
-        S.IdentType, 
-        S.IdentNumber, 
-        '', 
-        '', 
-        'JP', 
-        'N', 
-        'System Admin', 
-        ISNULL(S.City, ''), 
-        S.Address, 
-        S.Country, 
-        '5', 
-        'JP FINANCE', 
-        'D', 
-        'System Admin', 
-        GETDATE(), 
-        NULL, NULL, NULL, NULL, 
-        GETDATE(), 
-        GETUTCDATE(), 
-        GETUTCDATE(), 
-        NULL, 
-        NULL, 
-        GETUTCDATE(), 
-        S.Num, 
-        S.DOB
+        S.IdentificationNumber, S.UpdatedDate, S.EntNum, 'N',
+        'System Admin', ISNULL(S.City,''), S.Address, S.Country,
+        @GroupId, S.IdentType, S.IdentNumber, S.DOB,
+        'Sanctions IDs', 'D', 'System Admin', GETDATE(),
+        NULL, NULL, NULL, NULL, GETDATE(),
+        GETDATE(), GETUTCDATE(), NULL, NULL, GETUTCDATE()
     )
-
-WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN 
+WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN
     UPDATE SET 
-        T.DInd             = 'Y',
-        T.DelUserID        = 'System Admin',
-        T.DelDate          = GETDATE(),
+        T.DInd = 'Y',
+        T.DelUserID = 'System Admin',
+        T.DelDate = GETDATE(),
         T.ApproveDelUserID = 'System Admin',
-        T.ApproveDelDate   = GETDATE(),
-        T.DelDate_UTC      = GETUTCDATE()
-
-WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN 
+        T.ApproveDelDate = GETDATE(),
+        T.DelDate_UTC = GETUTCDATE()
+WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN
     UPDATE SET 
-        T.DInd             = 'N',
-        T.updated_date     = S.UpdatedDate,
-        T.DelUserID        = NULL,
-        T.DelDate          = NULL,
+        T.DInd = 'N',
+        T.updated_date = S.UpdatedDate,
+        T.DelUserID = NULL,
+        T.DelDate = NULL,
         T.ApproveDelUserID = NULL,
-        T.ApproveDelDate   = NULL,
-        T.DelDate_UTC      = NULL,
-        T.EnterFlag        = 'D',
+        T.ApproveDelDate = NULL,
+        T.DelDate_UTC = NULL,
+        T.EnterFlag = 'D',
         T.updated_date_UTC = GETUTCDATE(),
-        T.ADDRESS          = S.ADDRESS,
-        T.STATE            = ISNULL(S.City, ''),
-        T.COUNTRY          = S.Country,
-        T.IDENT            = S.IdentType,
-        T.IDNUM            = S.IdentNumber,
-        T.DOB              = S.DOB
-
+        T.ADDRESS = S.ADDRESS,
+        T.STATE = ISNULL(S.City,''),
+        T.COUNTRY = S.Country,
+        T.IDENT = S.IdentType,
+        T.IDNUM = S.IdentNumber,
+        T.DOB = S.DOB
 OUTPUT 
     CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ent_num ELSE Deleted.ent_num END,
     CASE WHEN $ACTION IN ('INSERT') THEN Inserted.spec_name ELSE Deleted.spec_name END,
     CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date ELSE Deleted.updated_date END,
     CASE WHEN $ACTION IN ('INSERT') THEN Inserted.remark ELSE Deleted.remark END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.taxid ELSE Deleted.taxid END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENT ELSE Deleted.IDENT END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENTO ELSE Deleted.IDENTO END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.TaxIDCD ELSE Deleted.TaxIDCD END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDNUM ELSE Deleted.IDNUM END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.issby ELSE Deleted.issby END,
     CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DInd ELSE Deleted.DInd END,
     CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creUserID ELSE Deleted.creUserID END,
-    CASE WHEN $ACTION IN ('INSERT') THEN 'System Admin' ELSE 'System Admin' END,
-    CASE WHEN $ACTION IN ('INSERT') THEN GETUTCDATE() ELSE GETUTCDATE() END,
-    CASE 
-        WHEN $ACTION = 'INSERT' 
-             OR ($ACTION = 'UPDATE' AND Deleted.DInd = 'Y' AND Inserted.DInd = 'N') THEN '01'
-        WHEN $ACTION = 'UPDATE' AND Inserted.DInd = 'Y' THEN '03'
-        ELSE '02' 
-    END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ADDRESS ELSE Deleted.ADDRESS END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.STATE ELSE Deleted.STATE END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.COUNTRY ELSE Deleted.COUNTRY END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.GROUPID ELSE Deleted.GROUPID END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.SOURCE ELSE Deleted.SOURCE END,
+    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENT ELSE Deleted.IDENT END,
+    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDNUM ELSE Deleted.IDNUM END,
+    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DOB ELSE Deleted.DOB END,
     CASE WHEN $ACTION IN ('INSERT') THEN Inserted.EnterFlag ELSE Deleted.EnterFlag END,
     CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedBy ELSE Deleted.ApprovedBy END,
     CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate ELSE Deleted.ApprovedDate END,
@@ -303,28 +191,12 @@ OUTPUT
     CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate ELSE Deleted.DelDate END,
     CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelUserID ELSE Deleted.ApproveDelUserID END,
     CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate ELSE Deleted.ApproveDelDate END,
-    CASE WHEN $ACTION IN ('INSERT') THEN GETUTCDATE() ELSE GETUTCDATE() END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate_UTC ELSE Deleted.ApprovedDate_UTC END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate_UTC ELSE Deleted.DelDate_UTC END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate_UTC ELSE Deleted.ApproveDelDate_UTC END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DOB ELSE Deleted.DOB END
-INTO BSADBJP.dbo.OFAC_SPEC_LOG
-(
-    ent_num, spec_name, updated_date, remark, TaxID, IDENT, IDENTO,
-    TaxIDCD, IDNUM, IssBy, DInd, creUserID, UserID, ActionDT, ActionCD,
-    Address, State, Country, GROUPID, SOURCE, EnterFlag,
-    ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate,
-    ActionDT_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, DOB
-);
+    CASE WHEN $ACTION = 'INSERT' OR ($ACTION = 'UPDATE' AND Deleted.DInd = 'Y' AND Inserted.DInd = 'N') THEN '01' 
+         WHEN $ACTION = 'UPDATE' AND Inserted.DInd = 'Y' THEN '03' ELSE '02' END,
+    GETUTCDATE()
+INTO BSADB.dbo.OFAC_GLSpec_Log 
+    (ent_num, spec_name, updated_date, remark, DInd, creUserID, IDENT, IDNUM, DOB,
+     EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate,
+     CreationDate, ActionCD, ActionDt);
 
-使用說明
-	•	這段已經是完整可直接使用的版本，包含完整的 OUTPUT + INTO。
-	•	GROUPID = 5 是參考你現有日本主名單的設定（如果日本 Sanctions IDs 要用不同的 GROUPID，請告訴我，我幫你改）。
-	•	SOURCE = 'JP FINANCE' 是我目前設的，你可以改成 'Sanctions IDs' 或其他你想要的值。
-	•	IssBy = 'JP' 是我目前寫的，代表 Japan。
-需要我再幫你調整以下項目嗎？
-	•	把 GROUPID 改成其他值
-	•	把 SOURCE 改成 'Sanctions IDs'
-	•	把海外版也改成跟你之前台灣版一樣使用 @MAXNo 自動編號的寫法
-	•	直接給你完整整合版的 Stored Procedure（把海外 + 日本主名單 + Sanctions IDs 全部合在一起）
-告訴我怎麼改，我馬上幫你調整！
+海外這樣有對?
