@@ -1,74 +1,19 @@
-好的，這是一個很好的問題。
-我直接回答你：
-為什麼海外的 Log 欄位這麼少？
-這不是 bug，而是因為兩邊的目標表結構本來就不一樣。
-項目
-海外 (OFAC_GLSpec / OFAC_GLSpec_Log)
-日本 (OFAC_SPEC / OFAC_SPEC_LOG)
-說明
-表結構
-較簡單、共用
-較詳細、獨立
-海外是給多個國家共用的表
-欄位數量
-少
-多
-包含 TaxID, IDENTO, TaxIDCD, issBy, Address, State, GROUPID, SOURCE, 多個 UTC 時間欄位等
-設計目的
-快速、共用
-詳細記錄
-日本/台灣/新加坡需要更完整的稽核資訊
+WITH  PURE_TS AS
+(
+	SELECT TS_CUST_ID FROM BANCS_SK_CUST_INFO a JOIN Customer_Migrate_buffer b on a.SK_CUST_ID = b.CustomerNo
+	WHERE a.CUST_RE_NO_FLG  = '1'
+	EXCEPT
+	SELECT TS_CUST_ID FROM BANCS_SK_CUST_INFO a JOIN Customer_Migrate_buffer b on a.SK_CUST_ID = b.CustomerNo
+	WHERE a.CUST_RE_NO_FLG IN ('2','3')
+)
+SELECT a.HIGHRISK ,u.HIGHRISK  FROM BSA_SUB_CUST_FACT a
+JOIN PURE_TS d on d.TS_CUST_ID = a.customerno
+JOIN CIF_Migrate_Mapping_TEMP h on h.NEW_CIF_KEY = a.CIF_KEY
+JOIN Cust_NP_Migrate_buffer t on t.CIF_KEY = h.SOURCE_CIF_KEY
+JOIN VERIFY..BSA_SUB_CUST_FACT u on u.CIF_KEY = a.CIF_KEY
+WHERE a.HIGHRISK != u.HIGHRISK
 
-目前海外版本的問題
-你目前海外 SID 的 OUTPUT 雖然不會報錯，但有以下問題：
-	1	跟主名單的 OUTPUT 不一致 你原本主名單寫進 OFAC_GLSpec_Log 時，OUTPUT 有包含 IDENTO、STATE、ADDRESS、COUNTRY、GROUPID 等欄位，但你 SID 版本少了這些。
-	2	缺少一些有用的稽核欄位 日本版有 Address、State、Country、GROUPID、SOURCE、ActionDT_UTC 等，海外版目前幾乎沒有，之後查 Log 會比較不方便。
 
-建議修正方向
-我建議把海外 SID 的 OUTPUT 調整成跟主名單一致的風格，補上合理的欄位。
-以下是修正後的海外 OUTPUT（推薦使用）：
-OUTPUT 
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ent_num ELSE Deleted.ent_num END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.spec_name ELSE Deleted.spec_name END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date ELSE Deleted.updated_date END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.remark ELSE Deleted.remark END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DInd ELSE Deleted.DInd END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creUserID ELSE Deleted.creUserID END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENT ELSE Deleted.IDENT END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDNUM ELSE Deleted.IDNUM END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DOB ELSE Deleted.DOB END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.EnterFlag ELSE Deleted.EnterFlag END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedBy ELSE Deleted.ApprovedBy END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate ELSE Deleted.ApprovedDate END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelUserID ELSE Deleted.DelUserID END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate ELSE Deleted.DelDate END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelUserID ELSE Deleted.ApproveDelUserID END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate ELSE Deleted.ApproveDelDate END,
-    CASE WHEN $ACTION = 'INSERT' OR ($ACTION = 'UPDATE' AND Deleted.DInd = 'Y' AND Inserted.DInd = 'N') THEN '01' 
-         WHEN $ACTION = 'UPDATE' AND Inserted.DInd = 'Y' THEN '03' ELSE '02' END,
-    GETUTCDATE(),
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ADDRESS ELSE Deleted.ADDRESS END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.STATE ELSE Deleted.STATE END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.COUNTRY ELSE Deleted.COUNTRY END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.GROUPID ELSE Deleted.GROUPID END,
-    CASE WHEN $ACTION IN ('INSERT') THEN Inserted.SOURCE ELSE Deleted.SOURCE END
-INTO BSADB.dbo.OFAC_GLSpec_Log 
-    (ent_num, spec_name, updated_date, remark, DInd, creUserID, IDENT, IDNUM, DOB,
-     EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate,
-     CreationDate, ActionCD, ActionDt, Address, State, Country, GROUPID, SOURCE);
-為什麼我只補這些？
-因為 OFAC_GLSpec_Log 本身就沒有像 OFAC_SPEC_LOG 那麼多欄位（例如沒有 TaxID、IDENTO、TaxIDCD、issBy、各種 _UTC 時間欄位等），所以不能硬塞。
+因為highrisk 是 H > M > L
 
-總結建議
-項目
-建議
-海外 Log 欄位少
-正常現象，屬於表結構差異
-是否要補欄位
-可以補 Address、State、Country、GROUPID、SOURCE（如上面版本）
-是否要跟日本一樣多
-不用，OFAC_GLSpec_Log 表本身就沒有那些欄位
-一致性
-建議讓海外 SID 的 OUTPUT 跟主名單的 OUTPUT 盡量一致
-
-需要我幫你把整個海外 SID 區塊（包含上面修正後的 OUTPUT）再給你一次完整版本嗎？還是你想再調整其他部分？
+要怎麼寫才能知道  a.HIGHRISK 都有 大於 u.HIGHRISK
