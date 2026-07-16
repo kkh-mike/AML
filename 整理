@@ -1,19 +1,102 @@
-WITH  PURE_TS AS
+如果 H > M > L，SQL 不會知道字串的大小關係，所以你必須自己定義排序規則。
+
+方法一：CASE WHEN (推薦)
+
+WITH PURE_TS AS
 (
-	SELECT TS_CUST_ID FROM BANCS_SK_CUST_INFO a JOIN Customer_Migrate_buffer b on a.SK_CUST_ID = b.CustomerNo
-	WHERE a.CUST_RE_NO_FLG  = '1'
+	SELECT TS_CUST_ID
+	FROM BANCS_SK_CUST_INFO a
+	JOIN Customer_Migrate_buffer b
+		ON a.SK_CUST_ID = b.CustomerNo
+	WHERE a.CUST_RE_NO_FLG = '1'
 	EXCEPT
-	SELECT TS_CUST_ID FROM BANCS_SK_CUST_INFO a JOIN Customer_Migrate_buffer b on a.SK_CUST_ID = b.CustomerNo
+	SELECT TS_CUST_ID
+	FROM BANCS_SK_CUST_INFO a
+	JOIN Customer_Migrate_buffer b
+		ON a.SK_CUST_ID = b.CustomerNo
 	WHERE a.CUST_RE_NO_FLG IN ('2','3')
 )
-SELECT a.HIGHRISK ,u.HIGHRISK  FROM BSA_SUB_CUST_FACT a
-JOIN PURE_TS d on d.TS_CUST_ID = a.customerno
-JOIN CIF_Migrate_Mapping_TEMP h on h.NEW_CIF_KEY = a.CIF_KEY
-JOIN Cust_NP_Migrate_buffer t on t.CIF_KEY = h.SOURCE_CIF_KEY
-JOIN VERIFY..BSA_SUB_CUST_FACT u on u.CIF_KEY = a.CIF_KEY
-WHERE a.HIGHRISK != u.HIGHRISK
+SELECT
+	a.HIGHRISK,
+	u.HIGHRISK
+FROM BSA_SUB_CUST_FACT a
+JOIN PURE_TS d
+	ON d.TS_CUST_ID = a.CustomerNo
+JOIN CIF_Migrate_Mapping_TEMP h
+	ON h.NEW_CIF_KEY = a.CIF_KEY
+JOIN Cust_NP_Migrate_buffer t
+	ON t.CIF_KEY = h.SOURCE_CIF_KEY
+JOIN VERIFY..BSA_SUB_CUST_FACT u
+	ON u.CIF_KEY = a.CIF_KEY
+WHERE
+	CASE a.HIGHRISK
+		WHEN 'H' THEN 3
+		WHEN 'M' THEN 2
+		WHEN 'L' THEN 1
+	END >
+	CASE u.HIGHRISK
+		WHEN 'H' THEN 3
+		WHEN 'M' THEN 2
+		WHEN 'L' THEN 1
+	END;
 
+結果會抓出
 
-因為highrisk 是 H > M > L
+a	u	是否抓出
+H	M	O
+H	L	O
+M	L	O
+M	H	X
+L	H	X
+L	M	X
+H	H	X
+M	M	X
+L	L	X
 
-要怎麼寫才能知道  a.HIGHRISK 都有 大於 u.HIGHRISK
+⸻
+
+方法二：先轉成 Rank
+
+如果後面還會常常比較，可以比較好閱讀。
+
+WITH PURE_TS AS
+(
+......
+),
+RISK AS
+(
+	SELECT
+		a.CIF_KEY,
+		a.HIGHRISK AS A_HIGHRISK,
+		u.HIGHRISK AS U_HIGHRISK,
+		CASE a.HIGHRISK
+			WHEN 'H' THEN 3
+			WHEN 'M' THEN 2
+			WHEN 'L' THEN 1
+		END AS A_RANK,
+		CASE u.HIGHRISK
+			WHEN 'H' THEN 3
+			WHEN 'M' THEN 2
+			WHEN 'L' THEN 1
+		END AS U_RANK
+	FROM BSA_SUB_CUST_FACT a
+	JOIN PURE_TS d
+		ON d.TS_CUST_ID = a.CustomerNo
+	JOIN CIF_Migrate_Mapping_TEMP h
+		ON h.NEW_CIF_KEY = a.CIF_KEY
+	JOIN Cust_NP_Migrate_buffer t
+		ON t.CIF_KEY = h.SOURCE_CIF_KEY
+	JOIN VERIFY..BSA_SUB_CUST_FACT u
+		ON u.CIF_KEY = a.CIF_KEY
+)
+SELECT *
+FROM RISK
+WHERE A_RANK > U_RANK;
+
+這樣你還可以看到：
+
+WHERE A_RANK < U_RANK   -- a 比較低
+WHERE A_RANK <> U_RANK -- 不一樣
+WHERE A_RANK = U_RANK  -- 一樣
+
+如果 HighRisk 未來只有 H/M/L 三種值，我會比較推薦第二種寫法，可讀性會比較高，而且之後要做統計 (H→M、M→L 有多少筆) 也比較方便。
