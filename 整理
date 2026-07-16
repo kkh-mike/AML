@@ -1,39 +1,103 @@
-SELECT 
-    a.customerno,
-	c.PEPBitwiseCode,
-    CASE WHEN c.PEPBitwiseCode & 1   = 1   THEN 'Y' ELSE 'N' END AS BlackList,
-    CASE WHEN c.PEPBitwiseCode & 2   = 2   THEN 'Y' ELSE 'N' END AS PEP,
-    CASE WHEN c.PEPBitwiseCode & 4   = 4   THEN 'Y' ELSE 'N' END AS NN,
-    CASE WHEN c.PEPBitwiseCode & 8   = 8   THEN 'Y' ELSE 'N' END AS ForeignPEP,
-    CASE WHEN c.PEPBitwiseCode & 16  = 16  THEN 'Y' ELSE 'N' END AS LocalPEP,
-    CASE WHEN c.PEPBitwiseCode & 32  = 32  THEN 'Y' ELSE 'N' END AS ForeignOrgPEP,
-    CASE WHEN c.PEPBitwiseCode & 64  = 64  THEN 'Y' ELSE 'N' END AS EfPEP,
-    CASE WHEN c.PEPBitwiseCode & 128 = 128 THEN 'Y' ELSE 'N' END AS CustRPIsPEP
-FROM VERIFY..BSA_SUB_CUST_FACT a
-JOIN Customer_Migrate_buffer b on a.CustomerNo = b.CustomerNo
-JOIN BSA_SUB_CUST_FACT_Extension_BAK_20260625 c     ON c.cif_KEY = a.cif_KEY 
-WHERE c.PEPBitwiseCode <>'0'
+如果你是要比對 BAK_20260625 跟現在的 BSA_SUB_CUST_FACT_Extension 的 PEPBitwiseCode 是否相同，我會建議直接用 FULL JOIN 去比較。
 
+SELECT
+    ISNULL(a.CustomerNo,b.CustomerNo) AS CustomerNo,
+    a.PEPBitwiseCode AS Old_PEPBitwiseCode,
+    b.PEPBitwiseCode AS New_PEPBitwiseCode
+FROM
+(
+    SELECT
+        x.CustomerNo,
+        c.PEPBitwiseCode
+    FROM VERIFY..BSA_SUB_CUST_FACT x
+    JOIN Customer_Migrate_buffer y
+        ON x.CustomerNo = y.CustomerNo
+    JOIN BSA_SUB_CUST_FACT_Extension_BAK_20260625 c
+        ON x.cif_KEY = c.cif_KEY
+    WHERE c.PEPBitwiseCode <> '0'
+) a
+FULL JOIN
+(
+    SELECT
+        x.CustomerNo,
+        c.PEPBitwiseCode
+    FROM VERIFY..BSA_SUB_CUST_FACT x
+    JOIN Customer_Migrate_buffer y
+        ON x.CustomerNo = y.CustomerNo
+    JOIN BSA_SUB_CUST_FACT_Extension c
+        ON x.cif_KEY = c.cif_KEY
+    WHERE c.PEPBitwiseCode <> '0'
+) b
+ON a.CustomerNo = b.CustomerNo
+WHERE ISNULL(a.PEPBitwiseCode,-1) <> ISNULL(b.PEPBitwiseCode,-1);
 
+如果你只想看不一樣的 Customer
 
+結果會長這樣：
 
-SELECT 
-    a.customerno,
-	c.PEPBitwiseCode,
-    CASE WHEN c.PEPBitwiseCode & 1   = 1   THEN 'Y' ELSE 'N' END AS BlackList,
-    CASE WHEN c.PEPBitwiseCode & 2   = 2   THEN 'Y' ELSE 'N' END AS PEP,
-    CASE WHEN c.PEPBitwiseCode & 4   = 4   THEN 'Y' ELSE 'N' END AS NN,
-    CASE WHEN c.PEPBitwiseCode & 8   = 8   THEN 'Y' ELSE 'N' END AS ForeignPEP,
-    CASE WHEN c.PEPBitwiseCode & 16  = 16  THEN 'Y' ELSE 'N' END AS LocalPEP,
-    CASE WHEN c.PEPBitwiseCode & 32  = 32  THEN 'Y' ELSE 'N' END AS ForeignOrgPEP,
-    CASE WHEN c.PEPBitwiseCode & 64  = 64  THEN 'Y' ELSE 'N' END AS EfPEP,
-    CASE WHEN c.PEPBitwiseCode & 128 = 128 THEN 'Y' ELSE 'N' END AS CustRPIsPEP
-FROM VERIFY..BSA_SUB_CUST_FACT a
-JOIN Customer_Migrate_buffer b on a.CustomerNo = b.CustomerNo
-JOIN BSA_SUB_CUST_FACT_Extension c     ON c.cif_KEY = a.cif_KEY 
-WHERE c.PEPBitwiseCode <>'0'
+CustomerNo	Old	New
+A001	2	18
+A002	32	NULL
+A003	NULL	64
 
+代表：
 
+* 2 →18 表示值被修改了
+* 32 → NULL 表示舊的有，新的沒有
+* NULL →64 表示新的多出來了
 
-我想要比較兩個的PEPBitwiseCode 是否都依樣
-要怎麼˙寫
+⸻
+
+如果你還想知道到底是哪個 Bit 被改掉，可以更進一步拆開：
+
+WITH OLD_DATA AS
+(
+    SELECT
+        a.CustomerNo,
+        c.PEPBitwiseCode
+    FROM VERIFY..BSA_SUB_CUST_FACT a
+    JOIN Customer_Migrate_buffer b
+        ON a.CustomerNo = b.CustomerNo
+    JOIN BSA_SUB_CUST_FACT_Extension_BAK_20260625 c
+        ON a.cif_KEY = c.cif_KEY
+),
+NEW_DATA AS
+(
+    SELECT
+        a.CustomerNo,
+        c.PEPBitwiseCode
+    FROM VERIFY..BSA_SUB_CUST_FACT a
+    JOIN Customer_Migrate_buffer b
+        ON a.CustomerNo = b.CustomerNo
+    JOIN BSA_SUB_CUST_FACT_Extension c
+        ON a.cif_KEY = c.cif_KEY
+)
+SELECT
+    ISNULL(o.CustomerNo,n.CustomerNo) AS CustomerNo,
+    o.PEPBitwiseCode AS Old_Code,
+    n.PEPBitwiseCode AS New_Code,
+    CASE WHEN o.PEPBitwiseCode & 2 = 2 THEN 'Y' ELSE 'N' END AS Old_PEP,
+    CASE WHEN n.PEPBitwiseCode & 2 = 2 THEN 'Y' ELSE 'N' END AS New_PEP,
+    CASE WHEN o.PEPBitwiseCode & 8 = 8 THEN 'Y' ELSE 'N' END AS Old_ForeignPEP,
+    CASE WHEN n.PEPBitwiseCode & 8 = 8 THEN 'Y' ELSE 'N' END AS New_ForeignPEP,
+    CASE WHEN o.PEPBitwiseCode & 16 = 16 THEN 'Y' ELSE 'N' END AS Old_LocalPEP,
+    CASE WHEN n.PEPBitwiseCode & 16 = 16 THEN 'Y' ELSE 'N' END AS New_LocalPEP
+FROM OLD_DATA o
+FULL JOIN NEW_DATA n
+    ON o.CustomerNo = n.CustomerNo
+WHERE ISNULL(o.PEPBitwiseCode,-1)
+    <> ISNULL(n.PEPBitwiseCode,-1);
+
+例如：
+
+CustomerNo	Old	New	Old_PEP	New_PEP	Old_Local	New_Local
+123456	2	18	Y	Y	N	Y
+
+你就可以很快知道：
+
+* 舊資料 = 2 (00000010)
+* 新資料 = 18 (00010010)
+* PEP 沒變
+* 多了一個 LocalPEP
+
+如果只是驗證 migration 的結果，我會比較推薦第二種寫法，因為不只知道 Code 不一樣，還能立即知道是哪一個 Flag 被打開或關閉，做 SIT/UAT 時會方便很多。
