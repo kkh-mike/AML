@@ -7,3 +7,45 @@ SELECT
     ) AS IsIdentity
 FROM INFORMATION_SCHEMA.COLUMNS
 WHERE TABLE_NAME='OFAC_GLSpec'
+
+
+
+
+COLUMN_NAME	IsIdentity
+spec_name	0
+updated_date	0
+remark	0
+TaxID	0
+IDENT	0
+IDENTO	0
+TaxIDCD	0
+IDNUM	0
+IssBy	0
+DInd	0
+creUserID	0
+STATE	0
+ADDRESS	0
+COUNTRY	0
+GROUPID	0
+SOURCE	0
+EnterFlag	0
+ApprovedBy	0
+ApprovedDate	0
+DelUserID	0
+DelDate	0
+ApproveDelUserID	0
+ApproveDelDate	0
+creDate	0
+updated_date_UTC	0
+ApprovedDate_UTC	0
+DelDate_UTC	0
+ApproveDelDate_UTC	0
+creDate_UTC	0
+ent_num	1
+spec_name_cn	0
+BatchID	0
+ISSBY_STATE	0
+DOB	0
+ApproveEditUserID	0
+ApproveEditDate	0
+ApproveEditDate_UTC	0
