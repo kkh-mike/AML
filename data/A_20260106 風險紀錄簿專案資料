@@ -1,58 +1,40 @@
---應用系統名稱 : AML
---Server名稱   : AMLDB1
---DataBase名稱 : BSADBTW
---提案單號     : 
---Total 筆數   : 142
---資料內容     : 全行PEP、高風險客戶數
-------------------------------
-USE BSADBTW
+以下是可以放到 Issue Tracking 或 CR 說明的內容。
 
--- 202112 PEP,HIGHRISK,TOT_CNT
-SELECT BRNCH_NBR,BRNCH_DESC,SUM(PEP_CNT) AS PEP_CNT, SUM(HIGHRISK) AS HIGHRISK, SUM(TOT_CNT) AS TOT_CNT   FROM 
-(
- SELECT BRNCH_NBR,BRNCH_DESC, COUNT(1) AS PEP_CNT,0 AS HIGHRISK, 0 AS TOT_CNT FROM
-(
- SELECT  '_'+A.BRNCH_NBR AS BRNCH_NBR,L.BRNCH_DESC
- FROM BSADBTW..PB_CUSTOMER_FACT A  WITH (NOLOCK)  
-INNER JOIN BSADBTW..BSA_SUB_CUST_FACT B  WITH (NOLOCK)  ON A.CIF_KEY = B.CIF_KEY
-LEFT JOIN BSADBTW..BRANCH_DIM L ON A.BRNCH_NBR = L.BRNCH_NBR
-LEFT JOIN (
-SELECT CIF_KEY,IsBearerShares,
-CASE WHEN PEPBitwiseCode & 1=1 THEN 'Y' ELSE 'N' END BlackList,
-CASE WHEN PEPBitwiseCode & 2=2 THEN 'Y' ELSE 'N' END PEP,
-CASE WHEN PEPBitwiseCode & 8=8 THEN 'Y' ELSE 'N' END ForeignPEP,
-CASE WHEN PEPBitwiseCode & 16=16 THEN 'Y' ELSE 'N' END LocalPEP,
-CASE WHEN PEPBitwiseCode & 32=32 THEN 'Y' ELSE 'N' END ForeignOrgPEP,
-CASE WHEN PEPBitwiseCode & 64=64 THEN 'Y' ELSE 'N' END ExPEP,
-CASE WHEN PEPBitwiseCode & 128=128 THEN 'Y' ELSE 'N' END CustRPIsPEP ,
-CASE WHEN PEPBitwiseCode & 4=4 THEN 'Y' ELSE 'N' END NN
-FROM BSADBTW..BSA_SUB_CUST_FACT_Extension
- ) F ON B.CIF_KEY = F.CIF_KEY
-WHERE A.RecordStatus='O'  AND b.CUSTOMERLEVEL <> 2
- AND F.pep = 'Y'
- ) A
- GROUP BY A.BRNCH_NBR,BRNCH_DESC
-UNION ALL
- SELECT BRNCH_NBR,BRNCH_DESC,0  AS PEP_CNT,COUNT(1) AS HIGHRISK,0 AS TOT_CNT FROM
-(
- SELECT  '_'+A.BRNCH_NBR AS BRNCH_NBR,L.BRNCH_DESC
- FROM BSADBTW..PB_CUSTOMER_FACT A  WITH (NOLOCK)  
-INNER JOIN BSADBTW..BSA_SUB_CUST_FACT B  WITH (NOLOCK)  ON A.CIF_KEY = B.CIF_KEY
-LEFT JOIN BSADBTW..BRANCH_DIM L ON A.BRNCH_NBR = L.BRNCH_NBR
-WHERE A.RecordStatus='O'  AND b.CUSTOMERLEVEL <> 2
- AND B.HIGHRISK ='H' 
- ) A
- GROUP BY A.BRNCH_NBR,BRNCH_DESC
-UNION ALL
-  SELECT BRNCH_NBR,BRNCH_DESC,0  AS PEP_CNT, 0 AS HIGHRISK,COUNT(1) AS TOT_CNT FROM
-(
- SELECT  '_'+A.BRNCH_NBR AS BRNCH_NBR,L.BRNCH_DESC
- FROM BSADBTW..PB_CUSTOMER_FACT A  WITH (NOLOCK)  
-INNER JOIN BSADBTW..BSA_SUB_CUST_FACT B  WITH (NOLOCK)  ON A.CIF_KEY = B.CIF_KEY
-LEFT JOIN BSADBTW..BRANCH_DIM L ON A.BRNCH_NBR = L.BRNCH_NBR
-WHERE A.RecordStatus='O'  AND b.CUSTOMERLEVEL <> 2
- ) A
- GROUP BY A.BRNCH_NBR,BRNCH_DESC
-) C
- GROUP BY C.BRNCH_NBR,BRNCH_DESC
- ORDER BY C.BRNCH_NBR,BRNCH_DESC
+【問題說明】
+
+2026/07/17 執行 SCHED_DJListPreparation.exe 時，於執行 SyncDJGlobalInternalList 發生錯誤：
+
+當 IDENTITY_INSERT 設為 OFF 時，無法將外顯值插入資料表 ‘OFAC_GLSpec’ 的識別欄位中。
+
+經檢查發現，IT20202509031043 新增之 Sanctions IDs（GROUPID = 10）同步邏輯於寫入 BSADB.dbo.OFAC_GLSpec 時，沿用了 BSADBJP..OFAC_SPEC 的 ent_num 產號方式，自行以 MAX(ent_num)+1 的方式產生 ent_num 並寫入資料表。
+
+然而，BSADB.dbo.OFAC_GLSpec 的 ent_num 欄位為 Identity Column（IsIdentity = 1），因此於 IDENTITY_INSERT = OFF 的情況下，不允許指定 ent_num 的值進行 INSERT，造成同步作業異常中止。
+
+【原因分析】
+
+1. OFAC_GLSpec.ent_num 為 Identity 欄位。
+2. Sanctions IDs（GROUPID = 10）同步邏輯自行產生 ent_num。
+3. INSERT INTO OFAC_GLSpec 時帶入 ent_num = S.Num。
+4. SQL Server 因 IDENTITY_INSERT = OFF 拒絕寫入，導致 Stored Procedure 執行失敗。
+
+【修改內容】
+
+1. 移除 #tempDJBlacklistDetailsSID 的 Num 欄位。
+2. 移除 MAX(ent_num)+1 的 ent_num 產號邏輯。
+3. 移除 INSERT INTO OFAC_GLSpec 時帶入 ent_num 的程式碼。
+4. 改由 SQL Server 自動產生 OFAC_GLSpec 的 Identity 值。
+5. 保留原有的 MERGE 比對條件：
+    * spec_name = IdentificationNumber
+    * remark = EntNum
+    * IdentificationType = IdentificationType
+6. 保留既有新增（INSERT）、更新（UPDATE）及軟刪除（DInd = ‘Y’）的同步邏輯與 Log 機制。
+
+【修改後結果】
+
+1. 新增資料時，由 SQL Server 自動產生 ent_num，不再發生 Identity Insert 錯誤。
+2. 舊資料仍可依 MERGE 條件正確進行更新與重新啟用。
+3. 不影響 GROUPID = 1 的 Dow Jones 主名單同步邏輯。
+4. 不影響 OFAC_GLSpec_Log 的寫入機制。
+5. 與目前 OFAC_GLSpec（GROUPID = 1）的設計方式保持一致。
+
+如果要寫在 CR 或 Jira，上述內容已經可以直接使用；若是要給主管或 SA 看，也能清楚交代「問題原因」、「修改內容」以及「影響範圍」。
