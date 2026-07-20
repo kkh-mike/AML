@@ -1,59 +1,108 @@
-倒檔申請單單號： IT19202607170005
- 倒檔筆數預計超過49999筆 序號1   實際總筆數   檔案名稱 600075.csv    【執行狀態】 失敗 ： 執行失敗，出現下列錯誤: "執行 Transact-SQL 陳述式或批次時發生例外狀況。"。
- - 執行失敗，出現下列錯誤: "執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。"。
- - 
- 	【來源SERVER】AMLDB1 【來源DB】BSADBTW 【來源OWNER】DBO 【來源TABLE】PB_Appointer_Fact 【來源WHERE】 
- 	【目的SERVER】amlist 【目的DB】BSADBTW 【目的OWNER】DBO 【目的TABLE】PB_Appointer_Fact 【目的DATA】Truncate 
- 序號10   實際總筆數   檔案名稱 600076.csv    【執行狀態】 失敗 ： 執行失敗，出現下列錯誤: "執行 Transact-SQL 陳述式或批次時發生例外狀況。"。
- - 執行失敗，出現下列錯誤: "執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。"。
- - 
- 	【來源SERVER】AMLDB1 【來源DB】BSADBTW 【來源OWNER】DBO 【來源TABLE】BSA_SUB_CUST_FACT 【來源WHERE】 
- 	【目的SERVER】amlist 【目的DB】BSADBTW 【目的OWNER】DBO 【目的TABLE】BSA_SUB_CUST_FACT 【目的DATA】Truncate 
- 序號11   實際總筆數 9817331  檔案名稱 600077.csv    【執行狀態】 成功
- 	【來源SERVER】AMLDB1 【來源DB】SOURCEDBTW 【來源OWNER】DBO 【來源TABLE】CIF_CVT_Source 【來源WHERE】 
- 	【目的SERVER】amlist 【目的DB】SOURCEDBTW 【目的OWNER】DBO 【目的TABLE】CIF_CVT_Source 【目的DATA】Truncate 
- 序號12   實際總筆數 9817346  檔案名稱 600078.csv    【執行狀態】 成功
- 	【來源SERVER】AMLDB1 【來源DB】WarehouseTW 【來源OWNER】DBO 【來源TABLE】PB_CUSTOMER_FACT 【來源WHERE】 
- 	【目的SERVER】amlist 【目的DB】WarehouseTW 【目的OWNER】DBO 【目的TABLE】PB_CUSTOMER_FACT 【目的DATA】Truncate 
- 序號2   實際總筆數 9817389  檔案名稱 600079.csv    【執行狀態】 成功
- 	【來源SERVER】AMLDB1 【來源DB】BSADBTW 【來源OWNER】DBO 【來源TABLE】BSA_SUB_CUST_FACT_Extension 【來源WHERE】 
- 	【目的SERVER】amlist 【目的DB】BSADBTW 【目的OWNER】DBO 【目的TABLE】BSA_SUB_CUST_FACT_Extension 【目的DATA】Truncate 
- 序號3   實際總筆數   檔案名稱 600080.csv    【執行狀態】 失敗 ： 執行失敗，出現下列錯誤: "傳輸資料時發生錯誤。如需詳細資訊，請參閱內部例外狀況。"。
- - 執行失敗，出現下列錯誤: "來源資料行 ~Name~ 的位置識別項 ~136196~ 與目的資料行 ~Name~ 的位置識別項 ~1028~ 不相符。"。
- - 
- 	【來源SERVER】AMLDB1 【來源DB】BSADBTW 【來源OWNER】DBO 【來源TABLE】PB_BoardOfDirector_Fact 【來源WHERE】 
- 	【目的SERVER】amlist 【目的DB】BSADBTW 【目的OWNER】DBO 【目的TABLE】PB_BoardOfDirector_Fact 【目的DATA】Truncate 
- 序號4   實際總筆數   檔案名稱 600081.csv    【執行狀態】 失敗 ： 執行失敗，出現下列錯誤: "執行 Transact-SQL 陳述式或批次時發生例外狀況。"。
- - 執行失敗，出現下列錯誤: "執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。"。
- - 
- 	【來源SERVER】AMLDB1 【來源DB】BSADBTW 【來源OWNER】DBO 【來源TABLE】PB_LegalAgent_Fact 【來源WHERE】 
- 	【目的SERVER】amlist 【目的DB】BSADBTW 【目的OWNER】DBO 【目的TABLE】PB_LegalAgent_Fact 【目的DATA】Truncate 
- 序號5   實際總筆數   檔案名稱 600082.csv    【執行狀態】 失敗 ： 執行失敗，出現下列錯誤: "執行 Transact-SQL 陳述式或批次時發生例外狀況。"。
- - 執行失敗，出現下列錯誤: "執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。"。
- - 
- 	【來源SERVER】AMLDB1 【來源DB】BSADBTW 【來源OWNER】DBO 【來源TABLE】PB_MainClient_Fact 【來源WHERE】 
- 	【目的SERVER】amlist 【目的DB】BSADBTW 【目的OWNER】DBO 【目的TABLE】PB_MainClient_Fact 【目的DATA】Truncate 
- 序號6   實際總筆數   檔案名稱 600083.csv    【執行狀態】 失敗 ： 執行失敗，出現下列錯誤: "執行 Transact-SQL 陳述式或批次時發生例外狀況。"。
- - 執行失敗，出現下列錯誤: "執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。"。
- - 
- 	【來源SERVER】AMLDB1 【來源DB】BSADBTW 【來源OWNER】DBO 【來源TABLE】PB_MainShareHolder_Fact 【來源WHERE】 
- 	【目的SERVER】amlist 【目的DB】BSADBTW 【目的OWNER】DBO 【目的TABLE】PB_MainShareHolder_Fact 【目的DATA】Truncate 
- 序號7   實際總筆數   檔案名稱 600084.csv    【執行狀態】 失敗 ： 執行失敗，出現下列錯誤: "執行 Transact-SQL 陳述式或批次時發生例外狀況。"。
- - 執行失敗，出現下列錯誤: "執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。"。
- - 
- 	【來源SERVER】AMLDB1 【來源DB】BSADBTW 【來源OWNER】DBO 【來源TABLE】PB_OtherRelatedParty_Fact 【來源WHERE】 
- 	【目的SERVER】amlist 【目的DB】BSADBTW 【目的OWNER】DBO 【目的TABLE】PB_OtherRelatedParty_Fact 【目的DATA】Truncate 
- 序號8   實際總筆數   檔案名稱 600085.csv    【執行狀態】 失敗 ： 執行失敗，出現下列錯誤: "執行 Transact-SQL 陳述式或批次時發生例外狀況。"。
- - 執行失敗，出現下列錯誤: "執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。"。
- - 
- 	【來源SERVER】AMLDB1 【來源DB】BSADBTW 【來源OWNER】DBO 【來源TABLE】PB_OtherRelatedParty_SubTypeCodes 【來源WHERE】 
- 	【目的SERVER】amlist 【目的DB】BSADBTW 【目的OWNER】DBO 【目的TABLE】PB_OtherRelatedParty_SubTypeCodes 【目的DATA】Truncate 
- 序號9   實際總筆數   檔案名稱 600086.csv    【執行狀態】 失敗 ： 執行失敗，出現下列錯誤: "執行 Transact-SQL 陳述式或批次時發生例外狀況。"。
- - 執行失敗，出現下列錯誤: "執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。"。
- - 
- 	【來源SERVER】AMLDB1 【來源DB】BSADBTW 【來源OWNER】DBO 【來源TABLE】PB_CustomerOptionalAnswers 【來源WHERE】 
- 	【目的SERVER】amlist 【目的DB】BSADBTW 【目的OWNER】DBO 【目的TABLE】PB_CustomerOptionalAnswers 【目的DATA】Truncate 
+重點只有兩個問題：
 
+1. 大部分 Table 是 Timeout (執行逾時)
 
+共 9 張 Table 失敗：
 
-說重點
+Table Name	Error
+PB_Appointer_Fact	Timeout
+BSA_SUB_CUST_FACT	Timeout
+PB_LegalAgent_Fact	Timeout
+PB_MainClient_Fact	Timeout
+PB_MainShareHolder_Fact	Timeout
+PB_OtherRelatedParty_Fact	Timeout
+PB_OtherRelatedParty_SubTypeCodes	Timeout
+PB_CustomerOptionalAnswers	Timeout
+
+錯誤訊息：
+
+執行逾時到期 (Execution Timeout Expired)
+
+表示：
+
+* SQL 執行太久
+* Server 沒有回應
+* 資料量太大
+* Linked Server 傳輸太久
+* Timeout 時間設定太短
+
+⸻
+
+2. PB_BoardOfDirector_Fact 是 Schema 不一致
+
+只有這張錯誤比較特別：
+
+來源資料行 Name 的位置識別項 136196 與目的資料行 Name 的位置識別項 1028 不相符。
+
+代表：
+
+* Source Table 跟 Target Table 不一致。
+
+可能是：
+
+* Column 順序不同
+* Column 被新增過
+* Column Type 不同
+* Schema 不一致
+
+需要確認：
+
+sp_help PB_BoardOfDirector_Fact
+
+比對：
+
+AMLDB1
+VS
+amlist
+
+看看是否有：
+
+Name varchar(200)
+↓
+Name nvarchar(500)
+
+或是：
+
+Source
+ID
+Code
+Name
+Address
+Target
+ID
+Name
+Code
+Address
+
+Column Position 不同也會發生。
+
+⸻
+
+成功的 Table
+
+* CIF_CVT_Source (981萬筆)
+* PB_CUSTOMER_FACT (981萬筆)
+* BSA_SUB_CUST_FACT_Extension (981萬筆)
+
+表示：
+
+* 倒檔程式沒有壞
+* Linked Server 正常
+* 部分 Table 可以成功
+
+⸻
+
+結論
+
+1. 8 張 Table
+    * 因為 Timeout 失敗。
+    * 需確認資料量、SQL Timeout 設定或 DB 是否有 Lock。
+2. 1 張 Table
+    * PB_BoardOfDirector_Fact
+    * Source 與 Target 的 Schema 不一致。
+3. 3 張 Table
+    * 已成功倒檔，不需要處理。
+
+一句話總結：
+
+此次倒檔失敗的主因是「大量資料導致 Timeout」，另外 PB_BoardOfDirector_Fact 則是來源與目的 Table Schema 不一致，需要比對欄位定義。
