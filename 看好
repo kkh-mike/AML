@@ -1,36 +1,48 @@
-沒問題！既然確定是**「金控層級 AML 聯防與資料下拋/上傳」，我重新將這三頁筆記梳理成更符合金控 IT / 批次作業規格**的結構化筆記。
-這樣看會更清晰，之後要回顧或寫系統文件（Spec）也很方便：
-🏛️ 金控 AML 聯防系統架構與作業規範
-1. 系統環境與執行參數 (Environment & Config)
- * 主機 / 伺服器：TC / P / DSAP \rightarrow dragon (測試機伺服器：uattrm01)
- * 營業日/基準日：20250925
- * 作業程式/模組：THAML / ASPD_001_B
- * 執行系統與週期：
-   * 執行介面：SysWeb
-   * 執行頻率：每月一次（批次執行時間：每月 10 號 15:30 / 10/30）
-2. 核心資料上傳與處理內容 (Upload Data)
-THAML 模組主要負責上傳以下兩大核心資料：
- * Customer 風險 Level（客戶風險等級）
- * 金控聯防名單（含新光子公司等跨子公司資料）
-3. AML 預測清單與比對邏輯 (Prediction & Risk Matching)
- * 預測清單處理：
-   * 資料經分析與加權，區分為 Good (正常) 與 Bad (異常) 資料。
-   * 透過 Control Function 進行控管，將產出資料 Upload 入庫（DB）。
- * 風險等級與名單比對：
-   * AML List / AML Rank 比對。
-   * AML_DIFF_RISK_M：進行各子公司/主機間風險 Level 的差異比對與調整。
-   * 業務邏輯標記：沒當加碼單 \rightarrow 註記為 AML Risk Level \rightarrow TH。
-4. 核心 Table 資料整理與下拋 (Data Processing & Output)
- * 資料拋轉路徑：
-   * AML 主機 / AML PII \rightarrow 寫入核心表 T_AML_PARTY。
-   * 對應主機欄位與等級格式：T_AML_Format（Host 名單 No. level）。
- * 資料整理與檔案產出：
-   * T_AML_PARTY \rightarrow 進行 壓重與資料整理 \rightarrow 下拋 產出 3 個 Data 檔案。
-   * 產出目標/延伸 Table：
-     * TSA_HIGH_RISK_CUST（高風險客戶主表）
-     * T_AML_M_RISKLV_HS_02C / CM
- * 檔案存放 (Place) 與編碼規範：
-   * 拋檔時需注意字型與編碼轉換：BIG5 / UTF8 / UTF16。
-💡 一句話總結作業全貌
-> 本作業為 每月 10 號跑批次 (SysWeb) 的金控 AML 聯防流程：在 uattrm01 (dragon) 環境執行 THAML (ASPD_001_B)，將客戶風險等級與子公司聯防名單上傳 DB 比對，並於 T_AML_PARTY 完成資料壓重與整理後，下拋產出 3 個指定編碼 (BIG5/UTF8) 的檔案與高風險客戶表 (TSA_HIGH_RISK_CUST)。
+完美的對照圖！這張圖是 DataStage (或 ETL 視覺化工具) 裡 THAML_ASDD_001_B 這個 Job 的架構流程圖。
+這完全把你筆記裡原本寫得有點凌亂的字（像是 3個data、big5/utf8/utf16、新光子公司、下拋、壓重）全部連起來了！
+我幫你把**「手寫筆記 + ETL 流程圖」**完美融合，重寫一份清晰專業的 THAML_ASDD_001_B 批次作業規格筆記：
+🏛️ 金控 AML 聯防資料處理批次作業筆記
+📌 系統與排程基本資訊
+ * Job 名稱：THAML_ASDD_001_B
+ * 主機環境：TC / P / DSAP \rightarrow dragon (測試機：uattrm01)
+ * 資料基準日 (As-of Date)：20250925（固定時間快照，確保跨子公司資料一致）
+ * 執行排程與介面：每月 10 號 15:30（或 10/30 批次），透過 SysWeb 執行
+🔄 ETL 流程圖對照解析 (THAML_ASDD_001_B)
+整個 Job 的資料流向分為 來源匯入 \rightarrow 整合壓重 \rightarrow 多編碼產出與清理 四大階段：
+[各子公司解密/檢核 Data Stage] 
+       │ (多來源匯流)
+       ▼
+[D_THAML_PARTY_INPUT_C] (資料輸入)
+       ▼
+[D_THAML_PARTY_C] (核心邏輯：壓重/整合)
+       ▼
+[D_THAML_PARTY_OUTPUT_C] (資料輸出)
+   ├──► [D_THAML_PARTY_ENC_BIG5_C]  (BIG5 編碼)
+   ├──► [D_THAML_PARTY_ENC_UTF16_C] (UTF16 編碼)
+   └──► [D_THAML_PARTY_ENC_UTF8_C]  (UTF8 編碼)
+       ▼
+[D_THAML_PARTY_DEL_C] (暫存清理/結尾)
+
+1. 來源端：子公司資料匯入與檢核 (Source Input)
+最上層負責接收並處理解密來自金控各子公司的 AML 聯防名單與客戶風險等級（Risk Level）：
+ * D_THAML_PARTY_DEC_MS_C：解密來源資料 (MS)
+ * D_THAML_PARTY_DEC_SKB_C：解密新光銀行資料 (SKB)
+ * D_THAML_PARTY_DEC_SKI_C：解密新光產險/人壽資料 (SKI)
+ * D_THAML_PARTY_DEC_SKL_C \rightarrow D_THAML_CHK_SKL_C：新光人壽資料解密與檢核
+ * D_THAML_PARTY_MOVE_C \rightarrow D_THAML_PARTY_DEC_SKP_C：新光證券/保代資料搬移與解密
+2. 核心處理端：資料匯總與壓重 (Processing Core)
+ * D_THAML_PARTY_INPUT_C：將上述所有子公司檢核後的資料進行統一格式匯入。
+ * D_THAML_PARTY_C：
+   * 核心業務邏輯：執行筆記中的 「整理 / 壓重」 與 「Risk Level 差異比對 (AML_DIFF_RISK_M)」。
+   * 標註高風險客戶 (TSA_HIGH_RISK_CUST) 與 AML Rank。
+ * D_THAML_PARTY_OUTPUT_C：產出整合後的 AML PARTY 主體資料，準備進行下拋轉檔。
+3. 下拋端：三種字型編碼轉檔 (Output & Encoding)
+筆記中的「下拋產出 3 個 data (BIG5 / UTF8 / UTF16)」就是對應這三支轉檔組件：
+ * D_THAML_PARTY_ENC_BIG5_C：轉碼為 BIG5 格式檔案
+ * D_THAML_PARTY_ENC_UTF16_C：轉碼為 UTF16 格式檔案
+ * D_THAML_PARTY_ENC_UTF8_C：轉碼為 UTF8 格式檔案
+4. 結尾端：清理與收尾 (Cleanup)
+ * D_THAML_PARTY_DEL_C：執行批次結束後的暫存檔清理 (Delete/Clean up)，完成整個 Job 流程。
+💡 一句話總結這張流程圖
+> THAML_ASDD_001_B 就是一支將各子公司 (SKB/SKL/SKI/SKP) 的解密資料匯入後，進行 T_AML_PARTY 資料壓重與風險等級比對，最後分流產出 BIG5 / UTF16 / UTF8 三種編碼檔案並進行清理的 DataStage 批次作業！
 > 
