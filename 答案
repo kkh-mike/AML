@@ -1,64 +1,52 @@
-✅ 明白了，謝謝你補充。
-你現在說的重點是：
-「有讀啦（篩選有讀 OFAC_GLSpec），我是說我最早的 code 為什麼失敗，我現在正在用你改的版本測試中。」
-好的，那我直接針對你最早貼的那版 code 做分析，告訴你它為什麼會失敗（Sanctions ID 沒同步進去、或沒被偵測）。
-你最早的 code 主要問題（Sanctions IDs 段）
-你一開始貼的版本，在 第三段 Sanctions IDs（GROUPID=10） 有以下幾個關鍵缺陷：
-問題
-說明
-後果
-沒有 TempNUM CTE 重用 ent_num
-直接把所有符合條件的 ID 都當新資料處理
-容易重複新增，或 matching 失敗
-INSERT #tempDJBlacklistDetailsSID 時只塞 5 個欄位
-City, Country, IdentType, IdentNumber, DOB 都是 NULL
-後面 MERGE INSERT 時這些欄位是空的
-沒有先查已存在的資料再決定用新 ent_num
-缺少像學長版那樣的 LEFT JOIN TempNUM
-新舊資料比對容易出問題
-MERGE 的 ON 條件雖然有 IdentificationType，但來源資料準備不完整
-導致很多應該進來的資料因為比對失敗而沒 INSERT
-你期望的 MX 相關 ID 可能就沒被寫進去
-@MAXNo 重複宣告
-日本段 + SID 段各宣告一次
-會報錯（你後來遇到的錯誤）
-最核心的原因是：
-你最早的 code 在準備 #tempDJBlacklistDetailsSID 時，缺少了「先找已經存在的 ent_num」這個步驟，導致資料要嘛沒進 temp table，要嘛進去後 MERGE 因為 key 比對失敗而沒真正寫進 OFAC_GLSpec。
-再加上 IdentificationType 的條件很嚴格，如果你的 MX 資料的 IdentificationType 不在那個長長的 IN 清單裡，或是 ListCategory 不符合，就根本不會被塞進 temp table，自然就不會出現在 GROUPID=10。
+✅ 我看懂你貼的畫面了。
+這張截圖顯示：
+	•	系統有從 Address Line 抓到字串（ru、SHENG、FAMILY、bank@）
+	•	並且有命中 GLSPEC（DJ Blacklist - Automated），RC=100
+	•	但你說「還是沒有」，意思應該是：你期望的那個特定 Sanctions ID（可能是那串 0x… 或 MX 相關的識別碼）沒有被當成 ID 類型命中，而是只被當成一般名稱去比對。
+為什麼還是沒達到你想要的效果？
+從畫面來看，目前觸發的是名稱比對（Name Match），而不是識別碼比對（Sanctions ID / GROUPID=10）。
+你最早的 code 失敗，主要有以下幾個原因（我整理給你）：
+你最早 code 的核心問題（為什麼 Sanctions ID 沒進去）
+	1	缺少「先找已存在 ent_num」的機制 你最早的版本在準備 #tempDJBlacklistDetailsSID 時，沒有先查 OFAC_GLSpec 裡已經存在的資料，導致新舊資料無法正確對應，MERGE 很容易失敗或沒 INSERT。
+	2	資料準備不完整 只塞了 5 個欄位進 temp table，後面 MERGE 時很多欄位是 NULL，影響比對。
+	3	@MAXNo 重複宣告 這會直接讓 SP 報錯（你後來遇到的錯誤）。
+	4	最可能的原因（你的 MX / 0x 那串）：
+	◦	那個識別碼的 IdentificationType 不在你程式硬-coded 的 IN 清單裡（例如是 crypto wallet address、或其他自訂類型）。
+	◦	或者該 Entity 的 ListCategory.Description2 / Description3 不符合條件。
+	◦	導致根本沒有被塞進 #tempDJBlacklistSID，自然就不會出現在 GROUPID=10。
 
-你現在正在測試的版本（我改的）有改進哪些？
-我上次給你的版本主要針對上面問題做了以下修正：
-	1	加入了 TempNUM CTE（先查已存在的 ent_num）
-	2	把 @MAXNo 宣告移到最上面，只宣告一次
-	3	讓新資料可以重用已有的 ent_num（比較乾淨）
-	4	清理了 INSERT 時的欄位對齊
-	5	保留目標表在 OFAC_GLSpec GROUPID=10（符合你海外有讀這張表的需求）
+你現在正在測試的版本（我改的）已經修正了什麼？
+	•	把 @MAXNo 宣告集中到最上面
+	•	加入 TempNUM CTE，讓可以重用已存在的 ent_num
+	•	讓資料準備更完整
+	•	目標依然維持在 OFAC_GLSpec GROUPID=10（因為你說篩選有讀這張表）
+但即使邏輯修正了，如果來源資料（Dow Jones）本身不符合條件，還是進不去。
 
-現在請你做一件事（很重要）
-你說你正在用我改的版本測試，請幫我確認以下兩點：
-測試後請回覆：
-	1	執行完 SP 後，這筆你關心的資料（MX 相關的識別碼）有沒有出現在 OFAC_GLSpec？ SELECT * 
-	2	FROM BSADB.dbo.OFAC_GLSpec 
-	3	WHERE GROUPID = 10 
-	4	  AND (spec_name LIKE '%你要找的關鍵字%' OR IDNUM LIKE '%你要找的關鍵字%')
-	5	  AND DInd = 'N'
-	6	
-	7	如果還是沒有，請把下面這段查詢的結果告訴我（把 ... 換成你那筆資料的關鍵字或 EntNum）： SELECT 
-	8	    A.EntityId,
-	9	    B.Description2,
-	10	    B.Description3,
-	11	    D.IdentificationType,
-	12	    D.IdentificationNumber,
-	13	    A.PersonStatus,
-	14	    D.Deleted
-	15	FROM BSADB.dbo.DJ_Entity A
-	16	JOIN BSADB.dbo.DJ_ListCategory B ON A.EntityId = B.EntityId
-	17	LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D ON A.EntityId = D.EntityId
-	18	WHERE ... -- 放你的 MX 關鍵字或 EntityId
-	19	
+請你現在做這件事（很重要）
+執行完我改的版本後，請跑下面這兩段查詢，告訴我結果：
+查詢 1：確認你關心的那筆資料有沒有進到 GROUPID=10
+SELECT 
+    spec_name, IDNUM, ADDRESS, DInd, updated_date, remark
+FROM BSADB.dbo.OFAC_GLSpec 
+WHERE GROUPID = 10 
+  AND DInd = 'N'
+  AND (spec_name LIKE '%0x931846D9%' OR spec_name LIKE '%MX%' OR IDNUM LIKE '%你要找的關鍵字%')
+查詢 2：檢查 Dow Jones 裡那筆資料的條件
+SELECT 
+    A.EntityId,
+    B.Description2,
+    B.Description3,
+    D.IdentificationType,
+    D.IdentificationNumber,
+    A.PersonStatus
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_ListCategory B ON A.EntityId = B.EntityId
+LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D ON A.EntityId = D.EntityId
+WHERE D.IdentificationNumber LIKE '%0x931846D9%'   -- 或換成你那串關鍵字
+   OR A.EntityId = 你懷疑的 EntNum
+請把這兩個查詢的結果貼給我（尤其是 IdentificationType 是什麼），我就能立刻判斷為什麼還是沒進去。
 
-簡單說：
-	•	你最早的 code 失敗，主要是因為 Sanctions IDs 段的資料準備邏輯不完整，導致很多符合條件的 ID 沒被寫進 OFAC_GLSpec GROUPID=10。
-	•	我改的版本已經把這個邏輯補強了。
-現在請你跑完測試後，把上面第 1 或第 2 點的結果告訴我，我再判斷是「資料沒進表」還是「進表了但篩選條件還不夠」。
-要不要我現在就再幫你把 Sanctions IDs 段再加強一次（例如放寬部分條件或加 log）？
+一句總結：
+你最早的 code 失敗，主要是因為 Sanctions IDs 段的資料準備與比對邏輯不完整，導致很多應該進 GROUPID=10 的識別碼被漏掉。
+我改的版本已經把邏輯補強了，但如果 Dow Jones 本身的那筆資料不符合 IdentificationType 或 ListCategory 的條件，還是進不去。
+現在請把上面兩個查詢的結果給我，我再幫你精準定位問題。
