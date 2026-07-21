@@ -1,11 +1,2 @@
--- 查這筆資料的 ListCategory 跟 IdentificationType
-SELECT 
-    A.EntityId, A.PersonStatus,
-    B.Description2, B.Description3,
-    D.IdentificationType, D.IdentificationNumber,
-    C.UpdatedDate
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_ListCategory B ON A.EntityId = B.EntityId
-JOIN BSADB.dbo.DJ_List_Data_A C ON A.EntityId = C.EntNum
-LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D ON A.EntityId = D.EntityId
-WHERE ... -- 放你的 MX 關鍵字或 EntNum
+訊息 134，層級 15，狀態 1，程序 GLSPEC_SyncDJToInternalList，行 462 [批次開始行 6]
+變數名稱 '@MAXNo' 已經宣告。變數名稱在一個查詢批次或預存程序內必須是唯一的。
