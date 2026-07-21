@@ -1,16 +1,50 @@
- SELECT 
-    A.EntityId,
-    B.Description2,
-    B.Description3,
-    D.IdentificationType,
-    D.IdentificationNumber,
-    A.PersonStatus
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_ListCategory B ON A.EntityId = B.EntityId
-LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D ON A.EntityId = D.EntityId
-WHERE D.IdentificationNumber LIKE '%0x931846D9%'   -- 或換成你那串關鍵字
-   OR A.EntityId = '1215703'
+SELECT * FROM BSADB.dbo.OFAC_GLSpec
+
+要怎麼找出對應的資料
+我目前只知道
+SELECT * FROM BSADB.dbo.OFAC_GLSpec A
+JOIN BSADB.dbo.DJ_ListCategory B ON A.ent_num = B.ID
+WHERE GROUPID = 10 AND B.Description2 = 'Sanctions Lists'
 
 
-EntityId	Description2	Description3	IdentificationType	IdentificationNumber	PersonStatus
-1215703	Other Official Lists	NULL	DUNS Number	247959286	Active
+
+因為我的條件式下面
+ INSERT INTO #tempDJBlacklistSID (EntNum, IdentificationType, IdentificationNumber, UpdatedDate)
+    SELECT 
+        A.EntityId, D.IdentificationType, D.IdentificationNumber, MAX(C.UpdatedDate)
+    FROM BSADB.dbo.DJ_Entity A
+    JOIN BSADB.dbo.DJ_ListCategory B          ON A.EntityId = B.EntityId
+    JOIN BSADB.dbo.DJ_List_Data_A C           ON A.EntityId = C.EntNum
+    LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D ON A.EntityId = D.EntityId
+    WHERE A.PersonStatus <> 'Inactive'
+      AND (
+            B.Description2 = 'Sanctions Lists'
+         OR B.Description3 IN (
+                'OFAC Related - Majority Owned', 'OFAC Related - Control',
+                'OFAC - Regional Sanctions Related - Majority Owned', 'OFAC - Regional Sanctions Related - Control',
+                'EU Related - Majority Owned', 'EU Related - Control',
+                'EU - Regional Sanctions Related - Majority Owned', 'EU - Regional Sanctions Related - Control'
+            )
+          )
+      AND B.Deleted = 0
+      AND D.IdentificationType IN (
+            'Aircraft Construction, Line, Fleet or Serial Number',
+            'Aircraft Manufacturer''s Serial Number (MSN)',
+            'Bank Identifier Code (BIC)',
+            'Central Registration Depository (CRD)',
+            'Company Identification No.',
+            'Driving Licence No.',
+            'DUNS Number',
+            'International Maritime Organization (IMO) Ship No.',
+            'International Securities Identification Number (ISIN)',
+            'Legal Entity Identifier (LEI)',
+            'National ID',
+            'National Provider Identifier (NPI)',
+            'National Tax No.',
+            'Others',
+            'Passport No.',
+            'Social Security No.',
+            'Email', 'Fax', 'Phone'
+          )
+      AND D.Deleted = 0
+    GROUP BY A.EntityId, D.IdentificationType, D.IdentificationNumber;
