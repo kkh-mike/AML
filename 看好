@@ -1,18 +1,36 @@
-這封催信既要禮貌、語氣堅定，又要明確給出截止時間（本週）。因為已經距離上次寄信（7/9）過了一段時間，建議採用 「直接回覆原郵件（Reply All）」 的方式，這樣可以保留歷史紀錄與附件，對方也最容易對齊上下文。
-1. 信件主旨（Subject）
-直接回覆原信件，主旨前面會自動帶有 RE:，建議修改或維持如下：
- * 建議主旨： RE: FW:【跨系統整合驗收通知】IT20202604291052 _ 優化香港分行 AML 組下載的貿易金融相關紅旗月報開發完成
- * (註：若想在主旨特別強調催促，可以維持 RE: 開頭，不用特別改寫)
-2. 信件內文建議（英文版）
-考慮到你之前是用英文溝通，這裡提供一個專業、得體且能達到催促目的的版本：
-> Dear Ling,
-> Following up on the email below regarding proposal IT20202604291052.
-> Could you kindly help verify and provide the TK along with the supervisor's approval email by the end of this week (July 24)?
-> Please let me know if you need any further information or assistance from my side.
-> Thank you!
-> Best regards,
-> 貫軒
+沒問題！既然確定是**「金控層級 AML 聯防與資料下拋/上傳」，我重新將這三頁筆記梳理成更符合金控 IT / 批次作業規格**的結構化筆記。
+這樣看會更清晰，之後要回顧或寫系統文件（Spec）也很方便：
+🏛️ 金控 AML 聯防系統架構與作業規範
+1. 系統環境與執行參數 (Environment & Config)
+ * 主機 / 伺服器：TC / P / DSAP \rightarrow dragon (測試機伺服器：uattrm01)
+ * 營業日/基準日：20250925
+ * 作業程式/模組：THAML / ASPD_001_B
+ * 執行系統與週期：
+   * 執行介面：SysWeb
+   * 執行頻率：每月一次（批次執行時間：每月 10 號 15:30 / 10/30）
+2. 核心資料上傳與處理內容 (Upload Data)
+THAML 模組主要負責上傳以下兩大核心資料：
+ * Customer 風險 Level（客戶風險等級）
+ * 金控聯防名單（含新光子公司等跨子公司資料）
+3. AML 預測清單與比對邏輯 (Prediction & Risk Matching)
+ * 預測清單處理：
+   * 資料經分析與加權，區分為 Good (正常) 與 Bad (異常) 資料。
+   * 透過 Control Function 進行控管，將產出資料 Upload 入庫（DB）。
+ * 風險等級與名單比對：
+   * AML List / AML Rank 比對。
+   * AML_DIFF_RISK_M：進行各子公司/主機間風險 Level 的差異比對與調整。
+   * 業務邏輯標記：沒當加碼單 \rightarrow 註記為 AML Risk Level \rightarrow TH。
+4. 核心 Table 資料整理與下拋 (Data Processing & Output)
+ * 資料拋轉路徑：
+   * AML 主機 / AML PII \rightarrow 寫入核心表 T_AML_PARTY。
+   * 對應主機欄位與等級格式：T_AML_Format（Host 名單 No. level）。
+ * 資料整理與檔案產出：
+   * T_AML_PARTY \rightarrow 進行 壓重與資料整理 \rightarrow 下拋 產出 3 個 Data 檔案。
+   * 產出目標/延伸 Table：
+     * TSA_HIGH_RISK_CUST（高風險客戶主表）
+     * T_AML_M_RISKLV_HS_02C / CM
+ * 檔案存放 (Place) 與編碼規範：
+   * 拋檔時需注意字型與編碼轉換：BIG5 / UTF8 / UTF16。
+💡 一句話總結作業全貌
+> 本作業為 每月 10 號跑批次 (SysWeb) 的金控 AML 聯防流程：在 uattrm01 (dragon) 環境執行 THAML (ASPD_001_B)，將客戶風險等級與子公司聯防名單上傳 DB 比對，並於 T_AML_PARTY 完成資料壓重與整理後，下拋產出 3 個指定編碼 (BIG5/UTF8) 的檔案與高風險客戶表 (TSA_HIGH_RISK_CUST)。
 > 
-💡 寫作小建議
- * 加粗關鍵字：將 TK、supervisor's approval email 以及 by the end of this week 加粗，能讓對方一眼看到重點。
- * 明確日期：寫出本週五的具體日期（7月24日），可以避免雙方對「這禮拜」產生時間差認知。
