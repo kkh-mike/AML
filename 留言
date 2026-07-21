@@ -1,93 +1,11 @@
-這支 SP 的整體目的：
-這是一支Dow Jones 制裁名單 (DJ Blacklist) 同步到內部 AML 系統的 Stored Procedure。 它會把外部的 Dow Jones 制裁資料，依照不同分類，分別同步到內部的兩個主要目標表，並且做冪等同步 (Idempotent Sync) + 軟刪除 + 完整稽核日誌。
-整支 SP 主要分成 三段獨立的同步流程，以下分別說明：
-
-第一段：主要黑名單同步（Primary Sanctions List）
-在做什麼？
-	•	從 BSADB.dbo.DJ_List_Data_A 篩選出「主要名稱」（NamePropertyBitCode & 1 > 0）且符合 AltStrengthBitCode 強度的實體。
-	•	使用 CTE + ROW_NUMBER() 把地址、證件、出生日期、性別等一對多資料扁平化（每一個 Entity 只取第一筆）。
-	•	使用 MERGE 對目標表做三種操作：
-	◦	新名單 → INSERT（DInd = 'N'）
-	◦	已不存在的名單 → 軟刪除（DInd = 'Y'）
-	◦	已存在但日期不同或之前被軟刪除 → 恢復 + 更新資料
-寫入目標：
-	•	主表：BSADB.dbo.OFAC_GLSpec（依傳入的 @GroupId 過濾）
-	•	日誌表：BSADB.dbo.OFAC_GLSpec_Log（記錄所有 INSERT / UPDATE / 軟刪除的 ActionCD）
-
-第二段：SCO 名單分流（Sanctions Control & Ownership）
-在做什麼？
-	•	篩選出屬於「控制權 / 多數持股」類型的實體（Description3 包含 OFAC Related - Majority Owned、Control、EU Related - Majority Owned 等）。
-	•	排除 NameSubType = 'OSN' 的資料。
-	•	取得 SanctionListReference 當作地址資訊。
-	•	同樣使用 MERGE 做新增 / 軟刪除 / 更新。
-寫入目標：
-	•	主表：BSADBTW..OFAC_SPEC（GROUPID = 27）
-	•	日誌表：BSADBTW.dbo.OFAC_SPEC_LOG
-這段是把「控制權與所有權」相關的制裁名單，獨立同步到 Group 27。
-
-第三段：SID 名單分流（Sanctions IDs）
-在做什麼？
-	•	篩選特定類型的識別證號（Passport、LEI、IMO、BIC、National ID、Email、Phone 等 19 種）。
-	•	同時包含「Sanctions Lists」或 SCO 類別的實體。
-	•	同樣做 MERGE 同步。
-寫入目標：
-	•	主表：BSADBTW..OFAC_SPEC（GROUPID = 29）
-	•	日誌表：BSADBTW.dbo.OFAC_SPEC_LOG
-這段是把「制裁相關的各種識別證號」獨立同步到 Group 29。
-
-三段寫入總結表
-區塊
-目標主表
-Group
-日誌表
-說明
-第一段
-BSADB.dbo.OFAC_GLSpec
-@GroupId (參數)
-BSADB.dbo.OFAC_GLSpec_Log
-主要黑名單（最常用）
-第二段
-BSADBTW..OFAC_SPEC
-27
-BSADBTW.dbo.OFAC_SPEC_LOG
-Sanctions Control & Ownership
-第三段
-BSADBTW..OFAC_SPEC
-29
-BSADBTW.dbo.OFAC_SPEC_LOG
-Sanctions IDs
-
-如何執行這支 SP 進行測試？
-1. 基本執行方式
--- 建議先用一個測試用的 GroupId
-EXEC dbo.GLSPEC_SyncDJToInternalList @GroupId = 999;   -- 改成你要測試的 GroupId
-2. 建議的測試流程（比較安全）
--- Step 1: 執行前先看目前有多少筆
-SELECT COUNT(*) AS BeforeCount 
-FROM BSADB.dbo.OFAC_GLSpec 
-WHERE GROUPID = 999 AND DInd = 'N';
-
--- Step 2: 執行 SP
-EXEC dbo.GLSPEC_SyncDJToInternalList @GroupId = 999;
-
--- Step 3: 執行後再看數量變化
-SELECT COUNT(*) AS AfterCount 
-FROM BSADB.dbo.OFAC_GLSpec 
-WHERE GROUPID = 999 AND DInd = 'N';
-
--- Step 4: 查看這次同步做了什麼動作（最重要！）
-SELECT TOP 100 *
-FROM BSADB.dbo.OFAC_GLSpec_Log
-WHERE GROUPID = 999
-ORDER BY ActionDt DESC;
-同樣的邏輯也可以用在 Group 27 和 Group 29 的表上檢查。
-3. 更安全的測試建議
-	•	先用小範圍的 GroupId 測試（例如只有幾十筆資料的 Group）。
-	•	如果想測試後可以回復，可以考慮把整段包在 BEGIN TRAN ... ROLLBACK TRAN，但要注意這支 SP 有跨資料庫寫入（BSADB ↔ BSADBTW）， transaction 行為會比較複雜。
-	•	重點觀察 Log 表 的 ActionCD：
-	◦	01 = 新增 或 從軟刪除恢復
-	◦	02 = 一般更新
-	◦	03 = 軟刪除
-
-小提醒： 這支 SP 裡面有幾個地方設計上不是很嚴謹（例如手動 @MAXNo 自增在高併發時有 race condition 的風險），但目前看起來是既有的 production code，測試時只要觀察 Log 表就能知道實際發生了什麼。
-需要我幫你寫一個「測試前後對比 + Log 檢視」的完整 Script 嗎？
+-- 查這筆資料的 ListCategory 跟 IdentificationType
+SELECT 
+    A.EntityId, A.PersonStatus,
+    B.Description2, B.Description3,
+    D.IdentificationType, D.IdentificationNumber,
+    C.UpdatedDate
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_ListCategory B ON A.EntityId = B.EntityId
+JOIN BSADB.dbo.DJ_List_Data_A C ON A.EntityId = C.EntNum
+LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D ON A.EntityId = D.EntityId
+WHERE ... -- 放你的 MX 關鍵字或 EntNum
