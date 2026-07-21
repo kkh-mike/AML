@@ -1,108 +1,64 @@
-重點只有兩個問題：
+✅ 明白了，謝謝你補充。
+你現在說的重點是：
+「有讀啦（篩選有讀 OFAC_GLSpec），我是說我最早的 code 為什麼失敗，我現在正在用你改的版本測試中。」
+好的，那我直接針對你最早貼的那版 code 做分析，告訴你它為什麼會失敗（Sanctions ID 沒同步進去、或沒被偵測）。
+你最早的 code 主要問題（Sanctions IDs 段）
+你一開始貼的版本，在 第三段 Sanctions IDs（GROUPID=10） 有以下幾個關鍵缺陷：
+問題
+說明
+後果
+沒有 TempNUM CTE 重用 ent_num
+直接把所有符合條件的 ID 都當新資料處理
+容易重複新增，或 matching 失敗
+INSERT #tempDJBlacklistDetailsSID 時只塞 5 個欄位
+City, Country, IdentType, IdentNumber, DOB 都是 NULL
+後面 MERGE INSERT 時這些欄位是空的
+沒有先查已存在的資料再決定用新 ent_num
+缺少像學長版那樣的 LEFT JOIN TempNUM
+新舊資料比對容易出問題
+MERGE 的 ON 條件雖然有 IdentificationType，但來源資料準備不完整
+導致很多應該進來的資料因為比對失敗而沒 INSERT
+你期望的 MX 相關 ID 可能就沒被寫進去
+@MAXNo 重複宣告
+日本段 + SID 段各宣告一次
+會報錯（你後來遇到的錯誤）
+最核心的原因是：
+你最早的 code 在準備 #tempDJBlacklistDetailsSID 時，缺少了「先找已經存在的 ent_num」這個步驟，導致資料要嘛沒進 temp table，要嘛進去後 MERGE 因為 key 比對失敗而沒真正寫進 OFAC_GLSpec。
+再加上 IdentificationType 的條件很嚴格，如果你的 MX 資料的 IdentificationType 不在那個長長的 IN 清單裡，或是 ListCategory 不符合，就根本不會被塞進 temp table，自然就不會出現在 GROUPID=10。
 
-1. 大部分 Table 是 Timeout (執行逾時)
+你現在正在測試的版本（我改的）有改進哪些？
+我上次給你的版本主要針對上面問題做了以下修正：
+	1	加入了 TempNUM CTE（先查已存在的 ent_num）
+	2	把 @MAXNo 宣告移到最上面，只宣告一次
+	3	讓新資料可以重用已有的 ent_num（比較乾淨）
+	4	清理了 INSERT 時的欄位對齊
+	5	保留目標表在 OFAC_GLSpec GROUPID=10（符合你海外有讀這張表的需求）
 
-共 9 張 Table 失敗：
+現在請你做一件事（很重要）
+你說你正在用我改的版本測試，請幫我確認以下兩點：
+測試後請回覆：
+	1	執行完 SP 後，這筆你關心的資料（MX 相關的識別碼）有沒有出現在 OFAC_GLSpec？ SELECT * 
+	2	FROM BSADB.dbo.OFAC_GLSpec 
+	3	WHERE GROUPID = 10 
+	4	  AND (spec_name LIKE '%你要找的關鍵字%' OR IDNUM LIKE '%你要找的關鍵字%')
+	5	  AND DInd = 'N'
+	6	
+	7	如果還是沒有，請把下面這段查詢的結果告訴我（把 ... 換成你那筆資料的關鍵字或 EntNum）： SELECT 
+	8	    A.EntityId,
+	9	    B.Description2,
+	10	    B.Description3,
+	11	    D.IdentificationType,
+	12	    D.IdentificationNumber,
+	13	    A.PersonStatus,
+	14	    D.Deleted
+	15	FROM BSADB.dbo.DJ_Entity A
+	16	JOIN BSADB.dbo.DJ_ListCategory B ON A.EntityId = B.EntityId
+	17	LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D ON A.EntityId = D.EntityId
+	18	WHERE ... -- 放你的 MX 關鍵字或 EntityId
+	19	
 
-Table Name	Error
-PB_Appointer_Fact	Timeout
-BSA_SUB_CUST_FACT	Timeout
-PB_LegalAgent_Fact	Timeout
-PB_MainClient_Fact	Timeout
-PB_MainShareHolder_Fact	Timeout
-PB_OtherRelatedParty_Fact	Timeout
-PB_OtherRelatedParty_SubTypeCodes	Timeout
-PB_CustomerOptionalAnswers	Timeout
-
-錯誤訊息：
-
-執行逾時到期 (Execution Timeout Expired)
-
-表示：
-
-* SQL 執行太久
-* Server 沒有回應
-* 資料量太大
-* Linked Server 傳輸太久
-* Timeout 時間設定太短
-
-⸻
-
-2. PB_BoardOfDirector_Fact 是 Schema 不一致
-
-只有這張錯誤比較特別：
-
-來源資料行 Name 的位置識別項 136196 與目的資料行 Name 的位置識別項 1028 不相符。
-
-代表：
-
-* Source Table 跟 Target Table 不一致。
-
-可能是：
-
-* Column 順序不同
-* Column 被新增過
-* Column Type 不同
-* Schema 不一致
-
-需要確認：
-
-sp_help PB_BoardOfDirector_Fact
-
-比對：
-
-AMLDB1
-VS
-amlist
-
-看看是否有：
-
-Name varchar(200)
-↓
-Name nvarchar(500)
-
-或是：
-
-Source
-ID
-Code
-Name
-Address
-Target
-ID
-Name
-Code
-Address
-
-Column Position 不同也會發生。
-
-⸻
-
-成功的 Table
-
-* CIF_CVT_Source (981萬筆)
-* PB_CUSTOMER_FACT (981萬筆)
-* BSA_SUB_CUST_FACT_Extension (981萬筆)
-
-表示：
-
-* 倒檔程式沒有壞
-* Linked Server 正常
-* 部分 Table 可以成功
-
-⸻
-
-結論
-
-1. 8 張 Table
-    * 因為 Timeout 失敗。
-    * 需確認資料量、SQL Timeout 設定或 DB 是否有 Lock。
-2. 1 張 Table
-    * PB_BoardOfDirector_Fact
-    * Source 與 Target 的 Schema 不一致。
-3. 3 張 Table
-    * 已成功倒檔，不需要處理。
-
-一句話總結：
-
-此次倒檔失敗的主因是「大量資料導致 Timeout」，另外 PB_BoardOfDirector_Fact 則是來源與目的 Table Schema 不一致，需要比對欄位定義。
+簡單說：
+	•	你最早的 code 失敗，主要是因為 Sanctions IDs 段的資料準備邏輯不完整，導致很多符合條件的 ID 沒被寫進 OFAC_GLSpec GROUPID=10。
+	•	我改的版本已經把這個邏輯補強了。
+現在請你跑完測試後，把上面第 1 或第 2 點的結果告訴我，我再判斷是「資料沒進表」還是「進表了但篩選條件還不夠」。
+要不要我現在就再幫你把 Sanctions IDs 段再加強一次（例如放寬部分條件或加 log）？
