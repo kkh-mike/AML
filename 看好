@@ -1,18 +1,23 @@
-可以直接這樣回信給主辦人（劉雨橙 / 監理系統組）：
-回信範本
-收件人：劉雨橙 (監理系統組) / 會議發起人
-副本 (CC)：（可視需要 CC Coco 或 AML 團隊相關同仁） 主旨：Re: 【系統整併：OBODS-HK 下檔資料加跑需求確認與討論】AML系統加跑需求回覆
-內文：
-雨橙 你好：
-回覆 AML（洗錢防制系統） 於 1/1 ~ 1/3 連假期間之 OBODS 資轉資料加跑需求如下：
- * 是否需要加跑：需要加跑 (V)
- * 預計抓檔時間：1/2 凌晨
- * 申請加跑之 Table 清單：
-   * WBS_CIF_CUST_INFO
-   * WBS_CIF_JOINT_ACCOUNT
-   * WBS_CIF_KYC
-   * WBS_CIF_STOCKHOLDER
-   * WBS_DEP_ACC_CCY_BAL
-請協助將以上 Table 納入集中封裝批次 DSAPSK777 中執行，以利 AML 系統於 1/2 辦理新光資轉 ETL 寫入作業。
-感謝協助！
-高貫軒 (Mike) AML 洗錢防制系統團隊
+幫我寫一之PS1 
+
+我要讀取路徑D:\AML_Source\Source\1141923\20260715
+
+下這些檔案
+    "AML_Acct.csv",
+    "AML_Cust.csv",
+    "AML_LoadTrxn.csv",
+    "AML_NameProperty_Cust.csv",
+    "AML_NameProperty_RP.csv",
+    "AML_SPEC_lowrisklistgroups.csv",
+    "AML_SPEC_OFAC_SPEC.csv"
+
+產出對應的MD5的CSV
+
+像這樣
+AML_Acct.csv;1582981;901c4938f992a37d456bd12a0ab27baf
+AML_CUST.csv;6181376;5834a2172660db32e6df8e6e82d05d41
+AML_LoadTrxn.csv;188726673;881cc4b7e8490c86a1e12aaeab0be09d
+AML_NameProperty_Cust.csv;6181376;b6a0021fe07cda3f3056afd46c670fc3
+AML_NameProperty_RP.csv;747441;bec206ac6b43191970ac152cb890b764
+AML_SPEC_lowrisklistgroups.csv;25;7ede4892df99e22f15940affeb0c0162
+AML_SPEC_OFAC_SPEC.csv;1930;e8ad26f7152ee0ffba297fc9f5364571
