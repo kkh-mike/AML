@@ -1,0 +1,264 @@
+ALTER VIEW [dbo].[Preload_Customer] AS
+/* 
+    =============================================
+    View: Preload_Customer
+    Purpose: AML/CRA 客戶風險評估的前置資料 View (資料門衛)
+    Description: 
+      - 每日處理 T-1 資料，整合 WBS 一般銀行與 TAP 私人銀行客戶資料
+      - 判斷客戶戶況 (Open / Close)
+      - 清洗敏感個資並標準化欄位，提供後續 CRA 風險評估與 AML 監控使用
+    =============================================
+*/
+
+WITH BOOK_RATE AS (
+    -- 取得最新 DBU 牌告利率 (目前未使用，保留供未來擴充)
+    SELECT * FROM HKDB..WBS_CTB_BOOK_RATE RATE WITH(NOLOCK)
+    WHERE RATE_TYPE = 'DBU'
+    AND RATE.UPDATE_DATE IN (
+        SELECT MAX(UPDATE_DATE) 
+        FROM HKDB..WBS_CTB_BOOK_RATE RATE_DATE WITH(NOLOCK) 
+        WHERE RATE_DATE.RATE_TYPE = 'DBU' 
+        GROUP BY RATE_DATE.CCY_CODE
+    )
+)
+SELECT
+    ROW_NUMBER() OVER (ORDER BY CustomerID) AS No,
+    CustomerID,
+    CustomerType,
+    CustomerName,
+    Addr1,
+    Addr2,
+    Addr3,
+    Addr4,
+    CtryCD,
+    Nationality,
+    Branch_nbr,
+    Record_Stat,
+    Customer_Chi_Name,
+    SIC_Code,
+    Date_Of_Birth,
+    InCorp_Date,
+    Creation_date,
+    Checker_DT_Stamp,
+    IsEmployee,
+    IsBelievedSuspicious,
+    Segment_Code,
+    OccupationCode,
+    OWNERSHIP_CODE,
+    CoreSystem,
+    Processing_Date,
+    Cust_Product_Service,
+    Cust_Method_Of_Opening,
+    Cust_Account_Purpose,
+    Source_Of_Fund,
+    Source_Of_Wealth,
+    Business_Operation_Stat,
+    First_Trxn_Amt,
+    Serving_Entity,
+    Cust_With_Bearer_Shares,
+    Uncooperative_Flag,
+    Trustee_Flag,
+    Spec_Product_Risk_Code,
+    OBU_Flag,
+    OBU_Type,
+    Customer_Scale,
+    Customer_Level,
+    Annual_Income,
+    Education,
+    Corr_Addr_Change_Flag,
+    Mail_Reject_Code,
+    SAR_Exclude_Flag,
+    Is_PEP,
+    Is_Foreign_PEP,
+    Is_Domestic_PEP,
+    Is_Foreign_Org_PEP,
+    Is_EX_PEP,
+    Cust_RP_Is_PEP,
+    Is_NN,
+    Is_Blacklist,
+    Is_High_Risk_Remark,
+    Warn_Restrict_Account,
+    Gender
+FROM (
+    /* ====================== WBS 一般銀行客戶 ====================== */
+    SELECT
+        WBS_CIF.CUSTOMER_ID AS CustomerID,
+        CustomerType,
+        REPLACE(REPLACE(REPLACE(WBS_CIF.CUSTOMER_ENG_NAME, CHAR(9), ''), CHAR(10), ''), CHAR(13), '') AS CustomerName,
+        WBS_CIF.CORRESPONDENCE_ENG_ADDRESS AS Addr1,
+        '' AS Addr2,
+        '' AS Addr3,
+        '' AS Addr4,
+        WBS_CIF.CORRESPONDENCE_COUNTRY AS CtryCD,
+        WBS_CIF.COUNTRY AS Nationality,
+        CASE WHEN WBS_CIF.DIVISION = 'Y' THEN '0900WM' ELSE '0900BD' END AS Branch_nbr,
+
+        /* 判斷客戶是否為有效戶 (Open) 或關閉戶 (Close) */
+        CASE
+            WHEN WBS_CIF.GUARANTOR = 'Y' THEN
+                CASE 
+                    WHEN WBS_CIF.CUSTOMER_STATUS IN ('000','002') THEN 'O'
+                    WHEN WBS_CIF.CUSTOMER_STATUS IN ('001','003') THEN 'C'
+                    WHEN WBS_CIF.STATUS = '1' THEN 'O' 
+                    ELSE 'C' 
+                END
+            WHEN ISNULL(WBS_CIF.OPENING_DATE, '00000000') = '00000000' THEN ISNULL(Record_Stat.Record_Stat, 'C')
+            WHEN DATEDIFF(DAY, WBS_CIF.OPENING_DATE, GETDATE()) > 30 THEN ISNULL(Record_Stat.Record_Stat, 'C')
+            ELSE 'O'
+        END AS Record_Stat,
+
+        WBS_CIF.CUSTOMER_NAME AS Customer_Chi_Name,
+        '' AS SIC_Code,
+        CASE WHEN CustomerType = 'P' THEN ESTABLISH_DATE ELSE '' END AS Date_Of_Birth,
+        CASE WHEN CustomerType = 'N' THEN ESTABLISH_DATE ELSE '' END AS InCorp_Date,
+        WBS_CIF.OPENING_DATE AS Creation_date,
+        WBS_CIF.DATE_INACTIVE AS Checker_DT_Stamp,
+        CASE WHEN WBS_CIF.BUSINESS_SECTOR_CODE = '007057' THEN 'Y' ELSE 'N' END AS IsEmployee,
+        '' AS IsBelievedSuspicious,
+        CASE 
+            WHEN WBS_CIF.GUARANTOR = 'Y' THEN 'NCR'
+            WHEN CustomerType = 'P' THEN 'RB'
+            ELSE 'CB' 
+        END AS Segment_Code,
+        '' AS OccupationCode,
+        '' AS OWNERSHIP_CODE,
+        'HKWBS' AS CoreSystem,
+        CONVERT(VARCHAR(10), GETDATE() - 1, 112) AS Processing_Date,
+
+        /* 帳戶目的轉碼 */
+        REPLACE(
+            CASE CustomerType
+                WHEN 'N' THEN REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(WBS_KYC.PURPOSE, '05', 'A09'), '04', 'A05'), '03', 'A03'), '02', 'A02'), '01', 'A01')
+                WHEN 'P' THEN REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(WBS_KYC.PURPOSE, '06', 'A09'), '05', 'A07'), '04', 'A06'), '03', 'A04'), '02', 'A03'), '01', 'A02')
+            END, ';', '~'
+        ) AS Cust_Account_Purpose,
+
+        WBS_KYC.SOURCE_FUNDS_COMPANY AS Source_Of_Fund,
+        '' AS Source_Of_Wealth,
+        '' AS Business_Operation_Stat,
+        '' AS First_Trxn_Amt,
+        '' AS Serving_Entity,
+        '' AS Cust_With_Bearer_Shares,
+        '' AS Uncooperative_Flag,
+        '' AS Trustee_Flag,
+        '' AS Spec_Product_Risk_Code,
+        '' AS OBU_Flag,
+        '' AS OBU_Type,
+        '' AS Customer_Scale,
+        '' AS Customer_Level,
+        WBS_KYC.AVERAGE_INCOME_LIST AS Annual_Income,
+        WBS_KYC.EDUCATION_STATUS AS Education,
+        '' AS Corr_Addr_Change_Flag,
+        '' AS Mail_Reject_Code,
+        'N' AS SAR_Exclude_Flag,
+        '' AS Is_PEP,
+        '' AS Is_Foreign_PEP,
+        '' AS Is_Domestic_PEP,
+        '' AS Is_Foreign_Org_PEP,
+        '' AS Is_EX_PEP,
+        '' AS Cust_RP_Is_PEP,
+        '' AS Is_NN,
+        '' AS Is_Blacklist,
+        '' AS Is_High_Risk_Remark,
+        '' AS Warn_Restrict_Account,
+        WBS_CIF.GENDER AS Gender
+
+    FROM (
+        SELECT WBS_CIF.*,
+               CASE WHEN RTRIM(LTRIM(CUSTOMER_TYPE)) IN ('01', '03') THEN 'P' ELSE 'N' END AS CustomerType
+        FROM WBS_CIF_CUST_INFO WBS_CIF WITH(NOLOCK)
+    ) WBS_CIF
+
+    /* 判斷 Record_Stat：是否有有效帳戶或授信 */
+    LEFT JOIN (
+        SELECT
+            ISNULL(ACC.CIF_CUST_INFO_SEQ, FAC.CIF_CUST_INFO_SEQ) AS CIF_CUST_INFO_SEQ,
+            MAX(
+                CASE 
+                    WHEN ACC.CASE_STATUS = '01' 
+                         AND ACC.ACC_TYPE <> '02' 
+                         AND ACC.IS_DORMANT <> 'Y'
+                         AND ISNULL(ACC.SPECIAL_STATUS_CODE, '01') NOT LIKE '%01%' 
+                    THEN 'O'
+                    WHEN BAL.CASE_STATUS = '01' AND ACC.IS_DORMANT <> 'Y' THEN 'O'
+                    WHEN FAC.FAC_STATUS = '05' THEN 'O'
+                    ELSE 'C' 
+                END
+            ) AS Record_Stat
+        FROM WBS_CIF_CUST_INFO WBS_CIF WITH(NOLOCK)
+        JOIN WBS_DEP_ACC ACC WITH(NOLOCK) ON WBS_CIF.CIF_CUST_INFO_SEQ = ACC.CIF_CUST_INFO_SEQ
+        LEFT JOIN WBS_DEP_ACC_CCY_BAL BAL WITH(NOLOCK) ON BAL.DEP_ACC_SEQ = ACC.DEP_ACC_SEQ AND BAL.CASE_STATUS = '01'
+        FULL JOIN WBS_FAC_INFO FAC WITH(NOLOCK) ON FAC.CIF_CUST_INFO_SEQ = ACC.CIF_CUST_INFO_SEQ AND FAC.FAC_STATUS = '05'
+        GROUP BY ISNULL(ACC.CIF_CUST_INFO_SEQ, FAC.CIF_CUST_INFO_SEQ)
+    ) Record_Stat ON WBS_CIF.CIF_CUST_INFO_SEQ = Record_Stat.CIF_CUST_INFO_SEQ
+
+    LEFT JOIN WBS_CIF_KYC WBS_KYC WITH(NOLOCK) ON WBS_CIF.CIF_KYC_SEQ = WBS_KYC.CIF_KYC_SEQ
+
+    WHERE WBS_CIF.ID_TYPE <> '31'                    -- 排除特殊證件別
+      AND ISNULL(WBS_CIF.PB, 'NULL') <> 'Y'          -- 排除已轉 PB 的客戶，避免重複
+
+    UNION ALL
+
+    /* ====================== TAP (PB) 私人銀行客戶 ====================== */
+    SELECT
+        CUSTOMER_ID AS CustomerID,
+        Customer_TYPE AS CustomerType,
+        CUSTOMER_ENG_NAME AS CustomerName,
+        CORR_ADDRESS_LINE1 AS Addr1,
+        CORR_ADDRESS_LINE2 AS Addr2,
+        CORR_ADDRESS_LINE3 AS Addr3,
+        CAST(CORR_ADDRESS_LINE4 AS VARCHAR) AS Addr4,
+        CORR_COUNTRY AS CtryCD,
+        TAP.NATIONALITY AS Nationality,
+        '0900PB' AS Branch_nbr,
+        CIF_STATUS AS Record_Stat,
+        CUSTOMER_CHI_NAME AS Customer_Chi_Name,
+        '' AS SIC_Code,
+        CASE WHEN Customer_TYPE = 'P' THEN CONVERT(VARCHAR(8), Date_Of_Birth, 112) END AS Date_Of_Birth,
+        CASE WHEN Customer_TYPE = 'N' THEN CONVERT(VARCHAR(8), InCorp_Date, 112) END AS InCorp_Date,
+        CONVERT(VARCHAR(8), OPENING_DATE, 112) AS Creation_date,
+        CONVERT(VARCHAR(8), CLOSED_DATE, 112) AS Checker_DT_Stamp,
+        CASE WHEN Customer_TYPE = 'P' THEN IS_EMPLOYEE_IND END AS IsEmployee,
+        CASE WHEN Is_HIGH_RISK_IND IN ('0', NULL) THEN NULL ELSE Is_HIGH_RISK_IND END AS IsBelievedSuspicious,
+        CUSTOMER_SEGMENT AS Segment_Code,
+        '' AS OccupationCode,
+        CASE WHEN Customer_TYPE = 'P' THEN OWNERSHIP_CODE ELSE NULL END AS OWNERSHIP_CODE,
+        CORE_SYSTEM AS CoreSystem,
+        CONVERT(VARCHAR(10), GETDATE() - 1, 112) AS Processing_Date,
+        CUST_PRODUCT_SERVICES AS Cust_Product_Service,
+        CUST_METHOD_OF_OPENING AS Cust_Method_Of_Opening,
+        CUST_ACCOUNT_PURPOSE AS Cust_Account_Purpose,
+        LEFT(SOURCE_OF_FUND, 2) AS Source_Of_Fund,
+        LEFT(SOURCE_OF_WEALTH, 2) AS Source_Of_Wealth,
+        CASE WHEN Customer_TYPE = 'P' THEN '' ELSE BUSINESS_OPERATION_STAT END AS Business_Operation_Stat,
+        CAST(FIRST_TRXN_AMT AS VARCHAR) AS First_Trxn_Amt,
+        SERVING_ENTITY AS Serving_Entity,
+        CUST_WITH_BEARER_SHARES AS Cust_With_Bearer_Shares,
+        UNCOOPERATIVE_FLAG AS Uncooperative_Flag,
+        TRUSTEE_FLAG AS Trustee_Flag,
+        SPEC_PRODUCT_RISK_CODE AS Spec_Product_Risk_Code,
+        CAST(OBU_FLAG AS VARCHAR) AS OBU_Flag,
+        CAST(OBU_TYPE AS VARCHAR) AS OBU_Type,
+        CAST(CUSTOMER_SCALE AS VARCHAR) AS Customer_Scale,
+        CAST(CUSTOMER_LEVEL AS VARCHAR) AS Customer_Level,
+        ANNUAL_INCOME AS Annual_Income,
+        CASE WHEN Customer_TYPE = 'P' THEN LEFT(EDUCATION, 2) ELSE '' END AS Education,
+        CAST(CORR_ADDR_CHANGE_FLAG AS VARCHAR) AS Corr_Addr_Change_Flag,
+        LEFT(MAIL_REJECT_CODE, 2) AS Mail_Reject_Code,
+        SAR_EXCLUDE_FLAG AS SAR_Exclude_Flag,
+        CAST(IS_PEP AS VARCHAR) AS Is_PEP,
+        CAST(IS_FOREIGN_PEP AS VARCHAR) AS Is_Foreign_PEP,
+        CAST(IS_DOMESTIC_PEP AS VARCHAR) AS Is_Domestic_PEP,
+        CAST(IS_FOREIGN_ORG_PEP AS VARCHAR) AS Is_Foreign_Org_PEP,
+        CAST(IS_EX_PEP AS VARCHAR) AS Is_EX_PEP,
+        CAST(CUST_RP_IS_PEP AS VARCHAR) AS Cust_RP_Is_PEP,
+        CAST(IS_NN AS VARCHAR) AS Is_NN,
+        CAST(IS_BLACKLIST AS VARCHAR) AS Is_Blacklist,
+        CAST(IS_HIGH_RISK_REMARK AS VARCHAR) AS Is_High_Risk_Remark,
+        CAST(WARN_RESTRICT_ACCOUNT AS VARCHAR) AS Warn_Restrict_Account,
+        Gender AS Gender
+    FROM Customer_File_TAP TAP WITH(NOLOCK)
+
+) Preload_Customer
+WHERE LEN(CustomerID) > 0;   -- 過濾掉異常空值客戶
+GO
