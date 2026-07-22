@@ -21,3 +21,15 @@ for example, if a screened party is being blacklisted this morning, will i be ab
 However, the update depends on when Dow Jones provides the latest data, and they do not have a fixed update schedule. 
 
 這邊要說的不是更新 是他們提供資料的時間不固定因為資料有不同種類 如 風險等級、負面新聞等等不同的資料 是分開給的
+
+
+
+這樣整理會比較自然，也能完整回答對方的問題：
+
+Our AML system updates the Dow Jones watchlist once every evening.
+
+However, Dow Jones provides different types of data, such as new watchlist entries, risk rating updates, and adverse media, separately and at different times. Therefore, we cannot guarantee exactly when a newly listed party will be available in our AML system.
+
+For example, if a party is added to the Dow Jones watchlist on the morning of 22 Jul, but Dow Jones has not yet included that information in the data they provide to us, our AML update on the evening of 22 Jul may still use the previous data, so the name check may not detect the new listing.
+
+To be on the safe side, we recommend checking on 24 Jul, after the AML update on the evening of 23 Jul.
