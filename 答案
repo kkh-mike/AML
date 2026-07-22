@@ -1,35 +1,169 @@
-新加坡的法尊問我
-the dow jones watchlist in our aml system
-for example, if a screened party is being blacklisted this morning, will i be able to detect it if i perform name check in the same morning?
+  */
+    IF OBJECT_ID('tempdb..#tempDJBlacklistSID') IS NOT NULL DROP TABLE #tempDJBlacklistSID;
+    IF OBJECT_ID('tempdb..#tempDJBlacklistDetailsSID') IS NOT NULL DROP TABLE #tempDJBlacklistDetailsSID;
 
-我是想表達下面這些，能幫我用英文表達?
+    CREATE TABLE #tempDJBlacklistSID
+    (
+        EntNum               INT NOT NULL,
+        IdentificationType   NVARCHAR(100) NOT NULL,
+        IdentificationNumber NVARCHAR(350) NOT NULL,
+        UpdatedDate          VARCHAR(8) NOT NULL
+    );
 
-我們固定更新的時間是在每天的晚上
-但資料都是取決於DJ 給我們的資料，其中資料不是單一資料 有可能是風險等級 、負面新聞 等等 然後給的時間不是固定的
+    CREATE TABLE #tempDJBlacklistDetailsSID
+    (
+        Num                  INT,
+        EntNum               INT NOT NULL,
+        IdentificationNumber NVARCHAR(350) NOT NULL,
+        IdentificationType   NVARCHAR(350) NOT NULL,
+        UpdatedDate          VARCHAR(8) NOT NULL,
+        Address              NVARCHAR(400)
+    );
 
-你要說確定的時間我們無法給出
+    INSERT INTO #tempDJBlacklistSID (EntNum, IdentificationType, IdentificationNumber, UpdatedDate)
+    SELECT 
+        A.EntityId,
+        D.IdentificationType,
+        D.IdentificationNumber, 
+        MAX(C.UpdatedDate)
+    FROM BSADB.dbo.DJ_Entity A
+    JOIN BSADB.dbo.DJ_ListCategory B          ON A.EntityId = B.EntityId
+    JOIN BSADB.dbo.DJ_List_Data_A C           ON A.EntityId = C.EntNum
+    LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D ON A.EntityId = D.EntityId
+    WHERE A.PersonStatus <> 'Inactive'
+      AND (
+            B.Description2 = 'Sanctions Lists'
+         OR B.Description3 IN (
+                'OFAC Related - Majority Owned', 'OFAC Related - Control',
+                'OFAC - Regional Sanctions Related - Majority Owned', 'OFAC - Regional Sanctions Related - Control',
+                'EU Related - Majority Owned', 'EU Related - Control',
+                'EU - Regional Sanctions Related - Majority Owned', 'EU - Regional Sanctions Related - Control'
+            )
+          )
+      AND B.Deleted = 0
+      AND D.IdentificationType IN (
+            'Aircraft Construction, Line, Fleet or Serial Number',
+            'Aircraft Manufacturer''s Serial Number (MSN)',
+            'Bank Identifier Code (BIC)',
+            'Central Registration Depository (CRD)',
+            'Company Identification No.',
+            'Driving Licence No.',
+            'DUNS Number',
+            'International Maritime Organization (IMO) Ship No.',
+            'International Securities Identification Number (ISIN)',
+            'Legal Entity Identifier (LEI)',
+            'National ID',
+            'National Provider Identifier (NPI)',
+            'National Tax No.',
+            'Others',
+            'Passport No.',
+            'Social Security No.',
+            'Email',
+            'Fax',
+            'Phone'
+          )
+      AND D.Deleted = 0
+    GROUP BY A.EntityId, D.IdentificationType, D.IdentificationNumber;
 
-如果今天早上被列入黑名單，如果DJ 還沒更新給的是舊資料我們就算當天晚上跑程式，這筆資料也可能查不到
+    ;WITH TempNUM AS
+    (
+        SELECT 
+            spec_name, 
+            updated_date, 
+            remark, 
+            ent_num,
+            REPLACE(ADDRESS, '; Please go to Dowjones website for more detail', '') AS IdentificationType
+        FROM BSADB.dbo.OFAC_GLSpec 
+        WHERE GROUPID = 10 
+          AND DInd = 'N'
+    )
+    INSERT INTO #tempDJBlacklistDetailsSID (Num, EntNum, IdentificationNumber, IdentificationType, UpdatedDate, Address)
+    SELECT 
+        E.ent_num,
+        A.EntNum,
+        A.IdentificationNumber,
+        A.IdentificationType,
+        A.UpdatedDate,
+        A.IdentificationType + '; Please go to Dowjones website for more detail'
+    FROM #tempDJBlacklistSID A
+    LEFT JOIN TempNUM E 
+        ON  A.EntNum               = E.remark 
+       AND A.IdentificationNumber = E.spec_name
+       AND A.IdentificationType   = E.IdentificationType;
 
-最保險的是第二天
+    -- 產生新的 ent_num（從目前最大值往後編）
+    SELECT @MAXNo = ISNULL(MAX(ent_num), 0) FROM BSADB.dbo.OFAC_GLSpec;
 
-例如0722早上列入黑名單
-那0723晚上AML更新後
-0724 就比較保險能找到
-
-
-However, the update depends on when Dow Jones provides the latest data, and they do not have a fixed update schedule. 
-
-這邊要說的不是更新 是他們提供資料的時間不固定因為資料有不同種類 如 風險等級、負面新聞等等不同的資料 是分開給的
+    UPDATE #tempDJBlacklistDetailsSID
+    SET @MAXNo = @MAXNo + 1,
+        Num    = @MAXNo
+    WHERE Num IS NULL;
 
 
-
-這樣整理會比較自然，也能完整回答對方的問題：
-
-Our AML system updates the Dow Jones watchlist once every evening.
-
-However, Dow Jones provides different types of data, such as new watchlist entries, risk rating updates, and adverse media, separately and at different times. Therefore, we cannot guarantee exactly when a newly listed party will be available in our AML system.
-
-For example, if a party is added to the Dow Jones watchlist on the morning of 22 Jul, but Dow Jones has not yet included that information in the data they provide to us, our AML update on the evening of 22 Jul may still use the previous data, so the name check may not detect the new listing.
-
-To be on the safe side, we recommend checking on 24 Jul, after the AML update on the evening of 23 Jul.
+    ;WITH TargetTable AS
+    (
+        SELECT *, 
+               REPLACE(ADDRESS, '; Please go to Dowjones website for more detail', '') AS IdentificationType
+        FROM BSADB.dbo.OFAC_GLSpec 
+        WHERE GROUPID = 10
+    )
+    MERGE TargetTable AS T
+    USING (SELECT Num, EntNum, IdentificationNumber, IdentificationType, UpdatedDate, Address 
+           FROM #tempDJBlacklistDetailsSID) AS S
+    ON  T.spec_name          = S.IdentificationNumber
+    AND T.remark             = CAST(S.EntNum AS VARCHAR(100))
+    AND T.IdentificationType = S.IdentificationType
+    WHEN NOT MATCHED BY TARGET THEN
+        INSERT (spec_name, updated_date, remark, TaxID, IDENT, IDENTO, TaxIDCD, IDNUM, IssBy, DInd,
+                creUserID, STATE, ADDRESS, COUNTRY, GROUPID, SOURCE, EnterFlag,
+                ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate,
+                creDate, updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, creDate_UTC, ent_num, DOB)
+        VALUES (S.IdentificationNumber, S.UpdatedDate, S.EntNum, '', NULL, NULL, '', S.IdentificationNumber, '',
+                'N', 'System Admin', '', S.Address, '', 10, 'Sanctions IDs', 'D',
+                'System Admin', GETDATE(), NULL, NULL, NULL, NULL,
+                GETDATE(), GETUTCDATE(), GETUTCDATE(), NULL, NULL, GETUTCDATE(), S.Num, NULL)
+    WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN
+        UPDATE SET T.DInd = 'Y', T.DelUserID = 'System Admin', T.DelDate = GETDATE(),
+                   T.ApproveDelUserID = 'System Admin', T.ApproveDelDate = GETDATE(), T.DelDate_UTC = GETUTCDATE()
+    WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN
+        UPDATE SET T.DInd = 'N', T.updated_date = S.UpdatedDate, T.DelUserID = NULL, T.DelDate = NULL,
+                   T.ApproveDelUserID = NULL, T.ApproveDelDate = NULL, T.DelDate_UTC = NULL,
+                   T.EnterFlag = 'D', T.updated_date_UTC = GETUTCDATE(),
+                   T.ADDRESS = S.Address, T.STATE = '', T.COUNTRY = '',
+                   T.IDENT = NULL, T.IDNUM = S.IdentificationNumber, T.DOB = NULL
+    OUTPUT 
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ent_num ELSE Deleted.ent_num END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.spec_name ELSE Deleted.spec_name END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date ELSE Deleted.updated_date END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.remark ELSE Deleted.remark END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DInd ELSE Deleted.DInd END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creUserID ELSE Deleted.creUserID END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENTO ELSE Deleted.IDENTO END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.STATE ELSE Deleted.STATE END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ADDRESS ELSE Deleted.ADDRESS END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.COUNTRY ELSE Deleted.COUNTRY END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.GROUPID ELSE Deleted.GROUPID END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENT ELSE Deleted.IDENT END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDNUM ELSE Deleted.IDNUM END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DOB ELSE Deleted.DOB END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.EnterFlag ELSE Deleted.EnterFlag END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedBy ELSE Deleted.ApprovedBy END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate ELSE Deleted.ApprovedDate END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelUserID ELSE Deleted.DelUserID END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate ELSE Deleted.DelDate END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelUserID ELSE Deleted.ApproveDelUserID END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate ELSE Deleted.ApproveDelDate END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creDate ELSE Deleted.creDate END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date_UTC ELSE Deleted.updated_date_UTC END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate_UTC ELSE Deleted.ApprovedDate_UTC END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate_UTC ELSE Deleted.DelDate_UTC END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate_UTC ELSE Deleted.ApproveDelDate_UTC END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creDate_UTC ELSE Deleted.creDate_UTC END,
+        CASE WHEN $ACTION = 'INSERT' OR ($ACTION = 'UPDATE' AND Deleted.DInd = 'Y' AND Inserted.DInd = 'N') THEN '01'
+             WHEN $ACTION = 'UPDATE' AND Inserted.DInd = 'Y' THEN '03' ELSE '02' END,
+        GETUTCDATE()
+    INTO BSADB.dbo.OFAC_GLSpec_Log
+        (ent_num, spec_name, updated_date, remark, DInd, creUserID, IDENTO, STATE, ADDRESS, COUNTRY, GROUPID,
+         IDENT, IDNUM, DOB, EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID,
+         ApproveDelDate, CreationDate, updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC,
+         CreationDate_UTC, ActionCD, ActionDt);
