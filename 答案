@@ -1,17 +1,20 @@
-SELECT 
-    spec_name,
-    IDNUM,
-    IDENT,
-    remark,
-    REPLACE(ADDRESS, '; Please go to Dowjones website for more detail', '') AS IdentificationType,
-    DInd,
-    STATE,
-    updated_date,
-    EnterFlag
-FROM BSADB.dbo.OFAC_GLSpec 
-WHERE GROUPID = 10
-  AND DInd = 'N'
-  AND IDNUM IS NOT NULL 
-  AND IDNUM <> ''
-  AND REPLACE(ADDRESS, '; Please go to Dowjones website for more detail', '') <> 'Others'
-ORDER BY updated_date DESC;
+貫軒你好！這份由監理系統組（報告人：劉雨橙，2026/07/21）發布的**「2027年元旦系統整併：OBODS 資轉批次下檔調整與上下游對接會議」**簡報，重點與你相關的事項整理如下：
+核心目標與重要時程
+ * 目標：確保 2027/01/04 (一) 正式開行時，各下游系統皆能順利取得業務所需資料。
+ * 回覆期限：請最晚於 本周五 (7/24) 下班前 正式回覆是否需要加跑批次。
+ * 預設規則：若期限內未回覆，系統預設為「不加跑」。
+OBODS 調整方案
+ * 執行方式：單一 Job 集中封裝針對有加跑需求的 Table，OBODS 將不拆分多個批次。
+ * 新 Job 名稱：DSAPSK777
+你的負責項目（高貫軒）
+簡報中列出由你負責的 AML（洗錢防制系統） 上游資轉 Table 如下：
+| 序號 | 資轉 Table 名稱 | 資料內容簡述 | 下游系統 | 備註 / 加跑狀態 |
+|---|---|---|---|---|
+| 1 | WBS_CIF_CUST_INFO | 客戶基本資料 | AML (洗錢防制系統) | 列於簡報第 4 頁（其他下游如 AOSYS、PLCS 等有需求） |
+| 2 | WBS_CIF_JOINT_ACCOUNT | 聯名戶資料 | AML (洗錢防制系統) | 需確認是否加跑 |
+| 4 | WBS_CIF_KYC | KYC檔 | AML (洗錢防制系統) | 需確認是否加跑 |
+| 5 | WBS_CIF_STOCKHOLDER | 關係人檔 | AML (洗錢防制系統) | 需確認是否加跑 |
+| 8 | WBS_DEP_ACC_CCY_BAL | 存款帳戶幣別餘額 | AML (洗錢防制系統) | 需確認是否加跑 |
+待辦事項提示
+ * 內部評估：請確認 AML 系統針對上述 Table 在元旦連假期間是否有加跑需求。
+ * 正式回覆：於 7/24 (五) 下班前 告知主辦團隊，以便排入 DSAPSK777 的執行清單中。
