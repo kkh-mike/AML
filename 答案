@@ -16,3 +16,8 @@ for example, if a screened party is being blacklisted this morning, will i be ab
 例如0722早上列入黑名單
 那0723晚上AML更新後
 0724 就比較保險能找到
+
+
+
+
+Not necessarily. Our AML system updates the Dow Jones watchlist once every evening, but the update depends on when Dow Jones provides the latest data. Since Dow Jones does not have a fixed update schedule, we cannot guarantee that a party added to the watchlist in the morning will be available for screening on the same day. To be on the safe side, we recommend performing the name check on the following day.
