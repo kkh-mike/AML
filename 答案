@@ -1,66 +1,17 @@
-簡單直接回答你的問題：
-GLspec 名單（GROUPID=10）要被 MX 偵測到，主要看這幾個欄位：
-優先順序
-欄位名稱
-說明
-目前這筆 249746000 的情況
-最重要
-spec_name
-最主要的 ID 值（你輸入的 249746000）
-有值
-非常重要
-IDNUM
-程序裡會把 IdentificationNumber 寫進這裡
-NULL（這很可能是問題）
-重要
-IDENT
-通常放名稱或另一種識別碼
-NULL
-次要
-ADDRESS
-實際存的是 IdentificationType + 備註
-Others;Please go to...
-參考
-remark
-存放 DJ 的 EntNum（1760092）
-有值
-參考
-IdentificationType（從 ADDRESS 解析）
-Others、National ID、BIC 等
-Others
-結論與問題分析
-MX 最常實際拿來比對的是：
-	1	spec_name（幾乎一定會用）
-	2	IDNUM（很多系統會特別用這個欄位做 exact match）
-你目前這筆資料的問題很明顯：
-	•	IDNUM 是 NULL
-	•	IDENT 也是 NULL
-	•	IdentificationType 被解析成 Others
-這三點加在一起，非常容易被 MX 的 screening rule 漏掉，尤其是當 MX 有設定「只偵測特定 IdentificationType」或「要求 IDNUM / IDENT 必須有值」時。
-建議你立刻執行這個查詢，確認實際資料
-請直接執行下面這段，把結果貼給我：
 SELECT 
     spec_name,
     IDNUM,
     IDENT,
-    IDENTO,
-    TaxID,
     remark,
+    REPLACE(ADDRESS, '; Please go to Dowjones website for more detail', '') AS IdentificationType,
     DInd,
     STATE,
     updated_date,
-    ADDRESS,
-    -- 把 ADDRESS 裡的 IdentificationType 解析出來
-    REPLACE(ADDRESS, '; Please go to Dowjones website for more detail', '') AS Parsed_IdentificationType,
-    GROUPID,
     EnterFlag
 FROM BSADB.dbo.OFAC_GLSpec 
-WHERE GROUPID = 10 
-  AND spec_name = '249746000';
-額外想問你
-	1	MX 的名單搜尋（或 transaction screening）後端，實際是查哪一張 table 或 view？ （例如是直接查 OFAC_GLSpec，還是另外有一張 MX_SanctionList、Watchlist_vw 之類的？）
-	2	MX 是否有設定「只偵測特定 IdentificationType」（例如只偵測 National ID、BIC、LEI，不偵測 Others）？
-把上面查詢的結果 + MX 真正用的 table 名稱告訴我，我可以更精準地告訴你：
-	•	這筆資料為什麼不會被偵測到
-	•	要怎麼調整（是改 sync procedure，還是 MX 的 rule）
-需要我幫你改 procedure 讓它強制把 IDNUM 寫入嗎？還是你想先確認 MX 到底看哪幾個欄位？
+WHERE GROUPID = 10
+  AND DInd = 'N'
+  AND IDNUM IS NOT NULL 
+  AND IDNUM <> ''
+  AND REPLACE(ADDRESS, '; Please go to Dowjones website for more detail', '') <> 'Others'
+ORDER BY updated_date DESC;
