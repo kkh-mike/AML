@@ -1,1 +1,61 @@
-bcp "SELECT CustomerNo, CUST_NME, NATIVE_CUST_NME, Alias_Name, C_CTRYCD, NATIONALITY_1, NATIONALITY_2, Cust_Method_Of_Opening, CAST(Cust_Product_Service AS NVARCHAR(4000)) FROM BSADBTW.dbo.Customer_Migrate_buffer_uat202607" queryout "D:\AML_Source\Source\1141923\SK_CIF.csv" -c -t"," -r"\n" -S "SQL Server" -U 你的帳號 -P 你的密碼
+Your BAT file is ready
+[file-tag: code-generated-file-3342ed23a2]
+為了確保 600 多萬筆資料的所有欄位 通通匯出，而且不會因為 ntext 或大字串欄位（如 Cust_Product_Service 等）導致 bcp 截斷報錯，這隻全新的 BAT 腳本做了以下自動處理：
+ * 自動讀取資料表結構：動態抓取 dbo.Customer_Migrate_buffer_uat202607 的 所有欄位名稱 當作 CSV 第一列（Header）。
+ * 自動型態轉換與防錯：自動檢查每一個欄位，若遇到 ntext / text 大欄位會自動加 CAST(欄位 AS NVARCHAR(MAX))，確保資料不被截斷且全數輸出。
+ * 極速匯出與合併：使用 bcp 將所有列匯出後，自動將 Header 與 Data 無縫合併成一個完整的 SK_CIF.csv。
+📄 .bat 批次檔程式碼
+請建立一個檔名為 export_all_sk_cif.bat 的檔案，將下方內容貼入存檔後按兩下執行即可：
+@echo off
+chcp 65001 >nul
+echo ===================================================
+echo   SQL Server BCP 全欄位/全資料自動匯出腳本
+echo ===================================================
+echo.
+
+:: 連線與路徑參數設定
+set SERVER=amlist
+set DB=BSADBTW
+set TABLE=dbo.Customer_Migrate_buffer_uat202607
+set USER=aml
+set PASS=aml1234
+set OUTDIR=D:\AML_Source\Source\1141923
+set FINAL_CSV=%OUTDIR%\SK_CIF.csv
+
+if not exist "%OUTDIR%" (
+    mkdir "%OUTDIR%"
+)
+
+echo [1/3] 正在自動分析所有欄位並產生標頭 (Header)...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$conn = New-Object System.Data.SqlClient.SqlConnection('Server=%SERVER%;Database=%DB%;User Id=%USER%;Password=%PASS%;'); $conn.Open(); $cmd = $conn.CreateCommand(); $cmd.CommandText = 'SELECT TOP 0 * FROM %TABLE%'; $reader = $cmd.ExecuteReader(); $cols = (0..($reader.FieldCount-1) | ForEach-Object { $reader.GetName($_) }) -join ','; $conn.Close(); Set-Content -Path '%OUTDIR%\header.csv' -Value $cols -Encoding UTF8"
+
+echo [2/3] 正在建立全欄位安全查詢並透過 BCP 匯出所有資料...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$conn = New-Object System.Data.SqlClient.SqlConnection('Server=%SERVER%;Database=%DB%;User Id=%USER%;Password=%PASS%;'); $conn.Open(); $cmd = $conn.CreateCommand(); $cmd.CommandText = 'SELECT TOP 0 * FROM %TABLE%'; $reader = $cmd.ExecuteReader(); $selectList = (0..($reader.FieldCount-1) | ForEach-Object { $name = $reader.GetName($_); $type = $reader.GetDataTypeName($_); if ($type -eq 'ntext' -or $type -eq 'text') { 'CAST([' + $name + '] AS NVARCHAR(MAX)) AS [' + $name + ']' } else { '[' + $name + ']' } }) -join ', '; $conn.Close(); Set-Content -Path '%OUTDIR%\query.txt' -Value $selectList"
+
+set /p QUERY_COLS=<"%OUTDIR%\query.txt"
+
+bcp "SELECT %QUERY_COLS% FROM %DB%.%TABLE%" queryout "%OUTDIR%\data.csv" -c -t"," -r"\n" -S %SERVER% -U %USER% -P %PASS%
+
+if errorlevel 1 (
+    echo.
+    echo [錯誤] BCP 匯出失敗，請檢查資料庫連線。
+    pause
+    exit /b 1
+)
+
+echo.
+echo [3/3] 正在合併標頭與所有資料列...
+copy /b "%OUTDIR%\header.csv" + "%OUTDIR%\data.csv" "%FINAL_CSV%" >nul
+
+echo 清理暫存檔...
+if exist "%OUTDIR%\header.csv" del "%OUTDIR%\header.csv"
+if exist "%OUTDIR%\data.csv" del "%OUTDIR%\data.csv"
+if exist "%OUTDIR%\query.txt" del "%OUTDIR%\query.txt"
+
+echo.
+echo ===================================================
+echo   匯出成功！所有欄位與資料已完全輸出至：
+echo   %FINAL_CSV%
+echo ===================================================
+pause
+
