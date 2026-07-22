@@ -1,17 +1,6 @@
-下面這支 Get-AMLFileMD5.ps1 會：
-
-1. 讀取 D:\AML_Source\Source\1141923\20260715
-2. 檢查指定的 CSV 是否存在。
-3. 計算：
-    * 檔案名稱
-    * 檔案大小(Bytes)
-    * MD5
-4. 最後輸出成 FileMD5.csv
-5. 格式如下：
-
-AML_Acct.csv;1582981;901c4938f992a37d456bd12a0ab27baf
 # 要讀取的路徑
 $FolderPath = "D:\AML_Source\Source\1141923\20260715"
+
 # 要檢查的檔案
 $Files = @(
     "AML_Acct.csv",
@@ -22,46 +11,40 @@ $Files = @(
     "AML_SPEC_lowrisklistgroups.csv",
     "AML_SPEC_OFAC_SPEC.csv"
 )
+
 # 輸出檔案
 $OutputFile = Join-Path $FolderPath "FileMD5.csv"
-# 如果檔案已存在則刪除
+
+# 如果輸出檔已存在則先刪除
 if (Test-Path $OutputFile) {
     Remove-Item $OutputFile
 }
-# 逐一處理檔案
+
 foreach ($FileName in $Files) {
+
     $FullPath = Join-Path $FolderPath $FileName
+
     if (Test-Path $FullPath) {
-        # 取得檔案大小(Bytes)
-        $FileSize = (Get-Item $FullPath).Length
+
+        # 計算 CSV 總行數(包含表頭)
+        $LineCount = (Get-Content -Path $FullPath | Measure-Object -Line).Lines
+
         # 計算 MD5
         $MD5 = (Get-FileHash -Path $FullPath -Algorithm MD5).Hash.ToLower()
-        # 組合輸出格式
-        $Result = "$FileName;$FileSize;$MD5"
-        # 寫入檔案
+
+        # 組合結果
+        $Result = "$FileName;$LineCount;$MD5"
+
+        # 寫入 CSV
         Add-Content -Path $OutputFile -Value $Result
+
+        # 顯示於畫面
         Write-Host $Result
     }
     else {
         Write-Host "File Not Found : $FileName" -ForegroundColor Yellow
     }
 }
+
 Write-Host ""
-Write-Host "MD5 File Generated：" -ForegroundColor Green
-Write-Host $OutputFile
-
-輸出範例
-
-AML_Acct.csv;1582981;901c4938f992a37d456bd12a0ab27baf
-AML_Cust.csv;6181376;5834a2172660db32e6df8e6e82d05d41
-AML_LoadTrxn.csv;188726673;881cc4b7e8490c86a1e12aaeab0be09d
-AML_NameProperty_Cust.csv;6181376;b6a0021fe07cda3f3056afd46c670fc3
-AML_NameProperty_RP.csv;747441;bec206ac6b43191970ac152cb890b764
-AML_SPEC_lowrisklistgroups.csv;25;7ede4892df99e22f15940affeb0c0162
-AML_SPEC_OFAC_SPEC.csv;1930;e8ad26f7152ee0ffba297fc9f5364571
-
-執行完後會在：
-
-D:\AML_Source\Source\1141923\20260715\FileMD5.csv
-
-看到相同內容的輸出檔案。這樣之後如果要比對 AML source file 的檔案大小與 MD5，就可以直接拿 FileMD5.csv 做比對。
+Write-Host "Generate Success : $OutputFile" -ForegroundColor Green
