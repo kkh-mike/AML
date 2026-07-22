@@ -1,166 +1,18 @@
-你的問題其實是 OFAC_GLSpec 的資料到底是從哪邊來的。
+新加坡的法尊問我
+the dow jones watchlist in our aml system
+for example, if a screened party is being blacklisted this morning, will i be able to detect it if i perform name check in the same morning?
 
-看起來有兩種可能：
+我是想表達下面這些，能幫我用英文表達?
 
-1. OFAC_GLSpec.ent_num = DJ_Entity.EntityId
-2. OFAC_GLSpec.ent_num = DJ_List_Data_A.EntNum
+我們固定更新的時間是在每天的晚上
+但資料都是取決於DJ 給我們的資料，其中資料不是單一資料 有可能是風險等級 、負面新聞 等等 然後給的時間不是固定的
 
-所以你可以先確認 ent_num 對的是誰。
+你要說確定的時間我們無法給出
 
-第一步，先看 OFAC_GLSpec 有哪些資料
+如果今天早上被列入黑名單，如果DJ 還沒更新給的是舊資料我們就算當天晚上跑程式，這筆資料也可能查不到
 
-SELECT TOP 100 *
-FROM BSADB.dbo.OFAC_GLSpec
+最保險的是第二天
 
-假設看到：
-
-ent_num
---------
-12345
-67890
-11111
-
-先去找是不是 DJ_Entity
-
-SELECT *
-FROM BSADB.dbo.DJ_Entity
-WHERE EntityId = 12345
-
-如果找得到，再看看是不是 Sanctions List
-
-SELECT *
-FROM BSADB.dbo.DJ_ListCategory
-WHERE EntityId = 12345
-
-例如：
-
-EntityId    Description2
----------   -----------------
-12345       Sanctions Lists
-
-代表有符合。
-
-第二種，直接把條件全部 JOIN 起來
-
-SELECT
-    A.ent_num,
-    B.Description2,
-    B.Description3,
-    C.PersonStatus,
-    D.IdentificationType,
-    D.IdentificationNumber
-FROM BSADB.dbo.OFAC_GLSpec A
-JOIN BSADB.dbo.DJ_ListCategory B
-    ON A.ent_num = B.EntityId
-JOIN BSADB.dbo.DJ_Entity C
-    ON A.ent_num = C.EntityId
-LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D
-    ON A.ent_num = D.EntityId
-WHERE B.Deleted = 0
-
-如果你只想看你的 SP 會抓到的資料，可以直接把條件全部加進去。
-
-SELECT
-    A.ent_num,
-    B.Description2,
-    B.Description3,
-    C.PersonStatus,
-    D.IdentificationType,
-    D.IdentificationNumber
-FROM BSADB.dbo.OFAC_GLSpec A
-JOIN BSADB.dbo.DJ_Entity C
-    ON A.ent_num = C.EntityId
-JOIN BSADB.dbo.DJ_ListCategory B
-    ON A.ent_num = B.EntityId
-LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D
-    ON A.ent_num = D.EntityId
-WHERE C.PersonStatus <> 'Inactive'
-AND (
-        B.Description2 = 'Sanctions Lists'
-     OR B.Description3 IN (
-            'OFAC Related - Majority Owned',
-            'OFAC Related - Control',
-            'OFAC - Regional Sanctions Related - Majority Owned',
-            'OFAC - Regional Sanctions Related - Control',
-            'EU Related - Majority Owned',
-            'EU Related - Control',
-            'EU - Regional Sanctions Related - Majority Owned',
-            'EU - Regional Sanctions Related - Control'
-        )
-    )
-AND B.Deleted = 0
-AND D.IdentificationType IN (
-        'Aircraft Construction, Line, Fleet or Serial Number',
-        'Aircraft Manufacturer''s Serial Number (MSN)',
-        'Bank Identifier Code (BIC)',
-        'Central Registration Depository (CRD)',
-        'Company Identification No.',
-        'Driving Licence No.',
-        'DUNS Number',
-        'International Maritime Organization (IMO) Ship No.',
-        'International Securities Identification Number (ISIN)',
-        'Legal Entity Identifier (LEI)',
-        'National ID',
-        'National Provider Identifier (NPI)',
-        'National Tax No.',
-        'Others',
-        'Passport No.',
-        'Social Security No.',
-        'Email',
-        'Fax',
-        'Phone'
-    )
-AND D.Deleted = 0;
-
-如果是想知道「為什麼 OFAC_GLSpec 沒被抓到」
-
-最好用 LEFT JOIN 一層一層看是哪個條件被擋掉。
-
-SELECT
-    A.ent_num,
-    C.PersonStatus,
-    B.Description2,
-    B.Description3,
-    B.Deleted AS ListDeleted,
-    D.IdentificationType,
-    D.Deleted AS IDDeleted
-FROM BSADB.dbo.OFAC_GLSpec A
-LEFT JOIN BSADB.dbo.DJ_Entity C
-    ON A.ent_num = C.EntityId
-LEFT JOIN BSADB.dbo.DJ_ListCategory B
-    ON A.ent_num = B.EntityId
-LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D
-    ON A.ent_num = D.EntityId
-WHERE A.ent_num = XXXXX;
-
-例如會看到：
-
-ent_num   PersonStatus   Description2        IdentificationType
--------   ------------   ----------------   --------------------
-12345     Active         Sanctions Lists     Passport No.
-
-或是
-
-12345     Active         NULL                Passport No.
-
-代表被 DJ_ListCategory 擋掉。
-
-12345     Inactive       Sanctions Lists     Passport No.
-
-代表被
-
-PersonStatus <> 'Inactive'
-
-擋掉。
-
-12345     Active         Sanctions Lists     Company No.
-
-代表被
-
-IdentificationType IN (...)
-
-擋掉。
-
-⸻
-
-如果你的目的是做 Root Cause Analysis，我會建議最後一個寫法最好用。拿 OFAC_GLSpec.ent_num 去做 LEFT JOIN，所有條件先不要下，只把資料攤開來看，很容易就知道它到底是被哪一個條件 (PersonStatus、Description2/3、Deleted、IdentificationType) 擋掉的。
+例如0722早上列入黑名單
+那0723晚上AML更新後
+0724 就比較保險能找到
