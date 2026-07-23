@@ -1,0 +1,165 @@
+USE [HKDB]
+GO
+
+/****** Object:  View [dbo].[RAW_CUSTOMER_RP]    Script Date: 2026/7/23 下午 05:41:36 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+
+/*
+ * 2018207 HKWBS 版本
+ * 20250527 GB2B-PPTA人員納入CDC掃描
+ */
+ALTER VIEW [dbo].[RAW_CUSTOMER_RP] AS
+
+SELECT
+	CIF.CUSTOMER_ID AS CustomerID --自己的ID
+	,RP.RP_TYPE AS Related_Parties_Type
+	,(CASE WHEN 'STOCK_HOLDER'=DATA_SOURCE THEN CIF.CUSTOMER_ID ELSE CIF_RP.CUSTOMER_ID END) --原WBS之RP放自己，否則聯名戶放對方
+		+ '_' + CONVERT(VARCHAR(10) ,RP.CIF_STOCKHOLDER_SEQ ) AS Related_Parties_ID		--MASTER:小孩+小孩序號 ;MEMBER:放兄弟+兄弟序號
+	,'' AS Other_Related_Parties_Type ,'' AS Other_Related_Parties_Desc
+	,CASE WHEN RP.HOLDER_ENG_NAME IS NULL THEN RP.HOLDER_NAME ELSE RP.HOLDER_ENG_NAME END AS Name
+	,ISNULL(RP.ALSO_KNOWN_AS, '') AS Aliases
+	,CASE WHEN RP.CAT_TYPE IN ('01','03') THEN 'I' ELSE 'C' END AS Type	/*聯名戶也當個人*/
+	,CASE WHEN RP.ESTABLISH_DATE IS NOT NULL THEN
+		SUBSTRING(RP.ESTABLISH_DATE, 1, 4) + '-' + SUBSTRING(RP.ESTABLISH_DATE, 5, 2) 
+			+ '-' + RIGHT(RP.ESTABLISH_DATE, 2) ELSE RP.ESTABLISH_DATE 
+	END AS DOB
+	,RP.COUNTRY AS Nationality
+	,'' AS P_Addr1 ,'' AS P_Addr2 ,'' AS P_Addr3 ,'' AS P_Country 
+	,'' AS C_Addr1 ,'' AS C_Addr2 ,'' AS C_Addr3 ,'' AS C_Country
+	,'' AS Contact_Phone_No ,'' AS Email
+	,'' AS ID_Type ,'' AS ID_Num 
+	,'' AS ID_Issue_Date ,'' AS ID_Expiry_Date 
+	,'' AS ID_Issuing_Country ,RP.REMARK AS Remark 
+	,RP.STATUS AS Status
+	,CONVERT( VARCHAR(10) ,DATEADD(D, - 1, GETDATE()), 20) AS Processing_Date
+	,'' AS OPENING_DATE ,'' AS CLOSED_DATE
+	,'HKWBS' AS CoreSystem ,RP.HOLDER_NAME AS Native_Name
+FROM (
+		SELECT
+			CIF_CUST_INFO_SEQ ,CAT_TYPE
+			,CASE WHEN CAT_TYPE = '00' THEN 'BOD' WHEN CAT_TYPE = '01' THEN 'BOD' 
+				WHEN CAT_TYPE = '02' THEN 'MS' WHEN CAT_TYPE = '03' THEN 'APP' ELSE 'OTH' 
+			 END AS RP_TYPE
+			,CIF_STOCKHOLDER_SEQ
+			,HOLDER_NAME ,HOLDER_ENG_NAME ,ESTABLISH_DATE ,COUNTRY ,ALSO_KNOWN_AS
+			,CASE WHEN STATUS = '1' THEN 'O' ELSE 'C' END AS STATUS
+			,'' AS REMARK ,'STOCK_HOLDER' AS DATA_SOURCE
+		FROM HKDB..WBS_CIF_STOCKHOLDER
+	UNION
+        SELECT 
+			CIF.CIF_CUST_INFO_SEQ --自己序號
+			,'01' AS CAT_TYPE ,'OTH' AS RP_TYPE	/*聯名戶小孩都是個人*/
+			,CIF_RP.CIF_CUST_INFO_SEQ AS CIF_STOCKHOLDER_SEQ --對方序號
+            ,CIF_RP.CUSTOMER_NAME AS HOLDER_NAME
+            ,CIF_RP.CUSTOMER_ENG_NAME AS HOLDER_ENG_NAME
+            ,CIF_RP.ESTABLISH_DATE
+            ,CIF_RP.COUNTRY
+            ,CIF_RP.ALIASES ALSO_KNOWN_AS
+            ,CASE WHEN JOINT_RP.STATUS = '1' THEN 'O' ELSE 'C' END AS STATUS
+            ,'JOINT MEMBER' REMARK ,'JOINT_RP' AS DATA_SOURCE
+        FROM HKDB..WBS_CIF_JOINT_ACCOUNT JOINT JOIN HKDB..WBS_CIF_JOINT_ACCOUNT JOINT_RP
+        ON JOINT.CIF_CUST_INFO_SEQ = JOINT_RP.CIF_CUST_INFO_SEQ 
+        AND JOINT.MEMBER_SEQ != JOINT_RP.MEMBER_SEQ  --同一聯名戶，不同小孩
+        JOIN WBS_CIF_CUST_INFO CIF ON CIF.CIF_CUST_INFO_SEQ = JOINT.MEMBER_SEQ	--小孩的CIF
+        JOIN WBS_CIF_CUST_INFO CIF_RP ON CIF_RP.CIF_CUST_INFO_SEQ = JOINT_RP.MEMBER_SEQ	--小孩的CIF
+	UNION
+        SELECT 
+			JOINT.CIF_CUST_INFO_SEQ --自己序號
+			,'03' AS CAT_TYPE ,'OTH' AS RP_TYPE	/*聯名戶的頭也當個人*/
+			,CIF_RP.CIF_CUST_INFO_SEQ AS CIF_STOCKHOLDER_SEQ --對方序號
+            ,CIF_RP.CUSTOMER_NAME AS HOLDER_NAME
+            ,CIF_RP.CUSTOMER_ENG_NAME AS HOLDER_ENG_NAME
+            ,CIF_RP.ESTABLISH_DATE
+            ,CIF_RP.COUNTRY
+            ,CIF_RP.ALIASES ALSO_KNOWN_AS
+            ,CASE WHEN JOINT.STATUS = '1' THEN 'O' ELSE 'C' END AS STATUS
+            ,'JOINT ACCOUNT' REMARK ,'JOINT_MASTER' AS DATA_SOURCE
+        FROM HKDB..WBS_CIF_JOINT_ACCOUNT JOINT JOIN HKDB..WBS_CIF_CUST_INFO CIF_RP
+        ON JOINT.MEMBER_SEQ = CIF_RP.CIF_CUST_INFO_SEQ 
+) AS RP 
+JOIN HKDB..WBS_CIF_CUST_INFO AS CIF ON RP.CIF_CUST_INFO_SEQ = CIF.CIF_CUST_INFO_SEQ
+LEFT JOIN HKDB..WBS_CIF_CUST_INFO AS CIF_RP ON RP.CIF_STOCKHOLDER_SEQ = CIF_RP.CIF_CUST_INFO_SEQ
+
+/*EWM*/
+UNION ALL
+SELECT 
+	Customer_ID_Number AS CustomerID
+	,Related_Parties_Type
+	,Related_Parties_ID
+	,Other_Related_Party_Type AS Other_Related_Parties_Type
+	,Other_Related_Party_Desc AS Other_Related_Parties_Desc
+	,Name
+	,ISNULL(Aliases,'') AS Aliases
+	,Type
+	,CONVERT( VARCHAR(10) ,Date_of_Birth ,20 ) AS DOB
+	,Nationality
+	,Permanent_Address_Line_1 AS P_Addr1
+	,Permanent_Address_Line_2 AS P_Addr2
+	,Permanent_Address_Line_3 AS P_Addr3
+	,Permanent_Country AS P_Country
+	,Correspondent_Address_Line_1 AS C_Addr1
+	,Correspondent_Address_Line_2 AS C_Addr2
+	,Correspondent_Address_Line_3 AS C_Addr3
+	,Correspondent_Country AS C_Country
+	,Contact_Phone_Number AS Contact_Phone_No
+	,Email_Address AS Email
+	,ID_Type AS ID_Type
+	,ID_Number AS ID_Num
+	,CAST( ID_Issue_Date AS VARCHAR ) AS ID_Issue_Date
+	,CAST( ID_Expiry_Date AS VARCHAR ) AS ID_Expiry_Date
+	,ID_Issuing_Country
+	,CAST( Remark AS VARCHAR ) AS REMARK
+	,Status
+	,CONVERT( VARCHAR(10) ,DATEADD(D, - 1, GETDATE()), 20) AS Processing_Date
+	,CONVERT( VARCHAR(10) ,OPENING_DATE ,20 ) AS OPENING_DATE
+	,CONVERT( VARCHAR(10) ,CLOSED_DATE ,20 ) AS CLOSED_DATE
+	,CoreSystem
+	,Native_Name AS Native_Name
+FROM Customer_RP_File_TAP
+
+/*PPTA*/
+UNION ALL
+SELECT 
+	COMPANYCUSTID as CustomerID
+	,RELATEDPARTIESTYPE as Related_Parties_Type
+	,USERUUID as Related_Parties_ID
+	,'' AS Other_Related_Parties_Type
+	,'' AS Other_Related_Parties_Desc
+	,USERENAME as Name
+	,'' AS Aliases
+	,USERTYPE as Type
+	,CONVERT( VARCHAR(10) ,USERBIRTHDAY ,20 ) AS DOB
+	,USERCOUNTRY as Nationality
+	,'' AS P_Addr1
+	,'' AS P_Addr2
+	,'' AS P_Addr3
+	,'' AS P_Country
+	,'' AS C_Addr1
+	,'' AS C_Addr2
+	,'' AS C_Addr3
+	,'' AS C_Country
+	,'' AS Contact_Phone_No
+	,'' AS Email
+	,USERIDENTCODE AS ID_Type
+	,USERIDENTNUMBER AS ID_Num
+	,'' AS ID_Issue_Date
+	,'' AS ID_Expiry_Date
+	,'' AS ID_Issuing_Country
+	,'PPTA' AS REMARK
+	,STATUS as Status
+	,CONVERT( VARCHAR(10) ,DATEADD(D, - 1, GETDATE()), 20) AS Processing_Date
+	,CONVERT( VARCHAR(10) ,CREATEDATE ,20 ) AS OPENING_DATE
+	,CONVERT( VARCHAR(10) ,CANCELDATE ,20 ) AS CLOSED_DATE
+	,SYSTEMID
+	,USERNAME AS Native_Name
+FROM HKDB..GB2B_PPTA_AML_CHECK
+
+
+GO
+
