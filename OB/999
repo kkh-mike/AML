@@ -1,0 +1,22 @@
+SELECT
+    r.session_id,   -- 哪個連線在跑
+    r.status,   -- 目前狀態 running=正在用 CPU；suspended=在等待資源；runnable=等 CPU 排程
+    r.command,   -- 目前在做什麼類型的命令
+    r.cpu_time,   -- 累積 CPU 時間
+    r.total_elapsed_time,  -- 總執行時間
+    r.wait_type,  -- 正在等什麼
+    r.wait_time,  -- 已經等多久
+    r.blocking_session_id,  -- 是不是被別人擋住
+    r.logical_reads,
+    r.reads,   -- 實體讀磁碟
+    r.writes,   -- 寫入量
+    DB_NAME(r.database_id) AS db_name,
+    SUBSTRING(t.text,
+              (r.statement_start_offset/2)+1,
+              ((CASE r.statement_end_offset
+                    WHEN -1 THEN DATALENGTH(t.text)
+                    ELSE r.statement_end_offset
+                END - r.statement_start_offset)/2) + 1) AS running_sql        -- 目前正在跑的 SQL 片段
+FROM sys.dm_exec_requests r
+CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
+WHERE r.session_id <> @@SPID; 
