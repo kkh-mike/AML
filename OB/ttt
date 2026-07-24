@@ -1,8 +1,7 @@
 @echo off
 chcp 65001 >nul
 echo ===================================================
-echo   SQL Server BCP 全欄位/全資料自動匯出腳本 (UTF-8)
-echo   (已修正：每個欄位強制用雙引號包起來，避免資料中的逗號破壞CSV)
+echo   SQL Server 全欄位自動匯出腳本 (UTF-8 + 正確CSV引號)
 echo ===================================================
 echo.
 
@@ -19,45 +18,41 @@ if not exist "%OUTDIR%" (
     mkdir "%OUTDIR%"
 )
 
-echo [1/3] 正在自動分析所有欄位並產生標頭 (Header)...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$conn = New-Object System.Data.SqlClient.SqlConnection('Server=%SERVER%;Database=%DB%;User Id=%USER%;Password=%PASS%;'); $conn.Open(); $cmd = $conn.CreateCommand(); $cmd.CommandText = 'SELECT TOP 0 * FROM %TABLE%'; $reader = $cmd.ExecuteReader(); $cols = (0..($reader.FieldCount-1) | ForEach-Object { '\"' + $reader.GetName($_) + '\"' }) -join ','; $conn.Close(); Set-Content -Path '%OUTDIR%\header.csv' -Value $cols -Encoding UTF8"
+echo 正在連線資料庫並匯出所有資料（自動處理逗號與雙引號）...
+echo.
 
-echo [2/3] 正在建立「每個欄位都用雙引號包起來」的安全查詢...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$conn = New-Object System.Data.SqlClient.SqlConnection('Server=%SERVER%;Database=%DB%;User Id=%USER%;Password=%PASS%;'); $conn.Open(); $cmd = $conn.CreateCommand(); $cmd.CommandText = 'SELECT TOP 0 * FROM %TABLE%'; $reader = $cmd.ExecuteReader(); $selectList = (0..($reader.FieldCount-1) | ForEach-Object { $name = $reader.GetName($_); '''\"' + ' + REPLACE(ISNULL(CAST([' + $name + '] AS NVARCHAR(MAX)), ''''), ''\"'', ''\"\"'') + ' + '''\"' }) -join ', '; $conn.Close(); Set-Content -Path '%OUTDIR%\query.txt' -Value $selectList -Encoding UTF8"
-
-set /p QUERY_COLS=<"%OUTDIR%\query.txt"
-
-echo [3/3] 正在透過 BCP 匯出所有資料 (UTF-8)...
-bcp "SELECT %QUERY_COLS% FROM %DB%.%TABLE%" queryout "%OUTDIR%\data.csv" -c -C 65001 -t"," -r"\n" -S %SERVER% -U %USER% -P %PASS%
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+"$ErrorActionPreference = 'Stop'; ^
+try { ^
+    $connStr = 'Server=%SERVER%;Database=%DB%;User Id=%USER%;Password=%PASS%;'; ^
+    $conn = New-Object System.Data.SqlClient.SqlConnection($connStr); ^
+    $conn.Open(); ^
+    $cmd = $conn.CreateCommand(); ^
+    $cmd.CommandTimeout = 0; ^
+    $cmd.CommandText = 'SELECT * FROM %TABLE%'; ^
+    $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd); ^
+    $table = New-Object System.Data.DataTable; ^
+    [void]$adapter.Fill($table); ^
+    $conn.Close(); ^
+    $table | Export-Csv -Path '%FINAL_CSV%' -NoTypeInformation -Encoding UTF8; ^
+    Write-Host ''; ^
+    Write-Host '==================================================='; ^
+    Write-Host ('匯出成功！共 ' + $table.Rows.Count + ' 筆資料'); ^
+    Write-Host ('檔案位置：%FINAL_CSV%'); ^
+    Write-Host '==================================================='; ^
+} catch { ^
+    Write-Host ''; ^
+    Write-Host '[錯誤] 匯出失敗：' -ForegroundColor Red; ^
+    Write-Host $_.Exception.Message -ForegroundColor Red; ^
+    exit 1; ^
+}"
 
 if errorlevel 1 (
     echo.
-    echo [錯誤] BCP 匯出失敗，請檢查資料庫連線或 query.txt 內容。
-    echo 目前產生的查詢內容如下：
-    type "%OUTDIR%\query.txt"
+    echo 請檢查資料庫連線資訊是否正確。
     pause
     exit /b 1
 )
 
 echo.
-echo 正在合併標頭與所有資料列...
-copy /b "%OUTDIR%\header.csv" + "%OUTDIR%\data.csv" "%FINAL_CSV%" >nul
-
-echo 清理暫存檔...
-if exist "%OUTDIR%\header.csv" del "%OUTDIR%\header.csv"
-if exist "%OUTDIR%\data.csv" del "%OUTDIR%\data.csv"
-if exist "%OUTDIR%\query.txt" del "%OUTDIR%\query.txt"
-
-echo.
-echo ===================================================
-echo   匯出成功！所有欄位與資料已完全輸出至：
-echo   %FINAL_CSV%
-echo ===================================================
-echo.
-echo 說明：
-echo   - 每個欄位都會被強制包成 "內容"
-echo   - 欄位內容若有雙引號，會自動變成兩個雙引號 ""
-echo   - NULL 會輸出成 ""
-echo   - 中文使用 UTF-8，不會亂碼
-echo ===================================================
 pause
