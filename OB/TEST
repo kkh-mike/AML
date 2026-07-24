@@ -1,0 +1,96 @@
+begin tran 
+   MERGE dbo.BSA_SUB_CUST_FACT AS TARGET
+                       USING (
+                           SELECT 
+                                A.CIF_KEY,
+                                --take from mapping table if TS null then SK
+                                COALESCE(B.TS_CUST_ID, A.CustomerNo) AS CustomerNo,
+                                A.CUST_NME,
+                                A.NATIVE_CUST_NME,
+                                A.Alias_Name,
+                                A.C_CTRYCD,
+                                A.NATIONALITY_1,
+                                A.NATIONALITY_2,
+                                A.Cust_Method_Of_Opening,
+                                A.Cust_Product_Service,
+                                A.Cust_Account_Purpose,
+                                A.OPEN_DTE,
+                                A.time_key,
+                                A.CUST_TYPE_CDE,
+                                A.Cust_With_Bearer_Shares
+                           FROM dbo.Customer_Migrate_buffer A WITH (NOLOCK)
+                           LEFT JOIN BANCS_SK_CUST_INFO B WITH (NOLOCK) ON B.SK_CUST_ID = A.CustomerNo                    
+                           WHERE ISNULL(B.CUST_RE_NO_FLG, 0) <> 1 AND 
+                           NOT EXISTS(
+                                                                                        SELECT 1 FROM dbo.Customer_Migrate_Exception_Table Z WHere Z.CIF_KEY = A.CIF_KEY
+                           ) AND
+                           NOT EXISTS (
+                                              SELECT 1
+                                              FROM dbo.Customer_Migrate_buffer X WITH (NOLOCK)
+                                              INNER JOIN BANCS_SK_CUST_INFO Y WITH (NOLOCK)
+                                                  ON X.CustomerNo = Y.SK_CUST_ID
+                                              WHERE Y.TS_CUST_ID = A.CustomerNo
+                                                                                          AND X.CustomerNo <> A.CustomerNo
+                                                                                          AND ISNULL(Y.CUST_RE_NO_FLG, 0) <> 1
+                                         )
+                                                        UNION 
+                                         
+                                                        SELECT 
+                                                                 B.CIF_KEY,                                                              
+                                                                COALESCE(s.TS_CUST_ID, B.CustomerNo) AS CustomerNo,
+                                                                B.CUST_NME,
+                                                                B.NATIVE_CUST_NME,
+                                                                B.Alias_Name,
+                                                                B.C_CTRYCD,
+                                                                B.NATIONALITY_1,
+                                                                B.NATIONALITY_2,
+                                                                B.Cust_Method_Of_Opening,
+                                                                B.Cust_Product_Service,
+                                                                B.Cust_Account_Purpose,
+                                                                B.OPEN_DTE,
+                                                                B.time_key,
+                                                                B.CUST_TYPE_CDE,
+                                                                B.Cust_With_Bearer_Shares
+                                                        FROM dbo.BANCS_SK_CUST_INFO s
+                                                        INNER JOIN dbo.Customer_Migrate_buffer b 
+                                                                ON s.SK_CUST_ID = b.CustomerNo
+                                                        LEFT JOIN dbo.CIF_Migrate_Mapping_TEMP m 
+                                                                ON b.CIF_KEY = m.SOURCE_CIF_KEY
+                                                        LEFT JOIN dbo.Customer_Migrate_Exception_Table e 
+                                                                ON b.CIF_KEY = e.CIF_KEY
+                                                        WHERE s.CUST_RE_NO_FLG <> '1'
+                                                          AND m.SOURCE_CIF_KEY IS NULL  
+                                                          AND e.CIF_KEY IS NULL 
+                       ) AS SOURCE
+                       ON TARGET.CustomerNo = SOURCE.CustomerNo
+
+                       WHEN MATCHED THEN
+                           -- Dummy update to ensure OUTPUT is triggered
+                           UPDATE SET CustomerNo = TARGET.CustomerNo                                                  
+
+                       WHEN NOT MATCHED BY TARGET THEN
+                           INSERT (
+                                CIF_KEY, CustomerNo, Alias_Name, Cust_Method_Of_Opening, 
+                                Cust_Product_Service, Cust_Account_Purpose,time_key, CUST_TYPE_CDE,Cust_With_Bearer_Shares
+                           )
+                           VALUES (
+                                NEWID(),
+                                SOURCE.CustomerNo,
+                                SOURCE.Alias_Name,
+                                SOURCE.Cust_Method_Of_Opening,
+                                SOURCE.Cust_Product_Service,
+                                SOURCE.Cust_Account_Purpose,
+                                SOURCE.time_key,
+                                SOURCE.CUST_TYPE_CDE,
+                                SOURCE.Cust_With_Bearer_Shares
+                           )
+
+                       OUTPUT 
+                           $action, 
+                           SOURCE.CIF_KEY, 
+                           INSERTED.CIF_KEY
+                       INTO dbo.CIF_Migrate_Mapping_TEMP (ACTION, SOURCE_CIF_KEY, NEW_CIF_KEY);
+
+
+
+					   rollback tran
