@@ -7,3 +7,59 @@ ON dbo.Customer_Migrate_Exception_Table (CIF_KEY);
 
 要怎麼把他的拿掉
 我不要index
+
+
+沒問題！幫你將圖片中的 SQL 語法完整整理並進行排版（轉為大寫關鍵字並統一縮排，方便閱讀與維護）：
+-- 1. SwiftMX 相關查詢與設定更新
+SELECT * FROM SwiftMX_Remark_Log;
+
+SELECT * FROM SWIFTMX_FormatDim;
+
+SELECT * FROM SwiftMX_MessageItemDetectionSettings 
+WHERE messagetype = 'pacs.008' 
+  AND messageitem = 'Document/FITOFICstmrCdtTrf/CdtTrfTxInf/Dbtr/Nm';
+
+SELECT * FROM GCMAINDB..InstallationPackage_Log;
+
+UPDATE SwiftMX_MessageItemDetectionSettings 
+SET NameCategory = 31 
+WHERE messagetype = 'pacs.008' 
+  AND messageitem = 'Document/FITOFICstmrCdtTrf/CdtTrfTxInf/Dbtr/Nm';
+
+-- 2. OFAC_GLSpec 相關查詢
+SELECT ent_num, * FROM BSADB.dbo.OFAC_GLSpec 
+WHERE GROUPID = '10' AND spec_name = '9274616';
+
+SELECT ent_num, * FROM BSADB.dbo.OFAC_GLSpec 
+WHERE GROUPID = '10' AND spec_name = '9274616';
+
+SELECT ent_num, * FROM BSADB.dbo.OFAC_GLSpec 
+WHERE remark = '625090';
+
+-- 3. 原始訊息與黑名單 / 國家設定查詢
+SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw 
+WHERE ClientReferenceNo = 'SID_202607210020';
+
+SELECT * FROM BSADB.[dbo].[OFAC_GLSPEC_GroupCountry]
+WHERE groupid = 10;
+
+SELECT * FROM SWIFTMX_BlackList_Setting 
+WHERE list = 'glspec' AND LIST_ID = 3;
+
+SELECT * FROM SWIFTMX_BlackList_Setting 
+WHERE list = 'glspec' AND LIST_ID = 10;
+
+SELECT SdnName, * FROM SwiftMX_DetectionResult 
+WHERE CaseId = 'B556D028-7A90-ED11-AE2F-0050568A471B';
+
+-- 4. Review 審查機制相關查詢與更新
+SELECT CreatedDate, * FROM MESSAGEDATABASE..SwiftMX_Raw 
+ORDER BY 1 DESC;
+
+SELECT * FROM SwiftMX_Review_Main 
+WHERE id = '8550D731-3787-F111-AE3D-0050568A471B';
+
+UPDATE SwiftMX_Review_Main 
+SET queueid = 79 
+WHERE id = '261CFF9D-3887-F111-AE3D-0050568A471B';
+
