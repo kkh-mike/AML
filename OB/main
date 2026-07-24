@@ -1,223 +1,278 @@
+從 Error 來看：
 
+字串或二進位資料會被截斷(String or binary data would be truncated)
 
+* Procedure：DataMigrator_Integrate
+* Line：3883
+* 發生點：EXEC sp_executesql @sql
 
+這代表 SQL Dynamic SQL 執行的時候，有欄位長度不夠。
 
-PATRIOT OFFICER - Error
------------------------------------------------
-Date : 2026年7月24日
-Time : 上午 11:23:12
-Exception Type : SqlException
-Source : .Net SqlClient Data Provider
-Message : 字串或二進位資料會被截斷。
+但是這種 Error 最大的問題是：
 
-Stack Trace : 
-   於 System.Data.SqlClient.SqlConnection.OnError(SqlException exception, Boolean breakConnection, Action`1 wrapCloseInAction)
-   於 System.Data.SqlClient.SqlInternalConnection.OnError(SqlException exception, Boolean breakConnection, Action`1 wrapCloseInAction)
-   於 System.Data.SqlClient.TdsParser.ThrowExceptionAndWarning(TdsParserStateObject stateObj, Boolean callerHasConnectionLock, Boolean asyncClose)
-   於 System.Data.SqlClient.TdsParser.TryRun(RunBehavior runBehavior, SqlCommand cmdHandler, SqlDataReader dataStream, BulkCopySimpleResultSet bulkCopyHandler, TdsParserStateObject stateObj, Boolean& dataReady)
-   於 System.Data.SqlClient.SqlCommand.FinishExecuteReader(SqlDataReader ds, RunBehavior runBehavior, String resetOptionsString, Boolean isInternal, Boolean forDescribeParameterEncryption, Boolean shouldCacheForAlwaysEncrypted)
-   於 System.Data.SqlClient.SqlCommand.RunExecuteReaderTds(CommandBehavior cmdBehavior, RunBehavior runBehavior, Boolean returnStream, Boolean async, Int32 timeout, Task& task, Boolean asyncWrite, Boolean inRetry, SqlDataReader ds, Boolean describeParameterEncryptionRequest)
-   於 System.Data.SqlClient.SqlCommand.RunExecuteReader(CommandBehavior cmdBehavior, RunBehavior runBehavior, Boolean returnStream, String method, TaskCompletionSource`1 completion, Int32 timeout, Task& task, Boolean& usedCache, Boolean asyncWrite, Boolean inRetry)
-   於 System.Data.SqlClient.SqlCommand.InternalExecuteNonQuery(TaskCompletionSource`1 completion, String methodName, Boolean sendToPipe, Int32 timeout, Boolean& usedCache, Boolean asyncWrite, Boolean inRetry)
-   於 System.Data.SqlClient.SqlCommand.ExecuteNonQuery()
-   於 AMLDataMigrator.General.ImportData(String connectionString, String filePath, String AcctMapping, String CIFMapping, String prefix, String module, Boolean CallSP)
+真正出錯的 SQL 在 @sql 裡面，所以 Line 3883 不一定是錯的地方。
 
-Custom message :
-Error in ImportCsvBySpec
+因此有幾個地方要查。
 
-SQL Exception Detail :
-Error Code : -2146232060
-Line number : 3883
-Procedure : DataMigrator_Integrate
-Number : 50000
-Server : AMLIST
-Source : .Net SqlClient Data Provider
+第一個嫌疑犯
 
+INSERT INTO Customer_Migrate_Exception_Table
 
+如果第一次建立 Table 是
 
+SELECT ....
+INTO Customer_Migrate_Exception_Table
 
-好像是從這邊開始有問題
-                                   EXEC sp_executesql @sql;  
+之後又
 
-                       SET @sql = CAST(N'' AS NVARCHAR(MAX)) + N'
-                           -- Check if table exists
-                           IF OBJECT_ID(''dbo.Customer_Migrate_Exception_Table'', ''U'') IS NULL
-                           BEGIN       
-                                SELECT                                    
-                                     Y.' + QUOTENAME(@CIFMappingSourceColumn) + ',
-                                     Y.' + QUOTENAME(@CIFMappingTargetColumn) + ',                                
-                                     ''Excluded in merging'' AS Reason,
-                                     A.* 
-                                INTO dbo.Customer_Migrate_Exception_Table
-                                FROM dbo.Customer_Migrate_buffer A
-                                LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' Y -- 修正：改用 LEFT JOIN，抓取無 Mapping 的直接轉入戶
-                                    ON Y.' + QUOTENAME(@CIFMappingSourceColumn) + ' = A.CustomerNo 
-                                WHERE 
-                                     -- 情況 A: 目標 ID 已經存在於 DB
-                                     EXISTS (
-                                         SELECT 1 
-                                         FROM dbo.BSA_SUB_CUST_FACT Z
-                                         WHERE Z.CustomerNo = COALESCE(Y.' + QUOTENAME(@CIFMappingTargetColumn) + ', A.CustomerNo)
-                                     )
-                                     OR
-                                     -- 情況 B: 批次內衝突 (Mapping 規則導致 ID 被搶佔)
-                                     EXISTS (
-                                         SELECT 1
-                                         FROM dbo.Customer_Migrate_buffer X
-                                         INNER JOIN ' + QUOTENAME(@CIFMappingTable) + ' MapX 
-                                            ON MapX.' + QUOTENAME(@CIFMappingSourceColumn) + ' = X.CustomerNo
-                                         WHERE MapX.' + QUOTENAME(@CIFMappingTargetColumn) + ' = A.CustomerNo -- 別人的目標 = 我的來源 (例如 38162428 1 的目標是 38162428)
-                                         AND X.CustomerNo <> A.CustomerNo -- 排徐自己
-                                                                                AND ISNULL(Y.'+QUOTENAME(@CIFMappingFlagColumn) + ', 0) <> 1
-                                                                                AND (ISNULL(Y.'+QUOTENAME(@CIFMappingSourceColumn) + ', '''') ='''' OR ISNULL(Y.'+QUOTENAME(@CIFMappingTargetColumn) + ', '''') ='''')
-                                     );
-                           END
-                           ELSE
-                           BEGIN       
-                                INSERT INTO dbo.Customer_Migrate_Exception_Table (                                
-                                     ' + QUOTENAME(@CIFMappingSourceColumn) + ',
-                                     ' + QUOTENAME(@CIFMappingTargetColumn) + ',
-                                     Reason,
-                                     time_key,
-                                     CIF_KEY,
-                                     CustomerNo,
-                                     CUST_NME,
-                                     NATIVE_CUST_NME,
-                                     Alias_Name,
-                                     C_CTRYCD,
-                                     NATIONALITY_1,
-                                     NATIONALITY_2,
-                                     Cust_Method_Of_Opening,
-                                     Cust_Product_Service,
-                                     Cust_Account_Purpose,
-                                     OPEN_DTE,
-                                     CustProdAndServicesUsed,
-                                     CustPurposeOfAcc,
-                                     RecordStatus,
-                                     Customer_Segment,
-                                     CUST_TYPE_CDE,
-                                     Cust_With_Bearer_Shares
-                                )
-                                SELECT 
-                                     Y.' + QUOTENAME(@CIFMappingSourceColumn) + ',
-                                     Y.' + QUOTENAME(@CIFMappingTargetColumn) + ',
-                                     ''Excluded in merging'' AS Reason ,
-                                     A.time_key,
-                                     A.CIF_KEY,
-                                     A.CustomerNo,
-                                     A.CUST_NME,
-                                     A.NATIVE_CUST_NME,
-                                     A.Alias_Name,
-                                     A.C_CTRYCD,
-                                     A.NATIONALITY_1,
-                                     A.NATIONALITY_2,
-                                     A.Cust_Method_Of_Opening,
-                                     A.Cust_Product_Service,
-                                     A.Cust_Account_Purpose,
-                                     A.OPEN_DTE,
-                                     A.CustProdAndServicesUsed,
-                                     A.CustPurposeOfAcc,
-                                     A.RecordStatus,
-                                     A.Customer_Segment,
-                                     A.CUST_TYPE_CDE,
-                                     A.Cust_With_Bearer_Shares
-                                FROM dbo.Customer_Migrate_buffer A
-                                LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' Y -- 修正：改用 LEFT JOIN
-                                     ON Y.' + QUOTENAME(@CIFMappingSourceColumn) + ' = A.CustomerNo 
-                                WHERE 
-                                     -- 情況 A: 目標 ID 已經存在於 DB
-                                     EXISTS (SELECT 1 FROM dbo.BSA_SUB_CUST_FACT Z WHERE Z.CustomerNo = COALESCE(Y.' + QUOTENAME(@CIFMappingTargetColumn) + ', A.CustomerNo))
-                                     OR
-                                     -- 情況 B: 批次內衝突
-                                     EXISTS (
-                                         SELECT 1
-                                         FROM dbo.Customer_Migrate_buffer X
-                                         INNER JOIN ' + QUOTENAME(@CIFMappingTable) + ' MapX 
-                                            ON MapX.' + QUOTENAME(@CIFMappingSourceColumn) + ' = X.CustomerNo
-                                         WHERE MapX.' + QUOTENAME(@CIFMappingTargetColumn) + ' = A.CustomerNo
-                                         AND X.CustomerNo <> A.CustomerNo
-                                                                                AND ISNULL(Y.'+QUOTENAME(@CIFMappingFlagColumn) + ', 0) <> 1
-                                                                                AND (ISNULL(Y.'+QUOTENAME(@CIFMappingSourceColumn) + ', '''') ='''' OR ISNULL(Y.'+QUOTENAME(@CIFMappingTargetColumn) + ', '''') ='''')
-                                     );
-                           END;'
-                                                   EXEC sp_executesql @sql;
-              
-                    SET @sql = CAST(N'' AS NVARCHAR(MAX)) + N'
-                    MERGE dbo.BSA_SUB_CUST_FACT AS TARGET
-                       USING (
-                           SELECT 
-                                A.CIF_KEY,
-                                --take from mapping table if TS null then SK
-                                COALESCE(B.' + QUOTENAME(@CIFMappingTargetColumn) + ', A.CustomerNo) AS CustomerNo,
-                                A.CUST_NME,
-                                A.NATIVE_CUST_NME,
-                                A.Alias_Name,
-                                A.C_CTRYCD,
-                                A.NATIONALITY_1,
-                                A.NATIONALITY_2,
-                                A.Cust_Method_Of_Opening,
-                                A.Cust_Product_Service,
-                                A.Cust_Account_Purpose,
-                                A.OPEN_DTE,
-                                A.time_key,
-                                A.CUST_TYPE_CDE,
-                                A.Cust_With_Bearer_Shares
-                           FROM dbo.Customer_Migrate_buffer A WITH (NOLOCK)
-                           LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' B WITH (NOLOCK) ON B.' + QUOTENAME(@CIFMappingSourceColumn) + ' = A.CustomerNo                    
-                           WHERE ISNULL(B.' + QUOTENAME(@CIFMappingFlagColumn) + ', 0) <> 1 AND 
-                           NOT EXISTS(
-                                                                                        SELECT 1 FROM dbo.Customer_Migrate_Exception_Table Z WHere Z.CIF_KEY = A.CIF_KEY
-                           ) AND
-                           NOT EXISTS (
-                                              SELECT 1
-                                              FROM dbo.Customer_Migrate_buffer X WITH (NOLOCK)
-                                              INNER JOIN ' + QUOTENAME(@CIFMappingTable) + ' Y WITH (NOLOCK)
-                                                  ON X.CustomerNo = Y.' + QUOTENAME(@CIFMappingSourceColumn) + '
-                                              WHERE Y.' + QUOTENAME(@CIFMappingTargetColumn) + ' = A.CustomerNo
-                                                                                          AND X.CustomerNo <> A.CustomerNo
-                                                                                          AND ISNULL(Y.'+QUOTENAME(@CIFMappingFlagColumn) + ', 0) <> 1
-                                         )
-                                                        UNION 
-                                         
-                                                        SELECT 
-                                                                 B.CIF_KEY,                                                              
-                                                                COALESCE(s.TS_CUST_ID, B.CustomerNo) AS CustomerNo,
-                                                                B.CUST_NME,
-                                                                B.NATIVE_CUST_NME,
-                                                                B.Alias_Name,
-                                                                B.C_CTRYCD,
-                                                                B.NATIONALITY_1,
-                                                                B.NATIONALITY_2,
-                                                                B.Cust_Method_Of_Opening,
-                                                                B.Cust_Product_Service,
-                                                                B.Cust_Account_Purpose,
-                                                                B.OPEN_DTE,
-                                                                B.time_key,
-                                                                B.CUST_TYPE_CDE,
-                                                                B.Cust_With_Bearer_Shares
-                                                        FROM dbo.BANCS_SK_CUST_INFO s
-                                                        INNER JOIN dbo.Customer_Migrate_buffer b 
-                                                                ON s.SK_CUST_ID = b.CustomerNo
-                                                        LEFT JOIN dbo.CIF_Migrate_Mapping_TEMP m 
-                                                                ON b.CIF_KEY = m.SOURCE_CIF_KEY
-                                                        LEFT JOIN dbo.Customer_Migrate_Exception_Table e 
-                                                                ON b.CIF_KEY = e.CIF_KEY
-                                                        WHERE s.CUST_RE_NO_FLG <> ''1''
-                                                          AND m.SOURCE_CIF_KEY IS NULL  
-                                                          AND e.CIF_KEY IS NULL 
-                       ) AS SOURCE
-                       ON TARGET.CustomerNo = SOURCE.CustomerNo
+INSERT INTO Customer_Migrate_Exception_Table
 
-                       WHEN MATCHED THEN
-                           -- Dummy update to ensure OUTPUT is triggered
-                           UPDATE SET CustomerNo = TARGET.CustomerNo                                                  
+就有可能發生。
 
-                       WHEN NOT MATCHED BY TARGET THEN
-                           INSERT (
-                                CIF_KEY, CustomerNo, Alias_Name, Cust_Method_Of_Opening, 
-                                Cust_Product_Service, Cust_Account_Purpose,time_key, CUST_TYPE_CDE,Cust_With_Bearer_Shares
-                           )
-                           VALUES (
-                                NEWID(),
-                                SOURCE.CustomerNo,
-                                SOURCE.Alias_Name,
+例如：
+
+第一次
+CustomerNo
+------------
+1234567890
+varchar(10)
+第二次
+CustomerNo
+------------
+123456789012345
+
+就爆了。
+
+⸻
+
+第二個嫌疑犯
+
+MERGE BSA_SUB_CUST_FACT
+
+例如
+
+SOURCE.CustomerNo
+
+最後會變成
+
+TARGET.CustomerNo
+
+如果
+
+BSA_SUB_CUST_FACT
+CustomerNo
+------------
+varchar(20)
+
+但是
+
+TS_CUST_ID
+----------
+1234567890123456789012345
+25碼
+
+也會炸。
+
+尤其這段：
+
+COALESCE(
+    B.TargetColumn,
+    A.CustomerNo
+)
+
+跟
+
+COALESCE(
+    s.TS_CUST_ID,
+    B.CustomerNo
+)
+
+都有可能。
+
+⸻
+
+第三個嫌疑犯
+
+這個比較值得懷疑。
+
+Customer_Migrate_Exception_Table
+
+是這樣建立的：
+
+SELECT
+Y.xxx,
+Y.xxx,
+'Excluded in merging' AS Reason,
+A.*
+INTO ....
+
+注意：
+
+Reason
+---------
+Excluded in merging
+
+SQL Server會自動推：
+
+varchar(21)
+
+但是如果以前的 Table 已經存在：
+
+Reason
+-------
+varchar(10)
+
+之後
+
+INSERT
+'Excluded in merging'
+
+就會爆了。
+
+所以可以先看一下：
+
+sp_help Customer_Migrate_Exception_Table
+
+或
+
+SELECT
+    COLUMN_NAME,
+    DATA_TYPE,
+    CHARACTER_MAXIMUM_LENGTH
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME =
+'Customer_Migrate_Exception_Table'
+
+看看是不是某個欄位長度太短。
+
+⸻
+
+第四個嫌疑犯
+
+Alias_Name
+
+因為這段只 insert 了部分欄位：
+
+INSERT(
+    CIF_KEY,
+    CustomerNo,
+    Alias_Name,
+    ....
+)
+VALUES(
+    NEWID(),
+    SOURCE.CustomerNo,
+    SOURCE.Alias_Name,
+    ....
+)
+
+如果：
+
+Customer_Migrate_buffer
+Alias_Name
+----------
+varchar(500)
+
+但是
+
+BSA_SUB_CUST_FACT
+Alias_Name
+---------
+varchar(100)
+
+也會炸。
+
+建議直接比一下：
+
+sp_help Customer_Migrate_buffer
+sp_help BSA_SUB_CUST_FACT
+sp_help Customer_Migrate_Exception_Table
+
+確認欄位長度。
+
+⸻
+
+如何快速找到是哪個欄位？
+
+可以先查最大的資料長度：
+
+SELECT
+MAX(LEN(CustomerNo)),
+MAX(LEN(Alias_Name)),
+MAX(LEN(CUST_NME)),
+MAX(LEN(NATIVE_CUST_NME)),
+MAX(LEN(C_CTRYCD))
+FROM Customer_Migrate_buffer
+
+再查：
+
+sp_help BSA_SUB_CUST_FACT
+
+例如看到：
+
+欄位                 長度
+CustomerNo          20
+Alias_Name          50
+CUST_NME            100
+NATIVE_CUST_NME     50
+
+如果：
+
+MAX(LEN(Alias_Name))
+=120
+
+答案就出來了。
+
+⸻
+
+如果 SQL Server 是 2019+
+
+可以把這個打開：
+
+DBCC TRACEON(460);
+
+或是 SQL 2019：
+
+ALTER DATABASE SCOPED CONFIGURATION
+SET VERBOSE_TRUNCATION_WARNINGS = ON;
+
+Error 就會變成：
+
+String or binary data would be truncated
+in table 'dbo.BSA_SUB_CUST_FACT'
+column 'Alias_Name'
+Truncated value:
+xxxxxxxxxxxxxxxxxxxxxxxx
+
+會直接告訴你：
+
+哪一張 Table
+哪一個 Column
+被截掉的是什麼值
+
+非常好用。
+
+⸻
+
+我的判斷
+
+目前最可疑的地方有兩個：
+
+1. Customer_Migrate_Exception_Table 的 INSERT
+    * 第一次 SELECT INTO 建出來的欄位長度和後續資料不一致。
+2. MERGE INTO BSA_SUB_CUST_FACT
+    * CustomerNo
+    * Alias_Name
+    * CUST_NME
+    * NATIVE_CUST_NME
+    * Mapping 後的 TS_CUST_ID
+    * Cust_Method_Of_Opening
+    * Cust_Product_Service
+    * Cust_Account_Purpose
+
+由於錯誤發生在 EXEC sp_executesql @sql，它只能告訴你「動態 SQL 裡有資料被截斷」，不能直接指出欄位。因此最有效的排查方式是：
+
+1. 先 PRINT @sql 或 SELECT @sql 看 Line 3883 執行的是哪一段 Dynamic SQL。
+2. sp_help Customer_Migrate_Exception_Table、sp_help BSA_SUB_CUST_FACT 檢查欄位長度。
+3. 用 MAX(LEN(...)) 檢查 Customer_Migrate_buffer 的實際資料長度。
+4. 如果環境允許，開啟 VERBOSE_TRUNCATION_WARNINGS，SQL Server 會直接告訴你是哪個欄位被截斷，可以大幅縮短除錯時間。
