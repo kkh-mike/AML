@@ -1,16 +1,21 @@
 @echo off
 chcp 65001 >nul
+
 echo ===================================================
-echo   SQL Server 全欄位自動匯出腳本 (UTF-8 + 正確CSV引號)
+echo   SQL Server BCP CSV Export (Quoted UTF-8 CSV)
 echo ===================================================
 echo.
 
-:: 連線與路徑參數設定
+:: ===============================
+:: Connection / Parameter
+:: ===============================
 set SERVER=amlist
 set DB=BSADBTW
 set TABLE=dbo.Customer_Migrate_buffer_uat202607
+
 set USER=aml
 set PASS=aml1234
+
 set OUTDIR=D:\AML_Source\Source\1141923
 set FINAL_CSV=%OUTDIR%\SK_CIF.csv
 
@@ -18,41 +23,84 @@ if not exist "%OUTDIR%" (
     mkdir "%OUTDIR%"
 )
 
-echo 正在連線資料庫並匯出所有資料（自動處理逗號與雙引號）...
-echo.
+
+echo [1/3] Generate Header...
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-"$ErrorActionPreference = 'Stop'; ^
-try { ^
-    $connStr = 'Server=%SERVER%;Database=%DB%;User Id=%USER%;Password=%PASS%;'; ^
-    $conn = New-Object System.Data.SqlClient.SqlConnection($connStr); ^
-    $conn.Open(); ^
-    $cmd = $conn.CreateCommand(); ^
-    $cmd.CommandTimeout = 0; ^
-    $cmd.CommandText = 'SELECT * FROM %TABLE%'; ^
-    $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd); ^
-    $table = New-Object System.Data.DataTable; ^
-    [void]$adapter.Fill($table); ^
-    $conn.Close(); ^
-    $table | Export-Csv -Path '%FINAL_CSV%' -NoTypeInformation -Encoding UTF8; ^
-    Write-Host ''; ^
-    Write-Host '==================================================='; ^
-    Write-Host ('匯出成功！共 ' + $table.Rows.Count + ' 筆資料'); ^
-    Write-Host ('檔案位置：%FINAL_CSV%'); ^
-    Write-Host '==================================================='; ^
-} catch { ^
-    Write-Host ''; ^
-    Write-Host '[錯誤] 匯出失敗：' -ForegroundColor Red; ^
-    Write-Host $_.Exception.Message -ForegroundColor Red; ^
-    exit 1; ^
-}"
+"$conn = New-Object System.Data.SqlClient.SqlConnection('Server=%SERVER%;Database=%DB%;User Id=%USER%;Password=%PASS%;'); ^
+$conn.Open(); ^
+$cmd = $conn.CreateCommand(); ^
+$cmd.CommandText='SELECT TOP 0 * FROM %TABLE%'; ^
+$r=$cmd.ExecuteReader(); ^
+$cols=(0..($r.FieldCount-1) | ForEach-Object { '"' + $r.GetName($_) + '"' }) -join ','; ^
+$conn.Close(); ^
+Set-Content '%OUTDIR%\header.csv' $cols -Encoding UTF8"
+
+
+echo [2/3] Generate SQL Query...
+
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+"$conn = New-Object System.Data.SqlClient.SqlConnection('Server=%SERVER%;Database=%DB%;User Id=%USER%;Password=%PASS%;'); ^
+$conn.Open(); ^
+$cmd=$conn.CreateCommand(); ^
+$cmd.CommandText='SELECT TOP 0 * FROM %TABLE%'; ^
+$r=$cmd.ExecuteReader(); ^
+
+$list = (0..($r.FieldCount-1) | ForEach-Object { ^
+$name=$r.GetName($_); ^
+'CHAR(34)+REPLACE(ISNULL(CAST(['+$name+'] AS NVARCHAR(MAX)),''''),CHAR(34),CHAR(34)+CHAR(34))+CHAR(34) AS ['+$name+']' ^
+}) -join ','; ^
+
+$conn.Close(); ^
+
+$sql='SELECT '+$list+' FROM %TABLE%'; ^
+
+Set-Content '%OUTDIR%\export.sql' $sql -Encoding UTF8"
+
+
+echo [3/3] Export CSV...
+
+
+sqlcmd ^
+-S %SERVER% ^
+-d %DB% ^
+-U %USER% ^
+-P %PASS% ^
+-i "%OUTDIR%\export.sql" ^
+-o "%OUTDIR%\data.csv" ^
+-s "," ^
+-W ^
+-f 65001
+
 
 if errorlevel 1 (
     echo.
-    echo 請檢查資料庫連線資訊是否正確。
+    echo ===============================
+    echo Export Failed
+    echo ===============================
     pause
     exit /b 1
 )
 
+
+echo Merge Header + Data...
+
+
+copy /b "%OUTDIR%\header.csv"+"%OUTDIR%\data.csv" "%FINAL_CSV%" >nul
+
+
+echo Cleanup...
+
+del "%OUTDIR%\header.csv"
+del "%OUTDIR%\data.csv"
+del "%OUTDIR%\export.sql"
+
+
 echo.
+echo ===================================================
+echo Export Success:
+echo %FINAL_CSV%
+echo ===================================================
+
 pause
