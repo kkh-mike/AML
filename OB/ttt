@@ -1,0 +1,70 @@
+@echo off
+chcp 65001 >nul
+echo ===================================================
+echo   SQL Server BCP 全欄位/全資料自動匯出腳本 (UTF-8)
+echo   (已修正：欄位內容自動用雙引號包起來，避免逗號破壞CSV)
+echo ===================================================
+echo.
+
+:: 連線與路徑參數設定
+set SERVER=amlist
+set DB=BSADBTW
+set TABLE=dbo.Customer_Migrate_buffer_uat202607
+set USER=aml
+set PASS=aml1234
+set OUTDIR=D:\AML_Source\Source\1141923
+set FINAL_CSV=%OUTDIR%\SK_CIF.csv
+
+if not exist "%OUTDIR%" (
+    mkdir "%OUTDIR%"
+)
+
+echo [1/3] 正在自動分析所有欄位並產生標頭 (Header)...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$conn = New-Object System.Data.SqlClient.SqlConnection('Server=%SERVER%;Database=%DB%;User Id=%USER%;Password=%PASS%;'); $conn.Open(); $cmd = $conn.CreateCommand(); $cmd.CommandText = 'SELECT TOP 0 * FROM %TABLE%'; $reader = $cmd.ExecuteReader(); $cols = (0..($reader.FieldCount-1) | ForEach-Object { '\"' + $reader.GetName($_) + '\"' }) -join ','; $conn.Close(); Set-Content -Path '%OUTDIR%\header.csv' -Value $cols -Encoding UTF8"
+
+echo [2/3] 正在建立「每個欄位都用雙引號包起來」的安全查詢並透過 BCP 匯出所有資料 (UTF-8)...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$conn = New-Object System.Data.SqlClient.SqlConnection('Server=%SERVER%;Database=%DB%;User Id=%USER%;Password=%PASS%;'); $conn.Open(); $cmd = $conn.CreateCommand(); $cmd.CommandText = 'SELECT TOP 0 * FROM %TABLE%'; $reader = $cmd.ExecuteReader(); $selectList = (0..($reader.FieldCount-1) | ForEach-Object { $name = $reader.GetName($_); '\"' + ' + REPLACE(ISNULL(CAST([' + $name + '] AS NVARCHAR(MAX)), ''''), ''\"'', ''\"\"'') + ' + '\"' }) -join ', '; $conn.Close(); Set-Content -Path '%OUTDIR%\query.txt' -Value $selectList"
+
+set /p QUERY_COLS=<"%OUTDIR%\query.txt"
+
+:: 關鍵修正：
+:: 1. SELECT 時把每個欄位都包成 "內容"，內部雙引號自動變成 ""
+:: 2. -C 65001 強制 UTF-8，解決中文亂碼
+bcp "SELECT %QUERY_COLS% FROM %DB%.%TABLE%" queryout "%OUTDIR%\data.csv" -c -C 65001 -t"," -r"\n" -S %SERVER% -U %USER% -P %PASS%
+
+if errorlevel 1 (
+    echo.
+    echo [錯誤] BCP 匯出失敗，請檢查資料庫連線。
+    pause
+    exit /b 1
+)
+
+echo.
+echo [3/3] 正在合併標頭與所有資料列...
+copy /b "%OUTDIR%\header.csv" + "%OUTDIR%\data.csv" "%FINAL_CSV%" >nul
+
+echo 清理暫存檔...
+if exist "%OUTDIR%\header.csv" del "%OUTDIR%\header.csv"
+if exist "%OUTDIR%\data.csv" del "%OUTDIR%\data.csv"
+if exist "%OUTDIR%\query.txt" del "%OUTDIR%\query.txt"
+
+echo.
+echo ===================================================
+echo   匯出成功！所有欄位與資料已完全輸出至：
+echo   %FINAL_CSV%
+echo ===================================================
+echo.
+echo 說明：
+echo   - 每個欄位都會用雙引號包起來（例如："值,裡面有逗號"）
+echo   - 欄位內容若本身有雙引號，會自動轉成兩個雙引號 ""
+echo   - NULL 會輸出為 ""
+echo ===================================================
+pause
+修正重點說明
+	1	Header 也改成用雙引號包起來（比較標準）。
+	2	資料列：在產生 SELECT 時，對每一個欄位都自動產生： '"' + REPLACE(ISNULL(CAST([欄位] AS NVARCHAR(MAX)), ''), '"', '""') + '"'
+	3	 這樣輸出就會變成標準 CSV 格式： "值1","值,裡面有逗號","值裡面有""雙引號"""
+	4	
+	5	保留原本的 -C 65001，中文不會亂碼。
+	6	所有欄位都強制 CAST 成 NVARCHAR(MAX)，避免 text/ntext 問題，也讓數字、日期都能正確輸出成文字。
+直接複製整段覆蓋原本的 .bat 即可使用。
