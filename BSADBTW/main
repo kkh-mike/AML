@@ -1,1 +1,12 @@
+SELECT a.CIF_KEY
+FROM LoadTrxn_Migrate_buffer a
+JOIN BSADBTW..ACCT_XREF_DIM b 
+  ON a.ACCT_KEY = SUBSTRING(b.ACCT_KEY, 4, LEN(b.ACCT_KEY) - 3)
+WHERE a.APPL <> 'LNA'
+  AND LEFT(b.ACCT_KEY, 3) = 'SK_';
 
+  住編找出來的cif_key 
+
+我要看看是不是都有在
+
+CIF_Migrate_Mapping_TEMP 的 SOURCE_CIF_KEY
