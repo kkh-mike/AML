@@ -1,3 +1,18 @@
+
+
+SELECT COUNT(*) AS Diff_Count
+FROM Customer_Migrate_buffer a
+JOIN BANCS_SK_CUST_INFO b
+    ON b.SK_CUST_ID = a.CustomerNo
+JOIN BSA_SUB_CUST_FACT c
+    ON c.CustomerNo = b.TS_CUST_ID
+WHERE b.CUST_RE_NO_FLG IN ('2','3')
+  AND b.SK_CUST_ID <> b.TS_CUST_ID
+  AND c.CustomerNo <> b.TS_CUST_ID;
+
+
+
+
 SELECT
     a.CustomerNo           AS Source_CustomerNo,
     b.SK_CUST_ID,
