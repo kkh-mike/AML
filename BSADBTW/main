@@ -1,3 +1,20 @@
+這封催促回覆（Gentle reminder）的信件建議寫得簡潔有禮即可。你可以參考以下範例直接複製使用：
+主旨 (Subject):
+RE: FW: 合併案系統留用建構測試 (Gentle Reminder)
+內文：
+Dear Ling,
+Hope this email finds you well.
+Just a gentle follow-up regarding the HK historical archive testing in the Shin Kong AML system mentioned below.
+Could you please provide an update on the testing status and reply to TK with your test results at your earliest convenience?
+Thank you for your assistance.
+Best regards,
+貫軒 (Mike)
+寫作重點提醒：
+ * 保持開頭的禮貌（Hope this email finds you well），並清楚點出是針對前一封信的追蹤（follow-up）。
+ * 再次明確指出希望對方在完成測試後將結果回覆給 TK（reply to TK with your test results）。
+
+
+
 
 
 SELECT COUNT(*) AS Diff_Count
