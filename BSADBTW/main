@@ -1,28 +1,14 @@
-出現這個錯誤是因為你開啟的是 Windows 一般的 cmd.exe，系統找不到 tf.exe 的環境變數。
-要解決這個問題，有以下 三種解決方法，選最方便的一個即可：
-方法 1：改用 Visual Studio 專用的命令提示字元（最推薦）
-不要用一般 CMD，改開啟 VS 專用的命令列，它會自動載入 tf 命令：
- * 按下 Windows 鍵（或點擊開始功能表）。
- * 搜尋：Developer Command Prompt（或 開發人員命令提示字元）。
- * 開啟該視窗後，先輸入指令切換到你的磁碟區與目錄：
-   d:
-cd \tfs-t3\AML\src\AML_RIGHTS_VW
+SELECT
+    a.CustomerNo           AS Source_CustomerNo,
+    b.SK_CUST_ID,
+    b.TS_CUST_ID,
+    b.CUST_RE_NO_FLG,
+    c.CustomerNo           AS AML_CustomerNo
+FROM Customer_Migrate_buffer a
+JOIN BANCS_SK_CUST_INFO b    ON b.SK_CUST_ID = a.CustomerNo
+JOIN BSA_SUB_CUST_FACT c    ON c.CustomerNo = b.TS_CUST_ID
+WHERE b.CUST_RE_NO_FLG IN ('2','3')  AND b.SK_CUST_ID <> b.TS_CUST_ID;
 
- * 再次執行你的指令即可：
-   tf diff AML_RIGHTS_VW.sql /format:unified > diff.patch
 
-方法 2：直接在現有 CMD 輸入 tf.exe 的完整路徑
-如果你想繼續用目前的 cmd 視窗，可以在 tf 前面加上完整路徑（依據你的 Visual Studio 版本，選擇對應的路徑）：
- * Visual Studio 2022 (Community / Professional / Enterprise)
-   "C:\Program Files\Microsoft Visual Studio\2022\Professional\Common7\IDE\CommonExtensions\Microsoft\TeamFoundation\Team Explorer\tf.exe" diff AML_RIGHTS_VW.sql /format:unified > diff.patch
 
- * Visual Studio 2019
-   "C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional\Common7\IDE\CommonExtensions\Microsoft\TeamFoundation\Team Explorer\tf.exe" diff AML_RIGHTS_VW.sql /format:unified > diff.patch
-
-   (備註：請依據你實際安裝的版本調整 Enterprise 或 Community)
-方法 3：直接在 Visual Studio 內開 Terminal
- * 回到你的 Visual Studio 畫面。
- * 按快捷鍵 Ctrl +  ` (Tab 上方的波浪鍵) 或點選上方選單 檢視 (View) > 終端機 (Terminal)。
- * 在下方開啟的 Developer PowerShell / Command Prompt 中，它已經在該專案目錄且包含 tf 環境，直接輸入指令即可：
-   tf diff AML_RIGHTS_VW.sql /format:unified > diff.patch
-
+有沒有辦法看AML_CustomerNo <>TS_CUST_ID 有幾筆?
