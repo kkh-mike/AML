@@ -1,4 +1,10 @@
-CREATE PROCEDURE dbo.SP_Delete_Insert_CIF_Data
+訊息 111，層級 15，狀態 1，程序 Migrate_HOUSEKEEP，行 5 [批次開始行 0]
+'CREATE/ALTER PROCEDURE' 必須是查詢批次的第一個陳述式。
+
+
+use BatchJobDB
+
+CREATE PROCEDURE dbo.Migrate_HOUSEKEEP
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -136,11 +142,11 @@ BEGIN
 
         DELETE A FROM CASHIERCHK_FACT A
         JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+   
 
         DELETE A FROM CHK_TXN_FACT A
         JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+
 
         DELETE A FROM OTHER_TXN_FACT A
         JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
