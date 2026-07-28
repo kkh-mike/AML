@@ -1,14 +1,12 @@
-訊息 111，層級 15，狀態 1，程序 Migrate_HOUSEKEEP，行 5 [批次開始行 0]
-'CREATE/ALTER PROCEDURE' 必須是查詢批次的第一個陳述式。
-
-
 use BatchJobDB
+GO
 
 CREATE PROCEDURE dbo.Migrate_HOUSEKEEP
 AS
 BEGIN
     SET NOCOUNT ON;
-
+END
+GO
     BEGIN TRY
         BEGIN TRANSACTION;
 
@@ -215,3 +213,5 @@ BEGIN
     END CATCH
 END;
 GO
+
+這樣對?
