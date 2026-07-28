@@ -1,3 +1,37 @@
+USE BatchJobDB
+GO
+
+CREATE PROCEDURE dbo.Migrate_HOUSEKEEP
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    BEGIN TRY
+
+        BEGIN TRANSACTION;
+
+        DELETE ....
+        DELETE ....
+        DELETE ....
+        ........
+
+        COMMIT TRANSACTION;
+
+    END TRY
+
+    BEGIN CATCH
+
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+
+        THROW;
+
+    END CATCH
+
+END;
+GO
+
+
 原本有
 
 
