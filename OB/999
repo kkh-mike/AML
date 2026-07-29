@@ -1,3 +1,29 @@
+
+直接用下面這版寄給廠商就好，簡潔清楚：
+
+Subject: 請協助調查 CIF 700103 仍被判定高風險問題（舊 BVI 股東資料未清除）
+Dear [廠商窗口],
+我們需要請貴公司協助調查以下問題：
+客戶：Power Zone Ventures Limited（CIF 700103）
+問題描述：
+	•	2025年7月風險評等已從 High 降為 Medium（分數 87），當時已移除 BVI 相關股東。
+	•	但目前系統每月風險評分仍持續產生 High Risk（分數 232），主要是因為 Customer Profile 的 Related Main Share Holder 中，仍保留著已移除的 BVI 股東資料。
+我們已確認 HKWBS 端資料已更新移除，因此初步判斷可能是 AML 系統端資料未正確同步或清除。
+請協助確認以下事項：
+	1	為什麼已移除的 BVI 股東資料仍出現在 AML 系統中？
+	2	HKWBS 與 AML 之間的 Related Party / Shareholder 資料同步是否有問題（特別是刪除或設為 Inactive 的處理）？
+	3	風險評分引擎讀取 Related Party 資料時，是否有過濾 Status 或 Inactive Date？
+	4	請提供根本原因及建議的處理方式。
+如需我們提供更多截圖或系統資料，請告知。
+謝謝。
+Best regards, [你的名字]
+
+如果想再簡短一點，或要改成全英文版本，跟我說我再幫你調。
+
+
+22222
+
+
 SELECT
     r.session_id,   -- 哪個連線在跑
     r.status,   -- 目前狀態 running=正在用 CPU；suspended=在等待資源；runnable=等 CPU 排程
