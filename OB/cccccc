@@ -1,4 +1,57 @@
 
+從這張 sp_help EDD_ReviewSchedule 的結果看，雖然有建立索引，但關鍵在於索引是「拆開的」，這正是 SQL Server 效能拉不起來的主因：
+ * IDX_EDD_ReviewSchedule_CIFKey 只索引了 CIFKey
+ * IDX_EDD_ReviewSchedule_Status 只索引了 Status
+為什麼拆開的單欄索引不夠快？
+你的條件是 WHERE Z.CIFKey = M.NEW_CIF_KEY AND Z.Status = 'P'：
+ * 當 SQL Server 選擇用 IDX_EDD_ReviewSchedule_CIFKey 找資料時，它能快速定位到該 CIFKey，但為了確認 Status = 'P' 以及傳回結果，它需要再去做一次 Key Lookup（對 Clustered Index Id 進行二次查找）。
+ * 當你的資料量極大時，每一筆條件比對都伴隨一次 Lookup，乘起來就是你前一張圖看到的 8,500 萬次 logical_reads！
+ * 另外，如果 Status = 'P' 的資料量很大，SQL Optimizer 也可能會覺得用 Status 索引沒效率，進而選擇直接走集群索引掃描（Index Scan），造成整張表反覆被讀取。
+最佳化解決方案
+1. 建立「複合索引（Composite Index）」
+將 CIFKey 與 Status 組合成同一個索引，讓查詢可以直接在這個 Index 內完成比對（Index Seek），完全不需要回表 Look Up：
+CREATE NONCLUSTERED INDEX IX_EDD_ReviewSchedule_CIFKey_Status 
+ON dbo.EDD_ReviewSchedule (CIFKey, Status);
+
+2. 改寫 SQL 邏輯（避開逐筆比對）
+即便有了索引，當兩邊 Buffer 表資料量非常龐大時，JOIN + GROUP BY + NOT EXISTS 一起做容易讓 SQL 生成不理想的 Hash Join 或 Nested Loop Plan。
+建議將步驟拆開成兩步，先把 Migration 資料 GROUP BY 乾淨 存入 Temp Table，再做 INSERT：
+-- 1. 先把要 migrated 的資料 Group By 取最小 ReviewDt
+IF OBJECT_ID(N'tempdb..#NewReview', 'U') IS NOT NULL 
+    DROP TABLE #NewReview;
+
+SELECT 
+    M.NEW_CIF_KEY, 
+    MIN(S.ReviewDt) AS MinReviewDt
+INTO #NewReview
+FROM dbo.CIF_Migrate_Mapping_TEMP M
+JOIN dbo.Cust_NP_Migrate_buffer S ON S.CIF_KEY = M.SOURCE_CIF_KEY
+WHERE S.ReviewDt IS NOT NULL
+GROUP BY M.NEW_CIF_KEY;
+
+-- 2. 給 Temp Table 加主鍵（縮短下一步的比對時間）
+ALTER TABLE #NewReview ADD CONSTRAINT PK_#NewReview PRIMARY KEY (NEW_CIF_KEY);
+
+-- 3. 再進行 Insert (此時資料量已大幅減少)
+INSERT INTO dbo.EDD_ReviewSchedule (CIFKey, ReviewDt, Status)
+SELECT 
+    N.NEW_CIF_KEY, 
+    N.MinReviewDt, 
+    'P'
+FROM #NewReview N
+WHERE NOT EXISTS (
+    SELECT 1 
+    FROM dbo.EDD_ReviewSchedule Z WITH (NOLOCK)
+    WHERE Z.CIFKey = N.NEW_CIF_KEY 
+      AND Z.Status = 'P'
+);
+
+結論：
+補上 (CIFKey, Status) 複合索引，或者採用先把資料 Group 完存 Temp Table 再判斷 NOT EXISTS 的策略，讀取量 (logical_reads) 就能從幾千萬次降低到幾千次，執行時間會從幾十分鐘縮短至幾秒鐘。
+
+
+
+44444
         IF @ModuleName = 'CUST_NP'
                             BEGIN
                                 IF OBJECT_ID(N'tempdb..#AffectedCif', 'U') IS NOT NULL
