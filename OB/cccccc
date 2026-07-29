@@ -1,0 +1,213 @@
+
+        IF @ModuleName = 'CUST_NP'
+                            BEGIN
+                                IF OBJECT_ID(N'tempdb..#AffectedCif', 'U') IS NOT NULL
+                                    DROP TABLE #AffectedCif;
+
+                                CREATE TABLE #AffectedCif
+                                    (
+                                      CIF_KEY UNIQUEIDENTIFIER ,
+                                      IsComplexStructure_Before CHAR(1) NULL ,
+                                      IsComplexStructure_After CHAR(1) NULL ,
+                                      IsBearerShares_Before CHAR(1) NULL ,
+                                      IsBearerShares_After CHAR(1) NULL ,
+                                      PEPBitwiseCode_Before INT NULL ,
+                                      PEPBitwiseCode_After INT NULL ,
+                                      Warn_Restrict_Account_Before CHAR(1) NULL ,
+                                      Warn_Restrict_Account_After CHAR(1) NULL ,
+                                      SDST2400001_Before NVARCHAR(MAX) NULL ,
+                                      SDST2400001_After NVARCHAR(MAX) NULL
+                                    );
+
+              -- CIPT1300004, CIPT1700061 - IsComplexStructure, Warn_Restrict_Account, RiskLevel, RiskScore
+                                ;WITH AggNP AS (
+                                    SELECT
+                                        M.NEW_CIF_KEY,                                                                    
+                                        CASE MAX(CASE S.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END)
+                                            WHEN 3 THEN 'H' WHEN 2 THEN 'M' WHEN 1 THEN 'L' ELSE NULL
+                                        END AS HIGHRISK,                                        
+                                        MAX(CASE S.HIGHRISK
+                                                WHEN 'H' THEN S.RiskScore
+                                                WHEN 'M' THEN S.RiskScore
+                                                WHEN 'L' THEN S.RiskScore
+                                                ELSE NULL END) AS RiskScore,
+                                        MAX(CAST(S.IsSARFiled AS INT)) AS IsSARFiled,
+                                        CASE WHEN MAX(CAST(S.IsComplexStructure AS INT)) = 1 THEN 1
+                                             WHEN MAX(CAST(S.IsComplexStructure AS INT)) IS NULL THEN NULL
+                                             ELSE 0 END AS IsComplexStructure,
+                                        CASE WHEN MAX(CAST(S.Warn_Restrict_Account AS INT)) = 1 THEN 'Y'
+                                             WHEN MAX(CAST(S.Warn_Restrict_Account AS INT)) IS NULL THEN NULL
+                                             ELSE 'N' END AS Warn_Restrict_Account
+                                    FROM dbo.CIF_Migrate_Mapping_TEMP M
+                                    JOIN dbo.Cust_NP_Migrate_buffer   S ON S.CIF_KEY = M.SOURCE_CIF_KEY
+                                    GROUP BY M.NEW_CIF_KEY
+                                )
+                                UPDATE  T
+                                SET     T.IsSARFiled = CASE
+                                   WHEN T.IsSARFiled = 1 OR A.IsSARFiled = 1 THEN 1
+                                   WHEN T.IsSARFiled IS NULL AND A.IsSARFiled IS NULL THEN NULL
+                                   ELSE 0
+                               END ,
+                       -- HighRisk → highest wins
+                                        T.HIGHRISK = CASE
+                                             WHEN CASE A.HIGHRISK
+                                                      WHEN 'L' THEN 1
+                                                      WHEN 'M' THEN 2
+                                                      WHEN 'H' THEN 3
+                                                      ELSE 0
+                                                  END > CASE T.HIGHRISK
+                                                           WHEN 'L' THEN 1
+                                                           WHEN 'M' THEN 2
+                                                           WHEN 'H' THEN 3
+                                                           ELSE 0
+                                                       END
+                                             THEN A.HIGHRISK
+                                             ELSE T.HIGHRISK
+                                         END ,
+                       -- RiskScore → follow chosen HighRisk
+                                        T.RiskScore = CASE
+                                            WHEN CASE A.HIGHRISK WHEN 'L' THEN 1 WHEN 'M' THEN 2 WHEN 'H' THEN 3 ELSE 0 END
+                                               > CASE T.HIGHRISK WHEN 'L' THEN 1 WHEN 'M' THEN 2 WHEN 'H' THEN 3 ELSE 0 END
+                                            THEN A.RiskScore   
+                                            WHEN CASE A.HIGHRISK WHEN 'L' THEN 1 WHEN 'M' THEN 2 WHEN 'H' THEN 3 ELSE 0 END
+                                               = CASE T.HIGHRISK WHEN 'L' THEN 1 WHEN 'M' THEN 2 WHEN 'H' THEN 3 ELSE 0 END
+                                            THEN CASE WHEN ISNULL(A.RiskScore, 0) > ISNULL(T.RiskScore, 0) 
+                                                      THEN A.RiskScore
+                                                      ELSE T.RiskScore
+                                                 END
+                                            ELSE T.RiskScore   
+                                        END ,
+                       -- IsComplexStructure → fill if NULL
+                                        T.IsComplexStructure = CASE
+                                                                   WHEN T.IsComplexStructure = 1 OR A.IsComplexStructure = 1 THEN 1
+                                                                   WHEN T.IsComplexStructure IS NULL AND A.IsComplexStructure IS NULL THEN NULL
+                                                                   ELSE 0
+                                                               END ,
+                                        T.Warn_Restrict_Account = CASE
+                                                                      WHEN T.Warn_Restrict_Account = 'Y' OR A.Warn_Restrict_Account = 'Y' THEN 'Y'
+                                                                      WHEN T.Warn_Restrict_Account IS NULL AND A.Warn_Restrict_Account IS NULL THEN NULL
+                                                                      ELSE 'N'
+                                                                  END
+                                OUTPUT  Inserted.CIF_KEY ,
+                                        Deleted.IsComplexStructure ,
+                                        Inserted.IsComplexStructure ,
+                                        Deleted.Warn_Restrict_Account ,
+                                        Inserted.Warn_Restrict_Account
+                                        INTO #AffectedCif ( CIF_KEY,
+                                                            IsComplexStructure_Before,
+                                                            IsComplexStructure_After,
+                                                            Warn_Restrict_Account_Before,
+                                                            Warn_Restrict_Account_After )
+                                FROM    dbo.BSA_SUB_CUST_FACT T
+                                        JOIN    AggNP A ON T.CIF_KEY = A.NEW_CIF_KEY;
+                                
+              -- CIPT1600002 - IsBearerShares, NameProperties
+                                MERGE dbo.BSA_SUB_CUST_FACT_Extension T
+                                USING
+                                    ( SELECT    M.NEW_CIF_KEY ,
+                                                CASE WHEN MAX(CAST(S.IsBearerShares AS INT)) = 1    THEN 1
+                                                     WHEN MAX(CAST(S.IsBearerShares AS INT)) IS NULL THEN NULL
+                                                     ELSE 0 END AS IsBearerShares,
+                                                COALESCE(SUM(DISTINCT S.PEPBitwiseCode), 0) AS PEPBitwiseCode
+                                      FROM      dbo.CIF_Migrate_Mapping_TEMP M
+                                                JOIN dbo.Cust_NP_Migrate_buffer S ON S.CIF_KEY = M.SOURCE_CIF_KEY
+                                      GROUP BY  M.NEW_CIF_KEY
+                                    ) S
+                                ON ( T.CIF_KEY = S.NEW_CIF_KEY )
+                                WHEN MATCHED THEN
+                                    UPDATE SET
+                                             T.IsBearerShares = CASE 
+																	WHEN T.IsBearerShares = 1 OR S.IsBearerShares = 1 THEN 1
+																	WHEN T.IsBearerShares IS NULL AND S.IsBearerShares IS NULL THEN NULL
+																	ELSE 0
+																END ,
+                                             T.PEPBitwiseCode = T.PEPBitwiseCode
+                                             | S.PEPBitwiseCode
+                                WHEN NOT MATCHED BY TARGET THEN
+                                    INSERT ( CIF_KEY ,
+                                             IsBearerShares ,
+                                             PEPBitwiseCode
+                                           )
+                                    VALUES ( S.NEW_CIF_KEY ,
+                                             S.IsBearerShares ,
+                                             S.PEPBitwiseCode
+                                           )
+                                OUTPUT
+                                    Inserted.CIF_KEY ,
+                                    Deleted.IsBearerShares ,
+                                    Inserted.IsBearerShares ,
+                                    Deleted.PEPBitwiseCode ,
+                                    Inserted.PEPBitwiseCode
+                                    INTO #AffectedCif ( CIF_KEY,
+                                                        IsBearerShares_Before,
+                                                        IsBearerShares_After,
+                                                        PEPBitwiseCode_Before,
+                                                        PEPBitwiseCode_After );
+
+              -- SDST2400001 (dropdownlist)
+                                DECLARE @SDSTemplateId NVARCHAR(100);
+                                SELECT  @SDSTemplateId = ID
+                                FROM    dbo.CIP_TEMPLATE_DIM
+                                WHERE   QueryId = 'SDST2400001';
+
+                                MERGE dbo.PB_CustomerOptionalAnswers T
+                                USING
+                                    ( SELECT    M.New_CIF_KEY AS CIF_KEY,
+                                                MAX(CAST(S.SDST2400001 AS INT)) AS SDST2400001
+                                      FROM      dbo.CIF_Migrate_Mapping_TEMP M
+                                                JOIN dbo.Cust_NP_Migrate_buffer S ON S.CIF_KEY = M.SOURCE_CIF_KEY
+                                      WHERE     ISNULL(SDST2400001, '') <> ''
+                                      GROUP BY  M.NEW_CIF_KEY
+                                    ) S
+                                ON ( T.CifKey = S.CIF_KEY
+                                     AND T.CIPTemplateId = @SDSTemplateId
+                                   )
+                                WHEN MATCHED THEN
+                                    UPDATE SET
+                                             T.AnswerCode = S.SDST2400001
+                                WHEN NOT MATCHED BY TARGET THEN
+                                    INSERT ( CifKey ,
+                                             HRSTemplateId ,
+                                             AnswerCode ,
+                                             Remarks ,
+                                             CIPTemplateId
+                                           )
+                                    VALUES ( S.CIF_KEY ,
+                                             @SDSTemplateId ,
+                                             S.SDST2400001 ,
+                                             'Data Migration' ,
+                                             @SDSTemplateId
+                                           ) --ask what remark they wanted to mark as
+                                OUTPUT
+                                    Inserted.CifKey ,
+                                    Deleted.AnswerCode ,
+                                    Inserted.AnswerCode
+                                    INTO #AffectedCif ( CIF_KEY,
+                                                        SDST2400001_Before,
+                                                        SDST2400001_After ); 
+              
+              -- Review Date
+              -- Insert for new CIF                                
+                                INSERT  INTO dbo.EDD_ReviewSchedule
+                                        ( CIFKey ,
+                                          ReviewDt ,
+                                          Status
+                                        )
+                                        SELECT  M.NEW_CIF_KEY ,
+                                                MIN(S.ReviewDt) ,  
+                                                'P'
+                                        FROM    dbo.CIF_Migrate_Mapping_TEMP M
+                                                JOIN dbo.Cust_NP_Migrate_buffer S ON S.CIF_KEY = M.SOURCE_CIF_KEY
+                                        WHERE   S.ReviewDt IS NOT NULL
+                                                AND NOT EXISTS ( SELECT 1
+                                                                 FROM   dbo.EDD_ReviewSchedule Z
+                                                                 WHERE  Z.CIFKey = M.NEW_CIF_KEY
+                                                                        AND Z.Status = 'P' )
+                                        GROUP BY M.NEW_CIF_KEY;  
+
+              -- Update for existing CIF
+
+
+
+
+你知道他為什麼這麼久?
