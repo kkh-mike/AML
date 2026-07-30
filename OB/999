@@ -1,3 +1,19 @@
+-- 1. 先加回 Primary Key（叢集）
+ALTER TABLE dbo.EDD_ReviewSchedule_bak_20260730
+ADD CONSTRAINT PK_EDD_ReviewSchedule_bak PRIMARY KEY CLUSTERED (Id);
+
+-- 2. 加回原本的兩個非叢集索引
+CREATE NONCLUSTERED INDEX IDX_EDD_ReviewSchedule_CIFKey
+ON dbo.EDD_ReviewSchedule_bak_20260730 (CIFKey);
+
+CREATE NONCLUSTERED INDEX IDX_EDD_ReviewSchedule_Status
+ON dbo.EDD_ReviewSchedule_bak_20260730 (Status);
+
+-- 3. 你已經有的複合索引可以保留
+-- IX_EDD_ReviewSchedule_CIFKey_Status
+
+
+
 這封信的整體邏輯與資料已經非常完整，但目前草稿比較偏向「大量資料羅列」，收件人（育豪）閱讀時可能需要花時間抓重點。
 建議調整為**「結論先行、數據佐證、明確 Action」**的結構，讓收件人看完前幾行就能掌握核心狀況與需要討論的方向。
 以下為優化後的郵件內容範本：
