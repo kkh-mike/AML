@@ -1,25 +1,17 @@
-[‎2026/‎7/‎30 上午 11:39]  
-Hi 貫軒 
-my boss just came back from a meeting with head office 
-he instructed to conduct another UAT/Business impact analysis like lst time by 信達
- 
-[‎2026/‎7/‎30 上午 11:40]  
-last time there was huge difference mainly due to the cut-off time of system, i.e. HKWBS info cut off at 31Dec, meanwhile our AML UAT cut off at 30Apr'26.
-this time they said both system should have a cut -off time of 30Jun' consistent and must run another UAT/Imapct analysis again.
- 
-
-[‎2026/‎7/‎30 下午 01:13]  
-Just to confirm, for this round of UAT / Business Impact Analysis, will you provide us with an Excel file for our input again? 
- 
-[‎2026/‎7/‎30 下午 01:39]  
-yes, the Excel of 11 columns will be provided by SKHK, since those are SKHK information
-then transfer the data to UAT AML system for risk score computation, but i believe some will be synchronise from HKWBS, that's why i believe will involve both systems
- 
-[‎2026/‎7/‎30 下午 01:41]  
-unlike HO, it's SK AML to TS AML, due to certain constraints, can only transfer the 11 columns of the Excel info to UAT AML for risk score computation if high, medium and low risk
- 
-[‎2026/‎7/‎30 下午 01:42]  
-so need to get UAT AML system ready, meanwhile i was made understand that HKWBS UAT environment or the info they tested/ready until 30Jun'26. so we will also test UAT AML at 30Jun'26 cut-off so that both system are consistent in terms of cut-off, so won't be that many "null" customers like last UAT test
-so that's why they have been asking in email on the cut-off of HKWBS and UAT AML in last email. this time need to test at the same cut-off 
- 
-所以香港要我們幹嘛我是貫軒
+貫軒，簡單來說，香港總行要求你們重新做一次 UAT / 業務影響分析（Business Impact Analysis）。
+原因和你們需要配合的事項幫你整理如下：
+為什麼要重做？
+上次測試數據差異太大，主因是兩邊系統的資料截點（Cut-off date）不一致（上次 HKWBS 是 12/31，但 AML UAT 是 4/30），導致產出一堆空值（"null"）客戶。
+香港要你們/你幹嘛？（核心任務）
+ * 統一資料截點至 2026/06/30
+   這次兩邊系統都要統一以 6/30 作為資料基準日，確保數據一致，避免再出現大量 null 資料。
+ * 準備好 UAT AML 系統
+   你需要確保 UAT AML 測試環境準備就緒，資料截點設定在 6/30。
+ * 接收 Excel 並匯入 AML 系統運算
+   * 香港（SKHK）會提供一份含有 11 個欄位 的 Excel 資料給你們填寫/對接。
+   * 你們需要將這 11 個欄位的資料轉移/匯入到 UAT AML 系統 中。
+   * 系統會結合部分從 HKWBS 同步過來的資訊，重新計算客戶的風險評分（高、中、低風險）。
+ * 產出全新的 UAT 與業務影響分析報告
+   跑完運算後，依據新的一致性數據重新評估對業務的影響。
+一話總結：
+香港希望這次**在相同的時間基準點（6/30）**下，把 SKHK 提供的 11 欄 Excel 資料匯入 UAT AML 系統重新跑一遍風險評分，並產出一份準確的業務影響分析。
