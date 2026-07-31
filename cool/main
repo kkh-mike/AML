@@ -1,1 +1,34 @@
-123
+要找出這少掉的 3 筆資料，最簡單的方式是將第二段查詢的 INNER JOIN 改為 LEFT JOIN，並篩選出關聯失敗（為 NULL）的資料，或是使用 NOT EXISTS / NOT IN。
+以下提供兩種常用的方法，您可以直接複製執行：
+方法一：使用 LEFT JOIN 找出抓不到對應的資料（推薦）
+將 INNER JOIN 改成 LEFT JOIN，並在 WHERE 條件中抓取關聯表主鍵為 NULL 的筆數：
+SELECT B.*
+FROM RP_NP_Migrate_buffer B
+LEFT JOIN CIF_Migrate_Mapping_TEMP M 
+    ON B.CIFKey = M.SOURCE_CIF_KEY
+LEFT JOIN (
+    SELECT DISTINCT CIFKey 
+    FROM pb_appointer_fact 
+) F 
+    ON M.NEW_CIF_KEY = F.CIFKey
+WHERE B.RP = 'APP'
+  -- 找出 Mapping 表沒對上，或最終目標表沒對上的 3 筆
+  AND (M.SOURCE_CIF_KEY IS NULL OR F.CIFKey IS NULL);
+
+方法二：使用 NOT EXISTS 排除存在的資料
+如果你想明確知道是 CIFKey 根本沒在後續關聯中找到，可以用這個寫法：
+SELECT B.*
+FROM RP_NP_Migrate_buffer B
+WHERE B.RP = 'APP'
+  AND NOT EXISTS (
+      SELECT 1 
+      FROM CIF_Migrate_Mapping_TEMP M
+      INNER JOIN pb_appointer_fact F 
+          ON M.NEW_CIF_KEY = F.CIFKey
+      WHERE B.CIFKey = M.SOURCE_CIF_KEY
+  );
+
+💡 排除排查小技巧
+這 3 筆消失的原因通常有兩種可能，查出結果後您可以檢查：
+ * Mapping 檔缺失：這 3 筆的 B.CIFKey 在 CIF_Migrate_Mapping_TEMP 中找不到對應的 SOURCE_CIF_KEY。
+ * 目標表缺失： Mapping 找得到，但轉換後的 NEW_CIF_KEY 在 pb_appointer_fact 中不存在。
