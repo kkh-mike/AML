@@ -1,3 +1,25 @@
+-- 1. 有沒有進 Exception
+SELECT * 
+FROM dbo.Customer_Migrate_Exception_Table
+WHERE CustomerNo IN ('22992314','80600673','94734842')
+   OR CIF_KEY IN (
+        '84a435cd-2beb-e511-80c8-0050568c710a',
+        '3dce86cd-2beb-e511-80c8-0050568c710a',
+        'c445d022-ed03-e611-80cb-0050568c710a'
+   );
+
+-- 2. Mapping 表狀況（假設你的 Mapping 表叫 XXX）
+SELECT * 
+FROM [你的CIFMappingTable]
+WHERE [SourceColumn] IN ('22992314','80600673','94734842');
+
+-- 3. BSA 是否已經有這些 CustomerNo
+SELECT CustomerNo, CIF_KEY 
+FROM dbo.BSA_SUB_CUST_FACT
+WHERE CustomerNo IN ('22992314','80600673','94734842');
+
+
+
 USE [BSADBTW]
 GO
 
