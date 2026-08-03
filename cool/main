@@ -1,3 +1,19 @@
+SELECT M.SOURCE_CIF_KEY 
+FROM TRSF_MTHLY_FACT a
+INNER JOIN CIF_Migrate_Mapping_TEMP M
+    ON a.cif_key = M.NEW_CIF_KEY
+WHERE EXISTS (
+    SELECT 1
+    FROM LoadTrxn_Migrate_buffer b
+    INNER JOIN CIF_Migrate_Mapping_TEMP M2 
+        ON b.cif_key = M2.SOURCE_CIF_KEY
+    WHERE b.APPL <> 'LNA' 
+      AND b.TrxnType = 'TRSF_MTHLY_FACT'
+);
+
+
+
+
 -- 1. 有沒有進 Exception
 SELECT * 
 FROM dbo.Customer_Migrate_Exception_Table
