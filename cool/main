@@ -1,3 +1,18 @@
+SELECT M.SOURCE_CIF_KEY
+FROM LoadTrxn_Migrate_buffer a
+INNER JOIN CIF_Migrate_Mapping_TEMP M 
+    ON a.cif_key = M.SOURCE_CIF_KEY
+WHERE a.APPL <> 'LNA' 
+  AND a.TrxnType = 'TRSF_MTHLY_FACT'
+  AND EXISTS (
+      SELECT 1
+      FROM TRSF_MTHLY_FACT b
+      INNER JOIN CIF_Migrate_Mapping_TEMP M2 
+          ON b.cif_key = M2.NEW_CIF_KEY
+  );
+
+
+
 SELECT M.SOURCE_CIF_KEY 
 FROM TRSF_MTHLY_FACT a
 INNER JOIN CIF_Migrate_Mapping_TEMP M
