@@ -1,24 +1,70 @@
-SELECT TS_CUST_ID FROM BANCS_SK_CUST_INFO a JOIN Customer_Migrate_buffer b on a.SK_CUST_ID = b.CustomerNo
-WHERE CUST_RE_NO_FLG IN ('2','3')
-EXCEPT
-SELECT TS_CUST_ID FROM BANCS_SK_CUST_INFO a JOIN Customer_Migrate_buffer b on a.SK_CUST_ID = b.CustomerNo
-WHERE a.CUST_RE_NO_FLG = '1'
-	
+你的需求可以拆成幾個步驟：
 
-這邊得到很多的TS_CUST_ID 
+1. 找出 TS_CUST_ID (CUST_RE_NO_FLG IN ('2','3') 但沒有 1)
+2. 用這些 TS_CUST_ID 去找 Customer_Migrate_buffer
+3. Join Cust_NP_Migrate_buffer
+4. Join BSA_SUB_CUST_FACT
+5. 比對兩邊的 HIGHRISK 是否一致
 
-帶到下面的 'Q1645090150'
+可以直接一次寫完，不需要一個一個查。
 
-SELECT   HIGHRISK,* FROM Customer_Migrate_buffer a
-JOIN Cust_NP_Migrate_buffer b ON a.CIF_KEY =b.CIF_KEY
-WHERE a.CustomerNo = 'Q1645090150'
+WITH TS_LIST AS
+(
+    SELECT TS_CUST_ID
+    FROM BANCS_SK_CUST_INFO a
+    JOIN Customer_Migrate_buffer b
+        ON a.SK_CUST_ID = b.CustomerNo
+    WHERE a.CUST_RE_NO_FLG IN ('2','3')
+    EXCEPT
+    SELECT TS_CUST_ID
+    FROM BANCS_SK_CUST_INFO a
+    JOIN Customer_Migrate_buffer b
+        ON a.SK_CUST_ID = b.CustomerNo
+    WHERE a.CUST_RE_NO_FLG = '1'
+)
+SELECT
+    t.TS_CUST_ID,
+    c.CIF_KEY,
+    np.HIGHRISK  AS NP_HIGHRISK,
+    bsa.HIGHRISK AS BSA_HIGHRISK,
+    CASE
+        WHEN np.HIGHRISK = bsa.HIGHRISK THEN 'MATCH'
+        ELSE 'NOT MATCH'
+    END AS RESULT
+FROM TS_LIST t
+JOIN Customer_Migrate_buffer c
+    ON t.TS_CUST_ID = c.CustomerNo
+LEFT JOIN Cust_NP_Migrate_buffer np
+    ON c.CIF_KEY = np.CIF_KEY
+LEFT JOIN BSA_SUB_CUST_FACT bsa
+    ON t.TS_CUST_ID = bsa.CustomerNo;
 
-SELECT HIGHRISK,* FROM BSA_SUB_CUST_FACT WHERE CustomerNo = 'Q1645090150'
+如果你只想看不一致的資料，再加一個 WHERE：
 
+WHERE
+    ISNULL(np.HIGHRISK,'') <> ISNULL(bsa.HIGHRISK,'');
 
-我主要看這兩個的HIGHRISK   
+這樣就會只列出：
 
-BSA_SUB_CUST_FACT  的 HIGHRISK     是不是使用 Cust_NP_Migrate_buffer  的 HIGHRISK   
+TS_CUST_ID	NP_HIGHRISK	BSA_HIGHRISK	RESULT
+Q1645090150	Y	N	NOT MATCH
+…	…	…	…
 
+⸻
 
-我要怎麼寫來驗證
+如果你的目的是驗證 ETL 是否真的使用 Cust_NP_Migrate_buffer.HIGHRISK
+
+其實可以把來源也一起列出，比較好追：
+
+SELECT
+    t.TS_CUST_ID,
+    c.CIF_KEY,
+    np.HIGHRISK  AS Source_HIGHRISK,
+    bsa.HIGHRISK AS Target_HIGHRISK,
+    CASE
+        WHEN ISNULL(np.HIGHRISK,'') = ISNULL(bsa.HIGHRISK,'')
+            THEN 'OK'
+        ELSE 'DIFFERENT'
+    END AS Verify_Result
+
+這樣一眼就能知道 BSA_SUB_CUST_FACT.HIGHRISK 是否與 Cust_NP_Migrate_buffer.HIGHRISK 相同，也是驗證 ETL 最常用的寫法。
