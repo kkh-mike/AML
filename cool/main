@@ -1,3 +1,21 @@
+SELECT 
+    M.NEW_CIF_KEY,
+    MIN(S.ReviewDt) AS MinReviewDt,
+    'P' AS Status
+FROM dbo.CIF_Migrate_Mapping_TEMP M
+JOIN dbo.Cust_NP_Migrate_buffer S 
+    ON S.CIF_KEY = M.SOURCE_CIF_KEY
+LEFT JOIN dbo.EDD_ReviewSchedule Z 
+    ON Z.CIFKey = M.NEW_CIF_KEY 
+   AND Z.Status = 'P'
+WHERE S.ReviewDt IS NOT NULL
+  AND Z.CIFKey IS NULL  -- 代表 EDD_ReviewSchedule 中不存在符合條件的資料
+GROUP BY M.NEW_CIF_KEY;
+
+
+
+
+
 SELECT M.SOURCE_CIF_KEY
 FROM LoadTrxn_Migrate_buffer a
 INNER JOIN CIF_Migrate_Mapping_TEMP M 
