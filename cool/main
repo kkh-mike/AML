@@ -1,3 +1,65 @@
+沒問題！這是最安全的作法，直接將原表的結構複製一份出來（不影響正式或原始資料），然後在複製出來的測試表上建立 Index 做測試。
+以下為你整理好的完整步驟語法：複製表與資料 \rightarrow 在測試表建立 Index \rightarrow 測試用的 SQL 改寫 \rightarrow 測試結束清理語法。
+第一步：複製一模一樣的結構與資料（建立測試表）
+執行以下 SQL，會建立三張前綴為 TEST_ 的實體表，並將原始資料完整複製進去：
+-- 1. 複製 CIF_Migrate_Mapping_TEMP 結構與資料
+SELECT * INTO dbo.TEST_CIF_Migrate_Mapping_TEMP 
+FROM dbo.CIF_Migrate_Mapping_TEMP;
+
+-- 2. 複製 Cust_NP_Migrate_buffer 結構與資料
+SELECT * INTO dbo.TEST_Cust_NP_Migrate_buffer 
+FROM dbo.Cust_NP_Migrate_buffer;
+
+-- 3. 複製 EDD_ReviewSchedule 結構與資料
+SELECT * INTO dbo.TEST_EDD_ReviewSchedule 
+FROM dbo.EDD_ReviewSchedule;
+
+第二步：在測試表上建立 Index
+複製完成後，在這些 TEST_ 表上建立我們優化需要的 Index：
+-- 1. 針對 TEST_CIF_Migrate_Mapping_TEMP 建立索引
+CREATE NONCLUSTERED INDEX IX_TEST_CIF_Migrate_Mapping_TEMP 
+ON dbo.TEST_CIF_Migrate_Mapping_TEMP (SOURCE_CIF_KEY) 
+INCLUDE (NEW_CIF_KEY);
+
+-- 2. 針對 TEST_Cust_NP_Migrate_buffer 建立索引
+CREATE NONCLUSTERED INDEX IX_TEST_Cust_NP_Migrate_buffer 
+ON dbo.TEST_Cust_NP_Migrate_buffer (CIF_KEY, ReviewDt);
+
+-- 3. 針對 TEST_EDD_ReviewSchedule 建立複合索引
+CREATE NONCLUSTERED INDEX IX_TEST_EDD_ReviewSchedule_CIFKey_Status 
+ON dbo.TEST_EDD_ReviewSchedule (CIFKey, Status);
+
+第三步：拿測試表來跑你的語法（包含語法優化版）
+建立好索引後，你可以用下面這段改指向 TEST_ 表的 SQL 來測試執行速度（此處使用了 LEFT JOIN 改寫優化）：
+SELECT 
+    M.NEW_CIF_KEY,
+    MIN(S.ReviewDt) AS MinReviewDt,
+    'P' AS Status
+FROM dbo.TEST_CIF_Migrate_Mapping_TEMP M
+JOIN dbo.TEST_Cust_NP_Migrate_buffer S 
+    ON S.CIF_KEY = M.SOURCE_CIF_KEY
+LEFT JOIN dbo.TEST_EDD_ReviewSchedule Z 
+    ON Z.CIFKey = M.NEW_CIF_KEY 
+   AND Z.Status = 'P'
+WHERE S.ReviewDt IS NOT NULL
+  AND Z.CIFKey IS NULL
+GROUP BY M.NEW_CIF_KEY;
+
+第四步：測試完成後清除測試表（還原環境）
+測試完畢後，直接將這三張測試表 DROP 掉即可，完全不留痕跡：
+DROP TABLE dbo.TEST_CIF_Migrate_Mapping_TEMP;
+DROP TABLE dbo.TEST_Cust_NP_Migrate_buffer;
+DROP TABLE dbo.TEST_EDD_ReviewSchedule;
+
+
+
+
+--------
+
+
+
+
+
 沒問題！測試效能時先建 Index 觀察速度，測完再 Drop 掉還原環境是非常標準且安全的作法。
 以下為你整理好的 建立 Index (ADD) 與 刪除 Index (DROP) 語法：
 1. 建立 Index（測試用）
