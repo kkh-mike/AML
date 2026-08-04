@@ -1,0 +1,64 @@
+--2451073
+WITH  PURE_TS AS
+(
+	SELECT TS_CUST_ID FROM BANCS_SK_CUST_INFO a JOIN Customer_Migrate_buffer b on a.SK_CUST_ID = b.CustomerNo
+	WHERE a.CUST_RE_NO_FLG  = '1'
+	EXCEPT
+	SELECT TS_CUST_ID FROM BANCS_SK_CUST_INFO a JOIN Customer_Migrate_buffer b on a.SK_CUST_ID = b.CustomerNo
+	WHERE a.CUST_RE_NO_FLG IN ('2','3')
+)
+SELECT COUNT(*) AS Total_Count FROM BSA_SUB_CUST_FACT a
+JOIN PURE_TS d on d.TS_CUST_ID = a.customerno
+JOIN CIF_Migrate_Mapping_TEMP h on h.NEW_CIF_KEY = a.CIF_KEY
+JOIN Cust_NP_Migrate_buffer t on t.CIF_KEY = h.SOURCE_CIF_KEY
+JOIN BSA_SUB_CUST_FACT_BAK_20260720 u on u.CIF_KEY = a.CIF_KEY
+
+
+--2446974
+WITH  PURE_TS AS
+(
+	SELECT TS_CUST_ID FROM BANCS_SK_CUST_INFO a JOIN Customer_Migrate_buffer b on a.SK_CUST_ID = b.CustomerNo
+	WHERE a.CUST_RE_NO_FLG  = '1'
+	EXCEPT
+	SELECT TS_CUST_ID FROM BANCS_SK_CUST_INFO a JOIN Customer_Migrate_buffer b on a.SK_CUST_ID = b.CustomerNo
+	WHERE a.CUST_RE_NO_FLG IN ('2','3')
+)
+SELECT COUNT(*) AS Total_Count FROM BSA_SUB_CUST_FACT a
+JOIN PURE_TS d on d.TS_CUST_ID = a.customerno
+JOIN CIF_Migrate_Mapping_TEMP h on h.NEW_CIF_KEY = a.CIF_KEY
+JOIN Cust_NP_Migrate_buffer t on t.CIF_KEY = h.SOURCE_CIF_KEY
+JOIN BSA_SUB_CUST_FACT_BAK_20260720 u on u.CIF_KEY = a.CIF_KEY
+WHERE  ISNULL(TRY_CAST(a.IsSARFiled AS INT), 0) = ISNULL(TRY_CAST(u.IsSARFiled AS INT), 0)  
+
+
+有差異耶
+
+能幫我跟下面這樣
+
+表示?
+
+我想看一下他們差異的資料
+SELECT
+    z.CIF_KEY AS NEW_CIF_KEY,
+    h.SOURCE_CIF_KEY,
+    y.CustomerNo,
+    t.IsSARFiled AS BUFFER_IsSARFiled,
+    z.IsSARFiled AS FACT_IsSARFiled,
+    ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) AS BUFFER_IsSARFiled_Int,
+    ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0) AS FACT_IsSARFiled_Int,
+    b.SK_CUST_ID,
+    b.CUST_RE_NO_FLG
+FROM BSA_SUB_CUST_FACT z
+JOIN CIF_Migrate_Mapping_TEMP h
+    ON h.NEW_CIF_KEY = z.CIF_KEY
+JOIN Cust_NP_Migrate_buffer t
+    ON t.CIF_KEY = h.SOURCE_CIF_KEY
+JOIN Customer_Migrate_buffer y
+    ON y.CIF_KEY = h.SOURCE_CIF_KEY
+LEFT JOIN BSA_SUB_CUST_FACT_BAK_20260720 c
+    ON c.CIF_KEY = z.CIF_KEY
+LEFT JOIN BANCS_SK_CUST_INFO b
+    ON b.SK_CUST_ID = y.CustomerNo
+WHERE c.CIF_KEY IS NULL
+  AND ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) <> ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0)
+ORDER BY z.CIF_KEY;
