@@ -1,3 +1,41 @@
+沒問題！測試效能時先建 Index 觀察速度，測完再 Drop 掉還原環境是非常標準且安全的作法。
+以下為你整理好的 建立 Index (ADD) 與 刪除 Index (DROP) 語法：
+1. 建立 Index（測試用）
+在 JOIN 與 WHERE 關鍵欄位上建立索引：
+-- 1. 針對 CIF_Migrate_Mapping_TEMP 建立索引 (含 INCLUDE 欄位提升效能)
+CREATE NONCLUSTERED INDEX IX_TEST_CIF_Migrate_Mapping_TEMP 
+ON dbo.CIF_Migrate_Mapping_TEMP (SOURCE_CIF_KEY) 
+INCLUDE (NEW_CIF_KEY);
+
+-- 2. 針對 Cust_NP_Migrate_buffer 建立索引
+CREATE NONCLUSTERED INDEX IX_TEST_Cust_NP_Migrate_buffer 
+ON dbo.Cust_NP_Migrate_buffer (CIF_KEY, ReviewDt);
+
+-- 3. 針對 EDD_ReviewSchedule 建立 CIFKey + Status 的複合索引
+CREATE NONCLUSTERED INDEX IX_TEST_EDD_ReviewSchedule_CIFKey_Status 
+ON dbo.EDD_ReviewSchedule (CIFKey, Status);
+
+2. 刪除 Index（還原環境用）
+測試完成後，執行以下語法即可將剛才建立的索引完全清除：
+-- 1. 刪除 CIF_Migrate_Mapping_TEMP 的測試索引
+DROP INDEX IX_TEST_CIF_Migrate_Mapping_TEMP 
+ON dbo.CIF_Migrate_Mapping_TEMP;
+
+-- 2. 刪除 Cust_NP_Migrate_buffer 的測試索引
+DROP INDEX IX_TEST_Cust_NP_Migrate_buffer 
+ON dbo.Cust_NP_Migrate_buffer;
+
+-- 3. 刪除 EDD_ReviewSchedule 的測試索引
+DROP INDEX IX_TEST_EDD_ReviewSchedule_CIFKey_Status 
+ON dbo.EDD_ReviewSchedule;
+
+💡 測試小建議
+ * 命名加上了 IX_TEST_ 前綴，這樣在物件清單中很好辨識，清理時也不會誤刪原本系統的 Index。
+ * 如果你在測試時發現 CREATE INDEX 跑比較久（例如 Buffer 表資料量非常大），代表它正在背景掃描資料建 B-Tree，這是正常的！建好後再跑你的原 SQL 就可以明顯對比出速度差異了。
+
+
+
+
 SELECT 
     M.NEW_CIF_KEY,
     MIN(S.ReviewDt) AS MinReviewDt,
