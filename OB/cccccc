@@ -1,26 +1,40 @@
-學長好，打擾你了！我是貫軒。
-香港要求我們重跑 SK 到 TS 的 AML UAT（Cut-off 統一抓 6/30）。想請教上次收到 SKHK 的 11 欄 Excel 後：
- * 是透過什麼方式/工具（SQL script、介面還背景作業）匯入 UAT AML 的？
- * 匯入前 Excel 需要先做資料清洗或轉格式嗎？
-方便的話打字、語音回我都可以，非常感謝學長！祝近況順利！
+在 amldbobt（跨伺服器/跨資料庫）尋找哪些預存程序（Stored Procedure, SP）會用到 obods（例如 obods_test 或 HKDB）的資料，可以直接在 amldbobt 執行 SQL 語法搜尋 SP 的程式碼內容。
+請在 amldbobt 上開啟 新查詢 (New Query)，並選擇對應的資料庫（例如 BSADBHK 或你想查的資料庫），執行以下幾種方法之一：
+方法一：搜尋 SP 內文（最常用且直接）
+透過 sys.sql_modules 與 sys.objects 模糊搜尋內文包含關鍵字（如 obods 或 HKDB）的預存程序：
+SELECT 
+    OBJECT_NAME(m.object_id) AS ProcedureName,
+    o.type_desc AS ObjectType,
+    m.definition AS CodeSnippet
+FROM sys.sql_modules m
+INNER JOIN sys.objects o ON m.object_id = o.object_id
+WHERE o.type IN ('P', 'PC') -- P 代表 Stored Procedure
+  AND (
+       m.definition LIKE '%obods%' 
+    OR m.definition LIKE '%HKDB%'
+  );
 
+方法二：如果跨伺服器使用了 Linked Server（連結伺服器）
+如果 amldbobt 和 obods_test 是兩台不同的 SQL Server 執行個體，程式碼中通常會使用 四段式名稱（例如 [obods_test].[HKDB].[dbo].[TableName]）或 Linked Server 名稱。
+你可以把 Linked Server 的名稱（或 IP / 機器名）加入搜尋語法：
+SELECT 
+    OBJECT_NAME(m.object_id) AS ProcedureName,
+    m.definition
+FROM sys.sql_modules m
+WHERE m.definition LIKE '%<你的LinkedServer名稱或IP>%'
+   OR m.definition LIKE '%obods%';
 
+方法三：透過系統檢視表 syscomments（舊版相容）
+如果伺服器版本較舊（雖然畫面上是 SQL 2016），也可以用傳統的 syscomments 搜尋：
+SELECT DISTINCT 
+    o.name AS ProcedureName
+FROM syscomments c
+INNER JOIN sys.objects o ON c.id = o.object_id
+WHERE o.type = 'P'
+  AND (c.text LIKE '%obods%' OR c.text LIKE '%HKDB%');
 
-
-貫軒，簡單來說，香港總行要求你們重新做一次 UAT / 業務影響分析（Business Impact Analysis）。
-原因和你們需要配合的事項幫你整理如下：
-為什麼要重做？
-上次測試數據差異太大，主因是兩邊系統的資料截點（Cut-off date）不一致（上次 HKWBS 是 12/31，但 AML UAT 是 4/30），導致產出一堆空值（"null"）客戶。
-香港要你們/你幹嘛？（核心任務）
- * 統一資料截點至 2026/06/30
-   這次兩邊系統都要統一以 6/30 作為資料基準日，確保數據一致，避免再出現大量 null 資料。
- * 準備好 UAT AML 系統
-   你需要確保 UAT AML 測試環境準備就緒，資料截點設定在 6/30。
- * 接收 Excel 並匯入 AML 系統運算
-   * 香港（SKHK）會提供一份含有 11 個欄位 的 Excel 資料給你們填寫/對接。
-   * 你們需要將這 11 個欄位的資料轉移/匯入到 UAT AML 系統 中。
-   * 系統會結合部分從 HKWBS 同步過來的資訊，重新計算客戶的風險評分（高、中、低風險）。
- * 產出全新的 UAT 與業務影響分析報告
-   跑完運算後，依據新的一致性數據重新評估對業務的影響。
-一話總結：
-香港希望這次**在相同的時間基準點（6/30）**下，把 SKHK 提供的 11 欄 Excel 資料匯入 UAT AML 系統重新跑一遍風險評分，並產出一份準確的業務影響分析。
+💡 小提醒與排錯建議：
+ * 確定查詢執行的資料庫：畫面上 amldbobt 底下有 BSADB、BSADBAU、BSADBHK 等多個資料庫。請確認下拉選單切換到了你想查詢的資料庫（例如 BSADBHK），或加上 USE [資料庫名稱];。
+ * 同義字 (Synonym) 或動態 SQL (Dynamic SQL)：
+   * 如果 SP 是透過 同義字 (Synonym) 連到 obods，語法中的 LIKE '%obods%' 也能查到建立同義字的定義，或者可以直接查詢 sys.synonyms。
+   * 如果程式碼是用字串拼湊後 EXEC() 或 sp_executesql 執行的動態 SQL，sys.sql_modules 依然能找得到字串裡包含的關鍵字。
