@@ -1,3 +1,8 @@
+
+="INSERT INTO #IndvCust (Customerno, openMethod, prodService, isHighRisk, isSar, isBlacklist, isNN, occup, jobTitle) VALUES (N'"&A2&"', N'"&B2&"', N'"&C2&"', '"&D2&"', '"&E2&"', '"&F2&"', '"&G2&"', N'"&H2&"', N'"&I2&"');"
+
+
+
 若資料量較大，逐行執行一千條 INSERT INTO ... VALUES (...) 會造成效能瓶頸（多次請求與 I/O 開銷），且也容易超過 SQL 執行上限。優化的方向有以下兩種常見做法：
 方法一：改用「多值組合」的批量插入 (Batch INSERT)
 將多筆資料合併為一個 INSERT 指令，每次寫入 100~500 筆資料，執行速度會顯著提升。
