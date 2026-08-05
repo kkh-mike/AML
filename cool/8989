@@ -1,3 +1,9 @@
+各位下游好, 請協助於8/5下班前回覆下列調查：
+1.	是否使用AO系統的香港掛code資料 (不論是AO系統提供或其他下游轉存提供)？
+2.	若AO系統於1/4日20:00後的日批才提供新光香港分行的掛code資料至OD/ODS2/DW，是否受影響？若會請說明影響情形
+
+
+
 =CONCAT("INSERT INTO #BussCust (Customerno, isCompleteStructure, openMethod, prodService, ownership, industry, isHighRisk, isSar, isBlacklist, isNN) VALUES ('",A2,"', '",B2,"', '",C2,"', '",D2,"', '",E2,"', '",F2,"', '",G2,"', '",H2,"', '",I2,"', '",J2,"');")
 
 
