@@ -1,42 +1,85 @@
-SELECT TS_CUST_ID
-FROM BANCS_SK_CUST_INFO
-WHERE CUST_RE_NO_FLG IN (1, 2)
-GROUP BY TS_CUST_ID
-HAVING COUNT(DISTINCT CUST_RE_NO_FLG) > 1;
 
-我要先找出TS_CUST_ID
+你的需求可以拆成兩個部分：
 
-然後帶入 a.CustomerNo 
+1. 找出同一個 TS_CUST_ID 同時存在 CUST_RE_NO_FLG = 1 跟 2 的資料。
+2. 確認最後寫入的 PEPBitwiseCode 是否取了較嚴格(較大或不同)的那筆。
 
-SELECT PEPBitwiseCode,* FROM Cust_NP_Migrate_buffer WHERE CIF_KEY IN
+如果只是要先找出來源 (Cust_NP_Migrate_buffer) 有不同 PEPBitwiseCode 的 TS_CUST_ID，可以直接這樣寫：
+
+WITH TS_LIST AS
 (
-SELECT a.CIF_KEY
-FROM Customer_Migrate_buffer a
-WHERE a.CustomerNo in
+    SELECT TS_CUST_ID
+    FROM BANCS_SK_CUST_INFO
+    WHERE CUST_RE_NO_FLG IN (1,2)
+    GROUP BY TS_CUST_ID
+    HAVING COUNT(DISTINCT CUST_RE_NO_FLG) = 2
+)
+SELECT
+    g.TS_CUST_ID,
+    COUNT(DISTINCT n.PEPBitwiseCode) AS PEP_CNT,
+    MIN(n.PEPBitwiseCode) AS MIN_PEP,
+    MAX(n.PEPBitwiseCode) AS MAX_PEP
+FROM TS_LIST t
+JOIN BANCS_SK_CUST_INFO g
+    ON g.TS_CUST_ID = t.TS_CUST_ID
+JOIN Customer_Migrate_buffer c
+    ON c.CustomerNo = g.SK_CUST_ID
+JOIN Cust_NP_Migrate_buffer n
+    ON n.CIF_KEY = c.CIF_KEY
+GROUP BY g.TS_CUST_ID
+HAVING COUNT(DISTINCT n.PEPBitwiseCode) > 1;
+
+⸻
+
+如果要比對最後寫入的值有沒有取嚴
+
+假設你的規則是：
+
+* 同一個 TS_CUST_ID
+* 有多個 SK_CUST_ID
+* 每個 SK_CUST_ID 有不同 PEPBitwiseCode
+* 最終 BSA_SUB_CUST_FACT_Extension.PEPBitwiseCode 應該等於來源最大的(較嚴格)
+
+可以直接比：
+
+WITH SOURCE_PEP AS
 (
-
+    SELECT
+        g.TS_CUST_ID,
+        MAX(n.PEPBitwiseCode) AS EXPECT_PEP
+    FROM BANCS_SK_CUST_INFO g
+    JOIN Customer_Migrate_buffer c
+        ON c.CustomerNo = g.SK_CUST_ID
+    JOIN Cust_NP_Migrate_buffer n
+        ON n.CIF_KEY = c.CIF_KEY
+    WHERE g.CUST_RE_NO_FLG IN (1,2)
+    GROUP BY g.TS_CUST_ID
 )
+SELECT
+    s.TS_CUST_ID,
+    s.EXPECT_PEP,
+    e.PEPBitwiseCode AS ACTUAL_PEP,
+    g.SK_CUST_ID,
+    c.CIF_KEY
+FROM SOURCE_PEP s
+JOIN BANCS_SK_CUST_INFO g
+    ON g.TS_CUST_ID = s.TS_CUST_ID
+JOIN Customer_Migrate_buffer c
+    ON c.CustomerNo = g.SK_CUST_ID
+JOIN CIF_Migrate_Mapping_TEMP m
+    ON m.SOURCE_CIF_KEY = c.CIF_KEY
+JOIN BSA_SUB_CUST_FACT_Extension e
+    ON e.CIF_KEY = m.NEW_CIF_KEY
+WHERE s.EXPECT_PEP <> e.PEPBitwiseCode;
 
-)
+⸻
 
+我想確認一件事
 
-但現在有個問題是 我最後要找出 有不同的 PEPBitwiseCode
+你說的「取嚴格」是指哪一種？
 
+1. 取數值最大的 PEPBitwiseCode (MAX)？
+2. 做 Bitwise OR，例如 1 | 4 = 5？
+3. 依照某個優先順序表（不是數值大小）？
 
-因為我是要驗測 PEPBitwiseCode 有取嚴格
-
-
-
-
--- Cust_NP_Migrate_buffer 這是  PEPBitwiseCode的 來源資料
---- BSA_SUB_CUST_FACT_Extension 這是最後寫入的地方
-
-SELECT a.PEPBitwiseCode,* FROM BSA_SUB_CUST_FACT_Extension a
-join CIF_Migrate_Mapping_TEMP  b on a.CIF_KEY = b.NEW_CIF_KEY
-join Customer_Migrate_buffer c on c.CIF_KEY = b.SOURCE_CIF_KEY
-join BANCS_SK_CUST_INFO g on g.SK_CUST_ID = c.CustomerNo
-
-
-因為有很多個SK_CUST_ID 對應同一個 TS_CUST_ID  
-要看有沒有取嚴
-
+因為 PEPBitwiseCode 這個欄位名稱很像是 Bit Mask，如果是 Bitwise Code，很多系統其實不是取 MAX，而是做 Bitwise OR。如果是這種情況，SQL 就要改成另一種寫法。
