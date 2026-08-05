@@ -1,3 +1,65 @@
+如果你是要查 SQL Server 哪些 View 有使用到某個 Table，有幾種方式。
+
+方法一：查 sys.sql_expression_dependencies (推薦)
+
+假設要找有沒有 View 用到 Customer_Migrate_buffer：
+
+SELECT
+    OBJECT_SCHEMA_NAME(referencing_id) AS SchemaName,
+    OBJECT_NAME(referencing_id) AS ViewName
+FROM sys.sql_expression_dependencies
+WHERE referenced_entity_name = 'Customer_Migrate_buffer'
+AND OBJECTPROPERTY(referencing_id, 'IsView') = 1;
+
+如果知道 Schema，可以一起加：
+
+SELECT
+    OBJECT_SCHEMA_NAME(referencing_id) AS SchemaName,
+    OBJECT_NAME(referencing_id) AS ViewName
+FROM sys.sql_expression_dependencies
+WHERE referenced_schema_name = 'dbo'
+AND referenced_entity_name = 'Customer_Migrate_buffer'
+AND OBJECTPROPERTY(referencing_id, 'IsView') = 1;
+
+⸻
+
+方法二：直接搜尋 View 定義 (最常用)
+
+有些 dependency 沒更新，直接搜尋文字比較準。
+
+SELECT
+    s.name AS SchemaName,
+    v.name AS ViewName
+FROM sys.views v
+JOIN sys.schemas s
+    ON v.schema_id = s.schema_id
+JOIN sys.sql_modules m
+    ON v.object_id = m.object_id
+WHERE m.definition LIKE '%Customer_Migrate_buffer%';
+
+這個會把所有 SQL 內容有出現 Customer_Migrate_buffer 的 View 找出來。
+
+⸻
+
+方法三：使用 SSMS
+
+1. 展開 Database
+2. 展開 Views
+3. 右鍵某個 View → View Dependencies (檢視相依性)
+
+不過這個只能一個一個看，不適合大量查詢。
+
+⸻
+
+我建議
+
+如果是工作上要確認「哪個 View 用到某個 Table」，我通常會先跑 方法二 (sys.sql_modules)，因為即使相依性沒有更新、用了 Dynamic SQL 或某些特殊寫法，也比較容易找到。
+
+如果你們是 SQL Server 2019 或 2022，這也是我最常用的查法。
+
+
+
+
 # ===================================================
 # SQL Server Export CSV (UTF-8 with Quoted Fields)
 # ===================================================
