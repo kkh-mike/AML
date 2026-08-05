@@ -1,65 +1,42 @@
-INSERT INTO dbo.dda_source (
-    [Acct_Key],
-    [Prmy_Offcr_Nbr], -- 本地 AO 代號欄位
-    [Prmy_Offcr_Nme]  -- 本地 AO 姓名欄位
+SELECT TS_CUST_ID
+FROM BANCS_SK_CUST_INFO
+WHERE CUST_RE_NO_FLG IN (1, 2)
+GROUP BY TS_CUST_ID
+HAVING COUNT(DISTINCT CUST_RE_NO_FLG) > 1;
+
+我要先找出TS_CUST_ID
+
+然後帶入 a.CustomerNo 
+
+SELECT PEPBitwiseCode,* FROM Cust_NP_Migrate_buffer WHERE CIF_KEY IN
+(
+SELECT a.CIF_KEY
+FROM Customer_Migrate_buffer a
+WHERE a.CustomerNo in
+(
+
 )
-SELECT 
-    LEFT(a.[ACCOUNT_NBR], 50),
-    LEFT(a.[OFFICER_NBR], 50),  -- 直接抓 obods.dbo.RAW_CASH_ACCOUNT 的最新 AO 代號
-    LEFT(a.[OFFICER_NAME], 100) -- 直接抓 obods.dbo.RAW_CASH_ACCOUNT 的最新 AO 姓名
-FROM obods.dbo.RAW_CASH_ACCOUNT a; -- 來源 DB 伺服器與 View
+
+)
+
+
+但現在有個問題是 我最後要找出 有不同的 PEPBitwiseCode
+
+
+因為我是要驗測 PEPBitwiseCode 有取嚴格
 
 
 
 
-USE [HKDB]
-GO
+-- Cust_NP_Migrate_buffer 這是  PEPBitwiseCode的 來源資料
+--- BSA_SUB_CUST_FACT_Extension 這是最後寫入的地方
 
-/****** Object:  View [dbo].[vw_RISKSYS_WBS_CUSTOMER_AO]    Script Date: 2026/8/5 下午 01:12:49 ******/
-SET ANSI_NULLS ON
-GO
+SELECT a.PEPBitwiseCode,* FROM BSA_SUB_CUST_FACT_Extension a
+join CIF_Migrate_Mapping_TEMP  b on a.CIF_KEY = b.NEW_CIF_KEY
+join Customer_Migrate_buffer c on c.CIF_KEY = b.SOURCE_CIF_KEY
+join BANCS_SK_CUST_INFO g on g.SK_CUST_ID = c.CustomerNo
 
-SET QUOTED_IDENTIFIER ON
-GO
 
-/*
-SELECT * FROM HKDB.dbo.vw_RISKSYS_WBS_CUSTOMER_AO
-*/
-ALTER VIEW [dbo].[vw_RISKSYS_WBS_CUSTOMER_AO]
-AS
-/*
-使用系統: RISKSYS 風險管理系統
-程式名稱: HKDB.dbo.vw_RISKSYS_WBS_CUSTOMER_AO
-程式說明: HKWBS 客戶主檔與AO資訊
-參考程式: WBS Source: ODSP.ODDBP01.dbo.WBS_VW_COL_FAC_LON / WBS IT: 張書坤
-開發人員: RISKSYS IT: 王勝玄 / HKWBS IT: 王盛禾
-開發日期: 2021/10/21
-修改記錄:
-2022/07/11 王勝玄 林佳慧 提案單IT20202202161057 彙整海外分行(新加坡分行、布里斯本分行、東京分行、納閔分行)擔保品(含存款)資訊需求。
-           香港分行別BRN_NO欄位值, 由現行代碼0900改為HK。
-*/
-
-   SELECT CIF.CIF_CUST_INFO_SEQ,
-          CIF.CUSTOMER_ID AS CUST_ID,
-          CIF.CUSTOMER_GLOBAL_ID AS CUSTOMER_GLOBAL_ID,
-          --CIF.RM1_EMP_ID,
-          --CIF.RM1_PCC,
-          --CIF.RM2_EMP_ID,
-          --CIF.RM2_EMP_PCC,
-          SUBSTRING(AO.AO_ID,1,10) AS AO_ID,
-          AO.AO_NM,
-          AO.EMP_NO,
-          AO.PRFT_CNTR
-     FROM dbo.WBS_CIF_CUST_INFO CIF
-    INNER JOIN dbo.WBS_COM_AO_CUST_REL AOR
-     --HKWBS改看GLOBAL_ID
-       --ON AOR.CUST_ID = CASE WHEN CIF.ID_TYPE IN (11,12,13) THEN RTRIM(CIF.CUSTOMER_ID) + '0' ELSE CIF.CUSTOMER_ID END
-       ON AOR.CUST_ID = CASE WHEN CIF.ID_TYPE IN (11,12,13) THEN RTRIM(CIF.CUSTOMER_GLOBAL_ID) + '0' ELSE CIF.CUSTOMER_ID END
-      AND AOR.CUST_ACCT_SYS = 'CIF'
-    INNER JOIN dbo.WBS_COM_AO_INFO AO
-       ON AO.AO_ID = RTRIM(AOR.AO_ID) AND AO.AO_TYP NOT IN ('AO1P', 'PFMS')
-   --HKDB無ODORG.HR_EMP資料表
-   --LEFT OUTER JOIN ODORG.HR_EMP HR ON HR.EMP_ID = TRIM(AO.EMP_NO) AND HR.JOB_STATUS = '1'
-
-GO
+因為有很多個SK_CUST_ID 對應同一個 TS_CUST_ID  
+要看有沒有取嚴
 
