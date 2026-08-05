@@ -1,3 +1,17 @@
+INSERT INTO dbo.dda_source (
+    [Acct_Key],
+    [Prmy_Offcr_Nbr], -- 本地 AO 代號欄位
+    [Prmy_Offcr_Nme]  -- 本地 AO 姓名欄位
+)
+SELECT 
+    LEFT(a.[ACCOUNT_NBR], 50),
+    LEFT(a.[OFFICER_NBR], 50),  -- 直接抓 obods.dbo.RAW_CASH_ACCOUNT 的最新 AO 代號
+    LEFT(a.[OFFICER_NAME], 100) -- 直接抓 obods.dbo.RAW_CASH_ACCOUNT 的最新 AO 姓名
+FROM obods.dbo.RAW_CASH_ACCOUNT a; -- 來源 DB 伺服器與 View
+
+
+
+
 USE [HKDB]
 GO
 
