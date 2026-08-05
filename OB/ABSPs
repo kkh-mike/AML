@@ -1,14 +1,18 @@
+可以，而且如果你的目的是驗證最後是否採用 CUST_RE_NO_FLG = 2 (較嚴格) 的 PEPBitwiseCode，那其實不需要 MAX() 了，直接拿 CUST_RE_NO_FLG = 2 的值當作預期值即可。
+
+例如：
 
 WITH SOURCE_PEP AS
 (
     SELECT
         g.TS_CUST_ID,
-        MAX(n.PEPBitwiseCode) AS EXPECT_PEP
+        n.PEPBitwiseCode AS EXPECT_PEP
     FROM BANCS_SK_CUST_INFO g
-    JOIN Customer_Migrate_buffer c        ON c.CustomerNo = g.SK_CUST_ID
-    JOIN Cust_NP_Migrate_buffer n        ON n.CIF_KEY = c.CIF_KEY
-    WHERE g.CUST_RE_NO_FLG IN (1,2)
-    GROUP BY g.TS_CUST_ID
+    JOIN Customer_Migrate_buffer c
+        ON c.CustomerNo = g.SK_CUST_ID
+    JOIN Cust_NP_Migrate_buffer n
+        ON n.CIF_KEY = c.CIF_KEY
+    WHERE g.CUST_RE_NO_FLG = 2
 )
 SELECT
     s.TS_CUST_ID,
@@ -17,12 +21,63 @@ SELECT
     g.SK_CUST_ID,
     c.CIF_KEY
 FROM SOURCE_PEP s
-JOIN BANCS_SK_CUST_INFO g    ON g.TS_CUST_ID = s.TS_CUST_ID
-JOIN Customer_Migrate_buffer c    ON c.CustomerNo = g.SK_CUST_ID
-JOIN CIF_Migrate_Mapping_TEMP m    ON m.SOURCE_CIF_KEY = c.CIF_KEY
-JOIN BSA_SUB_CUST_FACT_Extension e    ON e.CIF_KEY = m.NEW_CIF_KEY
+JOIN BANCS_SK_CUST_INFO g
+    ON g.TS_CUST_ID = s.TS_CUST_ID
+   AND g.CUST_RE_NO_FLG = 2
+JOIN Customer_Migrate_buffer c
+    ON c.CustomerNo = g.SK_CUST_ID
+JOIN CIF_Migrate_Mapping_TEMP m
+    ON m.SOURCE_CIF_KEY = c.CIF_KEY
+JOIN BSA_SUB_CUST_FACT_Extension e
+    ON e.CIF_KEY = m.NEW_CIF_KEY
 WHERE s.EXPECT_PEP <> e.PEPBitwiseCode;
 
+⸻
 
+如果你還想只驗證那些同時有 CUST_RE_NO_FLG = 1 和 2 的 TS_CUST_ID，可以再加一個 CTE：
 
-可不可以只針對 CUST_RE_NO_FLG  是2 的來撈阿
+WITH TS_LIST AS
+(
+    SELECT TS_CUST_ID
+    FROM BANCS_SK_CUST_INFO
+    WHERE CUST_RE_NO_FLG IN (1,2)
+    GROUP BY TS_CUST_ID
+    HAVING COUNT(DISTINCT CUST_RE_NO_FLG) = 2
+),
+SOURCE_PEP AS
+(
+    SELECT
+        g.TS_CUST_ID,
+        n.PEPBitwiseCode AS EXPECT_PEP
+    FROM BANCS_SK_CUST_INFO g
+    JOIN TS_LIST t
+        ON t.TS_CUST_ID = g.TS_CUST_ID
+    JOIN Customer_Migrate_buffer c
+        ON c.CustomerNo = g.SK_CUST_ID
+    JOIN Cust_NP_Migrate_buffer n
+        ON n.CIF_KEY = c.CIF_KEY
+    WHERE g.CUST_RE_NO_FLG = 2
+)
+SELECT
+    s.TS_CUST_ID,
+    s.EXPECT_PEP,
+    e.PEPBitwiseCode AS ACTUAL_PEP,
+    g.SK_CUST_ID,
+    c.CIF_KEY
+FROM SOURCE_PEP s
+JOIN BANCS_SK_CUST_INFO g
+    ON g.TS_CUST_ID = s.TS_CUST_ID
+   AND g.CUST_RE_NO_FLG = 2
+JOIN Customer_Migrate_buffer c
+    ON c.CustomerNo = g.SK_CUST_ID
+JOIN CIF_Migrate_Mapping_TEMP m
+    ON m.SOURCE_CIF_KEY = c.CIF_KEY
+JOIN BSA_SUB_CUST_FACT_Extension e
+    ON e.CIF_KEY = m.NEW_CIF_KEY
+WHERE s.EXPECT_PEP <> e.PEPBitwiseCode;
+
+這樣查出來的就是：
+
+* 同一個 TS_CUST_ID 同時存在 1、2
+* 以 CUST_RE_NO_FLG = 2 的 PEPBitwiseCode 作為預期值
+* 找出最終寫入 BSA_SUB_CUST_FACT_Extension 沒有取到 2 那筆 的資料。
