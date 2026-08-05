@@ -1,3 +1,57 @@
+@
+
+不用真的「一邊執行 .exe 一邊比對」，通常有兩種處理方式，看你方便選哪一種：
+方式一：直接查 SQL 歷史紀錄（不用開 .exe，最方便）
+如果這個 ETL 過去有執行過，SQL Server 的快取（Plan Cache）其實早就把語法記下來了。你不需要觸發 .exe，直接在 SSMS 開新查詢視窗執行語法即可：
+SELECT TOP 50
+    st.text AS [Executed_SQL_or_SP],
+    qs.last_execution_time AS [Last_Executed_Time],
+    qs.execution_count AS [Execution_Count]
+FROM sys.dm_exec_query_stats AS qs
+CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) AS st
+WHERE st.text LIKE '%RAW_%'      -- 搜尋第一張圖 obods 裡的檢視表名稱
+   OR st.text LIKE '%obods%'
+ORDER BY qs.last_execution_time DESC;
+
+方式二：如果一定要手動觸發 .exe（做實驗）
+如果你希望 「手動跑一次 .exe 讓它去抓資料，然後即時抓出它用了哪隻 SP」：
+ * 先在 SQL Server 開好 Profiler 或查詢視窗。
+ * 執行 .exe 讓它開始運作。
+ * 立刻執行 SQL（或者透過 SQL Server Profiler 側側監聽）：
+   -- 抓過去 10 分鐘內執行的 SP 或 SQL
+SELECT 
+    st.text AS [SQL_Content],
+    qs.last_execution_time
+FROM sys.dm_exec_query_stats AS qs
+CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) AS st
+WHERE qs.last_execution_time >= DATEADD(MINUTE, -10, GETDATE())
+ORDER BY qs.last_execution_time DESC;
+
+💡 補充：不用跑 .exe 也能直接「靜態找出 SP」的方法
+從你的截圖來看，amldbobt 資料庫裡面有很多 AC_ 開頭的 SP，而 obods 裡面有很多 RAW_ 開頭的檢視表（View）。
+你直接在 amldbobt（例如選擇 BSADBHK 資料庫）貼上這段 SQL，就能直接把「程式碼裡面有去 obods 撈 RAW_ 資料」的所有 SP 一次列出來，連 .exe 都不用執行：
+USE [BSADBHK]; -- 請切換到你 amldbobt 下的資料庫名稱
+
+SELECT 
+    OBJECT_NAME(m.object_id) AS [SP_Name],
+    m.definition AS [SP_Code]
+FROM sys.sql_modules m
+INNER JOIN sys.objects o ON m.object_id = o.object_id
+WHERE o.type = 'P' -- 只找 Stored Procedure
+  AND (
+       m.definition LIKE '%RAW_%'   -- 關鍵字：obods 裡的檢視表 prefix
+    OR m.definition LIKE '%obods%'  -- 關鍵字：obods 資料庫名
+    OR m.definition LIKE '%HKDB%'   -- 關鍵字：HKDB 資料庫名
+  );
+
+你要找的答案，大概率就在這個查詢結果產出的 SP 清單裡！你想先嘗試用靜態語法找，還是去查 SQL 執行紀錄？
+
+
+
+呃呃呃呃呃呃呃
+
+
+
 在 amldbobt（跨伺服器/跨資料庫）尋找哪些預存程序（Stored Procedure, SP）會用到 obods（例如 obods_test 或 HKDB）的資料，可以直接在 amldbobt 執行 SQL 語法搜尋 SP 的程式碼內容。
 請在 amldbobt 上開啟 新查詢 (New Query)，並選擇對應的資料庫（例如 BSADBHK 或你想查的資料庫），執行以下幾種方法之一：
 方法一：搜尋 SP 內文（最常用且直接）
