@@ -1,3 +1,13 @@
+EXEC sp_MSforeachdb '
+IF EXISTS (SELECT 1 FROM [?].sys.objects WHERE name = ''LOAD_PRELOAD_003'' AND type = ''P'')
+BEGIN
+    SELECT ''[?]'' AS [DatabaseName], name AS [SP_Name] FROM [?].sys.objects WHERE name = ''LOAD_PRELOAD_003'';
+END
+';
+
+
+
+
 @
 
 不用真的「一邊執行 .exe 一邊比對」，通常有兩種處理方式，看你方便選哪一種：
