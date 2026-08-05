@@ -1,4 +1,4 @@
-=CONCAT("INSERT INTO #IndvCust (Customerno, openMethod, prodService, isHighRisk, isSar, isBlacklist, isNN, occup, jobTitle) VALUES (N'",A2,"', N'",B2,"', N'",C2,"', '",D2,"', '",E2,"', '",F2,"', '",G2,"', N'",H2,"', N'",I2,"');")
+=CONCAT("INSERT INTO #BussCust (Customerno, isCompleteStructure, openMethod, prodService, ownership, industry, isHighRisk, isSar, isBlacklist, isNN) VALUES ('",A2,"', '",B2,"', '",C2,"', '",D2,"', '",E2,"', '",F2,"', '",G2,"', '",H2,"', '",I2,"', '",J2,"');")
 
 
-=IF(MOD(ROW()-2,1000)=0,"INSERT INTO #IndvCust (Customerno, openMethod, prodService, isHighRisk, isSar, isBlacklist, isNN, occup, jobTitle) VALUES (N'"&A2&"', N'"&B2&"', N'"&C2&"', '"&D2&"', '"&E2&"', '"&F2&"', '"&G2&"', N'"&H2&"', N'"&I2&"'),","(N'"&A2&"', N'"&B2&"', N'"&C2&"', '"&D2&"', '"&E2&"', '"&F2&"', '"&G2&"', N'"&H2&"', N'"&I2&"'),")
+這也幫我改
