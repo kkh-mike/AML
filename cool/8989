@@ -1,0 +1,40 @@
+USE BSADBHK
+
+--drop table #IndvCust
+--drop table #BussCust
+CREATE TABLE #IndvCust (
+    Customerno        NVARCHAR(50),
+    openMethod         NVARCHAR(100),
+    prodService        NVARCHAR(100),
+    isHighRisk     CHAR(1),
+    isSar         CHAR(1),
+    isBlacklist       CHAR(1),
+    isNN    CHAR(1),
+    occup           NVARCHAR(100),
+    jobTitle             NVARCHAR(100)
+);
+
+
+CREATE TABLE #BussCust (
+    Customerno        NVARCHAR(50),
+	isCompleteStructure         CHAR(1),
+    openMethod         NVARCHAR(100),
+    prodService        NVARCHAR(100),
+	ownership        NVARCHAR(100),
+	industry        NVARCHAR(100),
+    isHighRisk     CHAR(1),
+    isSar         CHAR(1),
+    isBlacklist       CHAR(1),
+    isNN    CHAR(1)
+);
+
+
+--excel 轉入資料
+INSERT INTO #IndvCust (Customerno, openMethod, prodService, isHighRisk, isSar, isBlacklist, isNN, occup, jobTitle) VALUES (N'680012', N'01', N'A02;A03;A04;B02;D02', 'N', 'N', 'N', 'N', N'0500', N'01');
+
+
+
+我目前excel 是這樣寫
+但我的資料很多
+我要怎麼改我的excel 公式
+=CONCAT("INSERT INTO #IndvCust (Customerno, openMethod, prodService, isHighRisk, isSar, isBlacklist, isNN, occup, jobTitle) VALUES (N'",A2,"', N'",B2,"', N'",C2,"', '",D2,"', '",E2,"', '",F2,"', '",G2,"', N'",H2,"', N'",I2,"');")
