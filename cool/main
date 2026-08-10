@@ -1,3 +1,33 @@
+Here is a simpler version using A2-level English so it is easy to read and understand:
+Dear Team,
+Thank you for your email. Here is the reason for the issue:
+1. What We Found
+ * HKWBS IDs: A12080314201, A12080314202, A12080314203, POWER10WS01, 700103_20638
+ * AML Active IDs: A12080314201, A12080314202, A12080314203, POWER10WS01, 700103_20638, and AMLA2300189
+The ID AMLA2300189 is extra. A user created this ID manually in the AML system after reviewing the case.
+Because this ID is still linked to the account, the system calculates the risk score incorrectly.
+2. Next Steps
+ * Please Check: Is AMLA2300189 still needed? If not, please help remove it.
+ * Our Support: After removing this ID, we will check the risk score again to make sure it is correct.
+Please let us know if you need further help.
+Best regards,
+[Your Name]
+常用單字句型 (A2 Key Words)
+ * Extra：多餘的 / 額外的
+ * Created manually：手動建立的
+ * Linked to...：連結到...
+ * Is still needed?：還需要嗎？
+ * Remove：刪除 / 移除
+
+
+
+
+
+
+
+
+
+
 沒問題！這是最安全的作法，直接將原表的結構複製一份出來（不影響正式或原始資料），然後在複製出來的測試表上建立 Index 做測試。
 以下為你整理好的完整步驟語法：複製表與資料 \rightarrow 在測試表建立 Index \rightarrow 測試用的 SQL 改寫 \rightarrow 測試結束清理語法。
 第一步：複製一模一樣的結構與資料（建立測試表）
