@@ -1,3 +1,27 @@
+USE [master]
+GO
+
+-- 1. 建立 Server 層級的 Login 帳號與密碼
+CREATE LOGIN [你的帳號名稱] 
+WITH PASSWORD = N'你的密碼', 
+     CHECK_EXPIRATION = OFF, 
+     CHECK_POLICY = OFF;
+GO
+
+-- 2. 切換到目標資料庫（例如 MYDB）
+USE [MYDB]
+GO
+
+-- 3. 在該資料庫建立對應的 User
+CREATE USER [你的帳號名稱] FOR LOGIN [你的帳號名稱];
+
+-- 4. 賦予 db_owner 權限
+ALTER ROLE [db_owner] ADD MEMBER [你的帳號名稱];
+GO
+
+
+
+
 各位下游好, 請協助於8/5下班前回覆下列調查：
 1.	是否使用AO系統的香港掛code資料 (不論是AO系統提供或其他下游轉存提供)？
 2.	若AO系統於1/4日20:00後的日批才提供新光香港分行的掛code資料至OD/ODS2/DW，是否受影響？若會請說明影響情形
