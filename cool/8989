@@ -1,49 +1,8 @@
-可以，而且很適合用 PowerShell 一次完成：
-
-SAR_Trxn_Detail_All.sql → 自動分割 → 依序產生 _1.sql ~ _210.sql → 依序 sqlcmd 執行 → 產生 log
-
-甚至你不需要自己先手動切 210 個檔案。
-
-不過有一個關鍵：不能單純按照「固定幾行」切，最好按照 SQL 的批次邊界（例如 GO）切，否則很容易把一個 SQL statement 切斷。
-
-我建議做成這種流程
-
-SAR_Trxn_Detail_All.sql
-        ↓
-PowerShell
-        ↓
-自動依 GO 分割
-        ↓
-SAR_Trxn_Detail_All_1.sql
-SAR_Trxn_Detail_All_2.sql
-SAR_Trxn_Detail_All_3.sql
-...
-        ↓
-依序 sqlcmd
-        ↓
-SAR_Trxn_Detail_All_1.log
-SAR_Trxn_Detail_All_2.log
-...
-        ↓
-全部完成
-
-而且可以再加上：
-
-* 某一份 SQL 失敗就停止
-* 自動記錄成功 / 失敗
-* 自動建立 Split、Log 資料夾
-* 執行前先刪除舊檔
-* 不需要寫死 210
-* 自動算到底有幾份
-* 最後顯示總共成功幾份
-
-例如可以直接做成一個 Run_SAR.ps1。
-
 # ==========================================
 # SAR_Trxn_Detail_All.sql
 # 自動分割 + 依序執行 SQL
 # ==========================================
-$SourceFile = ".\SAR_Trxn_Detail_All.sql"
+$SourceFile = "D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\TSEST\SAR_Trxn_Detail_All.sql"
 $OutputFolder = ".\Split"
 $LogFolder    = ".\Log"
 $Server   = "amlist"
@@ -112,164 +71,26 @@ foreach ($Batch in $Batches) {
     Write-Host "產生：$OutputFile"
     $Index++
 }
-# ==========================================
-# 8. 開始執行 SQL
-# ==========================================
-Write-Host ""
-Write-Host "========================================="
-Write-Host "開始執行 SQL"
-Write-Host "========================================="
-Write-Host ""
-$Total  = $Batches.Count
-$Success = 0
-$Failed  = 0
-for ($i = 1; $i -le $Total; $i++) {
-    $SqlFile = Join-Path `
-        $OutputFolder `
-        "SAR_Trxn_Detail_All_$i.sql"
-    $LogFile = Join-Path `
-        $LogFolder `
-        "SAR_Trxn_Detail_All_$i.log"
-    Write-Host "-----------------------------------------"
-    Write-Host "執行 [$i / $Total]"
-    Write-Host "$SqlFile"
-    Write-Host "-----------------------------------------"
-    sqlcmd `
-        -S $Server `
-        -U $User `
-        -P $Password `
-        -d $Database `
-        -i $SqlFile `
-        -o $LogFile
-    $ExitCode = $LASTEXITCODE
-    if ($ExitCode -eq 0) {
-        Write-Host "SUCCESS：第 $i 份執行成功" `
-            -ForegroundColor Green
-        $Success++
-    }
-    else {
-        Write-Host "FAILED：第 $i 份執行失敗" `
-            -ForegroundColor Red
-        Write-Host "請檢查：$LogFile" `
-            -ForegroundColor Yellow
-        $Failed++
-        # 遇到錯誤就停止
-        Write-Host ""
-        Write-Host "SQL 執行失敗，停止後續執行。" `
-            -ForegroundColor Red
-        break
-    }
-}
-# ==========================================
-# 9. 執行結果
-# ==========================================
-Write-Host ""
-Write-Host "========================================="
-Write-Host "執行完成"
-Write-Host "========================================="
-Write-Host "總 Batch：$Total"
-Write-Host "成功：$Success"
-Write-Host "失敗：$Failed"
-if ($Failed -eq 0) {
-    Write-Host ""
-    Write-Host "全部 SQL 執行成功！" `
-        -ForegroundColor Green
-}
-else {
-    Write-Host ""
-    Write-Host "有 SQL 執行失敗，請檢查 Log。" `
-        -ForegroundColor Red
-}
-Write-Host ""
-Read-Host "按 Enter 結束"
 
-但你這個情境，我會再建議改一點
 
-你現在原本是：
+PS C:\Users\1141923> D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\TSEST\Run_SAR.ps1
+清除舊檔案...
+讀取 D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\TSEST\SAR_Trxn_Detail_All.sql ...
+Get-Content : 記憶體不足，無法繼續執行此程式。
+位於 D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\TSEST\Run_SAR.ps1:38 字元:12
++ $Content = Get-Content $SourceFile -Raw
++            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [Get-Content]，OutOfMemoryException
+    + FullyQualifiedErrorId : ProviderContentReadError,Microsoft.PowerShell.Commands.GetContentCommand
+ 
+以 "2" 引數呼叫 "Split" 時發生例外狀況: "值不能為 null。
+參數名稱: input"
+位於 D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\TSEST\Run_SAR.ps1:43 字元:1
++ $Batches = [regex]::Split(
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+    + FullyQualifiedErrorId : ArgumentNullException
+ 
 
-for /l %%i in (1,1,210) do
+共找到 0 個 SQL Batch
 
-這代表你預先知道一定有 210 份。
-
-PowerShell 就不用這樣。
-
-它會自己偵測：
-
-原始 SQL
-   ↓
-GO
-   ↓
-GO
-   ↓
-GO
-   ↓
-...
-
-假設最後發現是 237 個 batch，就自動：
-
-SAR_Trxn_Detail_All_1.sql
-SAR_Trxn_Detail_All_2.sql
-...
-SAR_Trxn_Detail_All_237.sql
-
-然後：
-
-1 → sqlcmd
-2 → sqlcmd
-3 → sqlcmd
-...
-237 → sqlcmd
-
-這樣整個流程就變成一鍵執行。
-
-⸻
-
-⚠️ 不過有一個地方我要先確認
-
-你的 SAR_Trxn_Detail_All.sql 是哪一種？
-
-A.
-
-INSERT INTO xxx
-SELECT ...
-GO
-INSERT INTO xxx
-SELECT ...
-GO
-INSERT INTO xxx
-SELECT ...
-GO
-
-如果是這種，上面的做法很適合。
-
-但如果你的 SQL 是像：
-
-INSERT INTO xxx
-SELECT ...
-UNION ALL
-SELECT ...
-UNION ALL
-SELECT ...
-UNION ALL
-...
-
-然後只是因為 SQL 太大，檔案本身沒有 GO，那就不能用上面這種「依 GO 分割」。
-
-這時候要改成：
-
-SAR_Trxn_Detail_All.sql
-        ↓
-PowerShell
-        ↓
-每 N 筆 INSERT / 每 N MB 自動切
-        ↓
-_1.sql
-_2.sql
-_3.sql
-...
-        ↓
-sqlcmd
-
-這種我也可以幫你做，而且可以做成「SQL 太大就自動切，每份控制在例如 50MB」的版本。
-
-如果你把 SAR_Trxn_Detail_All.sql 裡面前面約 30～50 行貼給我，我可以直接按照你實際 SQL 結構幫你改成最安全的一鍵 PowerShell 版本。
