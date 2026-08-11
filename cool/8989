@@ -1,41 +1,37 @@
-'POB 出生地國家
-Case 5
-    AtName = "@CUST_PLACE_OF_BIRTH"
-    ColNum = 2
+SAR_Trxn_Detail_All.sql
 
-    'Check
-    For i = 2 To RowCount
-        
-        Dim originalValue As String
-        Dim checkValue As String
-        
-        originalValue = Trim(CStr(Range("G" & i).Value))
-        checkValue = Left(originalValue, 4)
-        
-        checkData = WorksheetFunction.IfError( _
-                        Application.VLookup( _
-                            checkValue, _
-                            Worksheets("Check").Range("A:A"), _
-                            1, _
-                            False), _
-                        "Error")
-        
-        If checkData = "Error" Then
-            
-            '標記錯誤欄位
-            Range("G" & i).Interior.Color = RGB(255, 220, 220)
-            
-            MsgBox _
-                "格式錯誤！" & vbNewLine & vbNewLine & _
-                "Excel列數：" & i & vbNewLine & _
-                "原始資料：" & originalValue & vbNewLine & _
-                "檢查值（前4碼）：" & checkValue & vbNewLine & _
-                "查找範圍：Check!A:A", _
-                vbExclamation, _
-                "格式錯誤"
-            
-            Range("G" & i).Select
-            Exit Sub
-        End If
-        
-    Next
+因為我的sql 太大
+
+我是分割成很多個
+SAR_Trxn_Detail_All_1.sql
+
+再用
+
+
+@echo off
+
+echo 正在執行 SQL 腳本...
+
+for /l %%i in (1,1,210) do (
+    echo 正在執行 Table_%%i.sql ...
+    
+    sqlcmd -S amlist -U aml -P aml1234 -d SARCaseWarehouse ^
+    -i "SAR_Trxn_Detail_All_%%i.sql" ^
+    -o "SAR_Trxn_Detail_All_%%i.log"
+)
+
+echo 全部執行完畢，請檢查對應的 .log 檔案。
+pause
+
+
+寫入
+
+但現在
+
+如果要自動化 
+SAR_Trxn_Detail_All.sql
+分割
+再接著執行寫入
+
+有辦法用powershell?
+
