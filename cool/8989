@@ -1,7 +1,27 @@
+可以，而且這樣其實更適合你現在的情況。
+
+你的需求改成：
+
+SAR_Trxn_Detail_All.sql
+        ↓
+每 10,000 列切一份
+        ↓
+SAR_Trxn_Detail_All_1.sql   ← 10,000 列
+SAR_Trxn_Detail_All_2.sql   ← 10,000 列
+SAR_Trxn_Detail_All_3.sql   ← 10,000 列
+...
+        ↓
+全部切完
+        ↓
+依序 sqlcmd 寫入
+
+而且不需要 GO 才能切，同樣使用 StreamReader，所以不會再遇到記憶體不足。
+
+你把原本「第 5～7 部分」換成下面這種即可。更簡單的話，我建議直接整支換成這版：
+
 # ==========================================
 # SAR_Trxn_Detail_All.sql
-# 自動分割 + 依序執行 SQL
-# 適合超大型 SQL
+# 每 10,000 列自動分割 + 依序執行
 # ==========================================
 $SourceFile = "D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\TSEST\SAR_Trxn_Detail_All.sql"
 $BaseFolder   = Split-Path $SourceFile -Parent
@@ -11,6 +31,8 @@ $Server   = "amlist"
 $User     = "aml"
 $Password = "aml1234"
 $Database = "SARCaseWarehouse"
+# 每個 SQL 檔案幾列
+$RowsPerFile = 10000
 # ==========================================
 # 1. 檢查來源 SQL
 # ==========================================
@@ -29,76 +51,74 @@ if (!(Test-Path $LogFolder)) {
     New-Item -ItemType Directory -Path $LogFolder | Out-Null
 }
 # ==========================================
-# 3. 清除舊的分割 SQL / Log
+# 3. 清除舊檔案
 # ==========================================
 Write-Host ""
-Write-Host "清除舊檔案..."
-Get-ChildItem $OutputFolder -Filter "SAR_Trxn_Detail_All_*.sql" -ErrorAction SilentlyContinue |
+Write-Host "清除舊的 SQL / Log..."
+Get-ChildItem $OutputFolder -Filter "SAR_Trxn_Detail_All_*.sql" `
+    -ErrorAction SilentlyContinue |
     Remove-Item -Force
-Get-ChildItem $LogFolder -Filter "SAR_Trxn_Detail_All_*.log" -ErrorAction SilentlyContinue |
+Get-ChildItem $LogFolder -Filter "SAR_Trxn_Detail_All_*.log" `
+    -ErrorAction SilentlyContinue |
     Remove-Item -Force
 # ==========================================
-# 4. 開始串流讀取 SQL
+# 4. 開始分割
 # ==========================================
 Write-Host ""
-Write-Host "開始分割 SQL..."
-Write-Host "來源：$SourceFile"
+Write-Host "========================================="
+Write-Host "開始分割 SQL"
+Write-Host "每 $RowsPerFile 列一個檔案"
+Write-Host "========================================="
 Write-Host ""
-$Index = 1
-$Writer = $null
-$BatchHasContent = $false
-# 使用 StreamReader
 $Reader = New-Object System.IO.StreamReader(
     $SourceFile,
     [System.Text.Encoding]::Default,
     $true
 )
+$FileIndex = 1
+$RowCount = 0
+$TotalRows = 0
+$Writer = $null
 try {
     while (($Line = $Reader.ReadLine()) -ne $null) {
-        # 判斷是不是 GO
-        if ($Line -match '^\s*GO\s*;?\s*$') {
-            # 如果目前有 SQL 內容
-            if ($BatchHasContent -and $Writer -ne $null) {
-                $Writer.WriteLine("GO")
+        # 每 10,000 列開新檔案
+        if ($RowCount -eq 0) {
+            if ($Writer -ne $null) {
                 $Writer.Close()
                 $Writer.Dispose()
-                $Writer = $null
-                Write-Host "產生：SAR_Trxn_Detail_All_$Index.sql"
-                $Index++
-                $BatchHasContent = $false
             }
-            continue
-        }
-        # 第一次遇到 SQL 時建立檔案
-        if ($Writer -eq $null) {
             $OutputFile = Join-Path `
                 $OutputFolder `
-                "SAR_Trxn_Detail_All_$Index.sql"
+                "SAR_Trxn_Detail_All_$FileIndex.sql"
             $Writer = New-Object System.IO.StreamWriter(
                 $OutputFile,
                 $false,
                 [System.Text.Encoding]::UTF8
             )
+            Write-Host "建立：SAR_Trxn_Detail_All_$FileIndex.sql"
+            $FileIndex++
         }
-        # 寫入目前這一行
+        # 寫入目前這一列
         $Writer.WriteLine($Line)
-        # 判斷是不是有實際 SQL
-        if ($Line.Trim().Length -gt 0) {
-            $BatchHasContent = $true
+        $RowCount++
+        $TotalRows++
+        # 到 10,000 列
+        if ($RowCount -eq $RowsPerFile) {
+            $Writer.Close()
+            $Writer.Dispose()
+            $Writer = $null
+            Write-Host "  完成 $RowsPerFile 列"
+            $RowCount = 0
         }
     }
     # ==========================================
-    # 5. 處理最後一個 Batch
+    # 5. 處理最後不足 10,000 列的檔案
     # ==========================================
     if ($Writer -ne $null) {
-        if ($BatchHasContent) {
-            $Writer.WriteLine("GO")
-            Write-Host "產生：SAR_Trxn_Detail_All_$Index.sql"
-            $Index++
-        }
         $Writer.Close()
         $Writer.Dispose()
         $Writer = $null
+        Write-Host "  完成最後 $RowCount 列"
     }
 }
 finally {
@@ -111,36 +131,39 @@ finally {
         $Writer.Dispose()
     }
 }
+$TotalFiles = $FileIndex - 1
 # ==========================================
-# 6. 計算總檔案數
+# 6. 分割完成
 # ==========================================
-$Total = $Index - 1
 Write-Host ""
 Write-Host "========================================="
 Write-Host "SQL 分割完成"
 Write-Host "========================================="
-Write-Host "總共產生：$Total 個 SQL 檔案"
+Write-Host "總列數：$TotalRows"
+Write-Host "每檔：$RowsPerFile 列"
+Write-Host "總檔案數：$TotalFiles"
 Write-Host "輸出位置：$OutputFolder"
 Write-Host ""
 # ==========================================
-# 7. 開始依序執行 SQL
+# 7. 開始執行 SQL
 # ==========================================
-$Success = 0
-$Failed  = 0
 Write-Host "========================================="
-Write-Host "開始執行 SQL"
+Write-Host "開始依序執行 SQL"
 Write-Host "========================================="
 Write-Host ""
-for ($i = 1; $i -le $Total; $i++) {
+$Success = 0
+$Failed = 0
+for ($i = 1; $i -le $TotalFiles; $i++) {
     $SqlFile = Join-Path `
         $OutputFolder `
         "SAR_Trxn_Detail_All_$i.sql"
     $LogFile = Join-Path `
         $LogFolder `
         "SAR_Trxn_Detail_All_$i.log"
+    Write-Host ""
     Write-Host "-----------------------------------------"
-    Write-Host "執行 [$i / $Total]"
-    Write-Host "SQL：SAR_Trxn_Detail_All_$i.sql"
+    Write-Host "執行 [$i / $TotalFiles]"
+    Write-Host "SAR_Trxn_Detail_All_$i.sql"
     Write-Host "-----------------------------------------"
     sqlcmd `
         -S $Server `
@@ -151,22 +174,15 @@ for ($i = 1; $i -le $Total; $i++) {
         -o $LogFile
     $ExitCode = $LASTEXITCODE
     if ($ExitCode -eq 0) {
-        Write-Host "SUCCESS：第 $i 份執行成功" `
-            -ForegroundColor Green
+        Write-Host "SUCCESS" -ForegroundColor Green
         $Success++
     }
     else {
-        Write-Host "FAILED：第 $i 份執行失敗" `
-            -ForegroundColor Red
-        Write-Host "請檢查 Log：" `
-            -ForegroundColor Yellow
-        Write-Host $LogFile
+        Write-Host "FAILED" -ForegroundColor Red
+        Write-Host "請檢查：$LogFile" -ForegroundColor Yellow
         $Failed++
-        # ==========================================
-        # 遇到錯誤停止
-        # ==========================================
         Write-Host ""
-        Write-Host "SQL 執行失敗，停止後續執行。" `
+        Write-Host "發生錯誤，停止後續 SQL。" `
             -ForegroundColor Red
         break
     }
@@ -176,31 +192,58 @@ for ($i = 1; $i -le $Total; $i++) {
 # ==========================================
 Write-Host ""
 Write-Host "========================================="
-Write-Host "全部處理完成"
+Write-Host "執行結果"
 Write-Host "========================================="
-Write-Host "總 SQL：$Total"
+Write-Host "總檔案：$TotalFiles"
 Write-Host "成功：$Success"
 Write-Host "失敗：$Failed"
 Write-Host ""
-Write-Host "SQL 檔案位置："
-Write-Host $OutputFolder
-Write-Host ""
-Write-Host "Log 檔案位置："
-Write-Host $LogFolder
+Write-Host "SQL：$OutputFolder"
+Write-Host "Log：$LogFolder"
 if ($Failed -eq 0) {
     Write-Host ""
-    Write-Host "========================================="
-    Write-Host "全部 SQL 執行成功！"
-    Write-Host "=========================================" `
-        -ForegroundColor Green
+    Write-Host "全部執行成功！" -ForegroundColor Green
 }
 else {
     Write-Host ""
-    Write-Host "========================================="
-    Write-Host "有 SQL 執行失敗！"
-    Write-Host "請檢查對應的 Log。"
-    Write-Host "=========================================" `
-        -ForegroundColor Red
+    Write-Host "有 SQL 執行失敗！" -ForegroundColor Red
 }
 Write-Host ""
 Read-Host "按 Enter 結束"
+
+不過有一個超重要的點
+
+這個「每 10,000 列」是單純按照檔案的行數切。
+
+例如你的 SQL 是：
+
+INSERT INTO SAR_Trxn_Detail
+(
+    COL1,
+    COL2,
+    COL3
+)
+VALUES
+(
+    'AAA',
+    'BBB',
+    'CCC'
+),
+(
+    'DDD',
+    'EEE',
+    'FFF'
+);
+
+這種情況一筆資料可能有很多行，10,000 行不一定等於 10,000 筆資料。
+
+但如果你的原始 SQL 是這種：
+
+INSERT INTO SAR_Trxn_Detail VALUES (...);
+INSERT INTO SAR_Trxn_Detail VALUES (...);
+INSERT INTO SAR_Trxn_Detail VALUES (...);
+INSERT INTO SAR_Trxn_Detail VALUES (...);
+
+那就完全沒問題。
+
+另外，如果你的 SQL 每 10,000 行切開後，前後需要保留 GO、INSERT、transaction 或其他結構，我會建議不要直接用「行數切」，要按照你的 SQL 格式切，否則可能會把一個 SQL 指令從中間剖開。
