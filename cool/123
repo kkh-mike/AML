@@ -1,73 +1,14 @@
-對，那你現在不用執行整支 Stored Procedure。
-你要的是先把「死亡名單掃描」會抓到的資料拉出來，然後指定一個名稱測試。
+可以。你這次的目的很明確：
 
-直接跑這支即可：
+拿一個 DJ 的 FullName，確認它符合「死亡名單 + Japanese Finance」條件，然後執行 SP，最後確認 BSADBJP..OFAC_SPEC 是否真的有被同步。
 
-USE BSADB;
-GO
-DECLARE @TestName NVARCHAR(350) = N'你要測試的名稱';
-SELECT
-    A.EntityId,
-    A.FullName,
-    A.Deceased,
-    A.PersonStatus,
-    A.UpdatedDate_UTC,
-    B.SanctionListReference,
-    CASE
-        WHEN A.Deceased = 1
-         AND B.SanctionListReference LIKE '%Japanese Finance%'
-        THEN 'MATCH'
-        ELSE 'NOT MATCH'
-    END AS TestResult
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_SanctionListReference B
-    ON A.EntityId = B.EntityId
-WHERE A.FullName LIKE '%' + @TestName + '%'
-ORDER BY
-    A.EntityId,
-    B.SanctionListReference;
-
-例如你要測：
-
-DECLARE @TestName NVARCHAR(350) = N'John';
-
-它會把名稱相關資料拉出來。
-
-如果你要測「死亡名單這段到底會不會抓」
-
-我更建議直接用這支，只拉真正會進 #tempDJBlacklistJP 的資料：
-
-USE BSADB;
-GO
-DECLARE @TestName NVARCHAR(350) = N'你要測試的名稱';
-SELECT 
-    A.EntityId,
-    A.FullName,
-    A.Deceased,
-    CONVERT(VARCHAR(8), A.UpdatedDate_UTC, 112) AS UpdatedDate,
-    B.SanctionListReference
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_SanctionListReference B
-    ON A.EntityId = B.EntityId
-WHERE A.Deceased = 1
-  AND B.SanctionListReference LIKE '%Japanese Finance%'
-  AND A.FullName LIKE '%' + @TestName + '%'
-ORDER BY A.EntityId;
-
-如果這支有撈出來，例如：
-
-EntityId   FullName       Deceased   UpdatedDate   SanctionListReference
-123456     XXX XXXX       1          20260812      Japanese Finance
-
-就代表：
-
-這個名稱會被你 SP 的「多加入死亡名單掃描」抓到。 ✅
+我建議照下面 SOP 做，先查、再測、最後驗證，不要一開始就直接跑 SP。
 
 ⸻
 
-如果你想一次把「可以拿來測試的名稱」全部拉出來
+一、先找一筆「死亡名單」測試資料
 
-這個我反而最推薦：
+先執行：
 
 USE BSADB;
 GO
@@ -75,6 +16,7 @@ SELECT TOP 100
     A.EntityId,
     A.FullName,
     A.Deceased,
+    A.PersonStatus,
     CONVERT(VARCHAR(8), A.UpdatedDate_UTC, 112) AS UpdatedDate,
     B.SanctionListReference
 FROM BSADB.dbo.DJ_Entity A
@@ -84,12 +26,300 @@ WHERE A.Deceased = 1
   AND B.SanctionListReference LIKE '%Japanese Finance%'
 ORDER BY A.UpdatedDate_UTC DESC;
 
-你從這 100 筆挑一個 FullName，再丟回：
+你會拿到類似：
 
-DECLARE @TestName NVARCHAR(350) = N'你挑的名字';
+EntityId    FullName          Deceased    PersonStatus    UpdatedDate    SanctionListReference
+123456      TEST NAME         1           Active          20260812       Japanese Finance
 
-測就可以。
+這時候記下三個東西
 
-而且這樣最安全，因為目前只是 SELECT，完全不會寫入 BSADBJP..OFAC_SPEC。
+EntityId = 123456
+FullName = TEST NAME
+Deceased = 1
 
-如果你的目的下一步是「挑一個死亡名單的人，然後實際 EXEC GLSPEC_SyncDJToInternalList，最後確認 BSADBJP..OFAC_SPEC 有沒有新增」，￼ 我可以直接給你完整的前後測試 SQL。
+其中 EntityId 很重要，因為你的 SP 實際上是靠 EntityId 去同步，不是靠 FullName。
+
+⸻
+
+二、用 FullName 確認「這筆真的會被死亡名單抓到」
+
+把剛剛的名稱放進去：
+
+USE BSADB;
+GO
+DECLARE @TestName NVARCHAR(350) = N'TEST NAME';
+SELECT 
+    A.EntityId,
+    A.FullName,
+    A.Deceased,
+    A.PersonStatus,
+    CONVERT(VARCHAR(8), A.UpdatedDate_UTC, 112) AS UpdatedDate,
+    B.SanctionListReference,
+    
+    CASE
+        WHEN A.Deceased = 1
+         AND B.SanctionListReference LIKE '%Japanese Finance%'
+        THEN 'MATCH'
+        ELSE 'NOT MATCH'
+    END AS TestResult
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B
+    ON A.EntityId = B.EntityId
+WHERE A.FullName = @TestName;
+
+你要看到：
+
+TestResult = MATCH
+
+如果是 MATCH，代表：
+
+這個 FullName 確實符合你 SP 裡這段：
+
+WHERE A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+
+⸻
+
+三、先確認目前 OFAC_SPEC 有沒有這個人
+
+這一步非常重要。
+
+因為如果這個人本來就已經存在，你後面執行 SP 後看到資料，不代表是這次新增的。
+
+USE BSADBJP;
+GO
+DECLARE @TestName NVARCHAR(350) = N'TEST NAME';
+SELECT
+    ent_num,
+    spec_name,
+    updated_date,
+    remark,
+    DInd,
+    GROUPID,
+    SOURCE,
+    EnterFlag,
+    creDate,
+    DelDate
+FROM BSADBJP.dbo.OFAC_SPEC
+WHERE GROUPID = 5
+  AND spec_name = @TestName;
+
+理想情況
+
+查不到：
+
+0 rows
+
+這樣最好測。
+
+因為等一下執行 SP 後，如果出現：
+
+TEST NAME
+GROUPID = 5
+
+就可以很明確確認是這次同步進來的。
+
+⸻
+
+四、如果 FullName 已經存在，先不要亂刪
+
+例如你查到：
+
+spec_name = TEST NAME
+GROUPID = 5
+DInd = N
+
+不要直接 DELETE。
+
+因為這是正式同步表的話，刪資料可能會影響其他測試。
+
+這種情況建議換另一個目前不存在於 OFAC_SPEC 的死亡名單 FullName。
+
+⸻
+
+五、執行 Stored Procedure
+
+這裡有一個容易搞混的地方。
+
+你的 SP：
+
+CREATE PROCEDURE [dbo].[GLSPEC_SyncDJToInternalList]
+    @GroupId BIGINT
+
+但是你第二段 Japanese Finance：
+
+BSADBJP..OFAC_SPEC
+
+是：
+
+WHERE GROUPID = 5
+
+所以你要測 Japanese Finance，實際上這一段跟你傳入的 @GroupId 沒有直接關係。
+
+你可以依照系統正常執行方式傳入對應的 GroupId。
+
+例如如果你平常就是：
+
+EXEC BSADB.dbo.GLSPEC_SyncDJToInternalList @GroupId = 1;
+
+就照原本系統使用方式執行。
+
+⚠️ 不要為了測 JP 隨便猜一個 GroupId。
+
+⸻
+
+六、執行前，我建議先把 EntityId 記下來
+
+例如：
+
+EntityId = 123456
+FullName = TEST NAME
+
+執行 SP：
+
+USE BSADB;
+GO
+EXEC dbo.GLSPEC_SyncDJToInternalList
+    @GroupId = 你的正常GroupId;
+
+⸻
+
+七、執行完立刻查 OFAC_SPEC
+
+這是最重要的驗證。
+
+USE BSADBJP;
+GO
+DECLARE @TestEntityId INT = 123456;
+DECLARE @TestName NVARCHAR(350) = N'TEST NAME';
+SELECT
+    ent_num,
+    spec_name,
+    updated_date,
+    remark,
+    DInd,
+    GROUPID,
+    SOURCE,
+    EnterFlag,
+    creDate,
+    DelDate,
+    ApprovedDate
+FROM BSADBJP.dbo.OFAC_SPEC
+WHERE GROUPID = 5
+  AND (
+        remark = CAST(@TestEntityId AS VARCHAR(100))
+        OR spec_name = @TestName
+      );
+
+你理想上會看到：
+
+ent_num      ...
+spec_name    TEST NAME
+remark       123456
+DInd         N
+GROUPID      5
+SOURCE       JP FINANCE
+EnterFlag    NULL
+
+這就代表：
+
+✅ 同步成功
+
+⸻
+
+八、再確認 Log
+
+你的 SP 還會寫：
+
+BSADBJP.dbo.OFAC_SPEC_LOG
+
+所以再查：
+
+USE BSADBJP;
+GO
+DECLARE @TestEntityId INT = 123456;
+SELECT TOP 20
+    ent_num,
+    spec_name,
+    updated_date,
+    remark,
+    DInd,
+    GROUPID,
+    SOURCE,
+    ActionCD,
+    ActionDT,
+    UserID
+FROM BSADBJP.dbo.OFAC_SPEC_LOG
+WHERE GROUPID = 5
+  AND remark = CAST(@TestEntityId AS VARCHAR(100))
+ORDER BY ActionDT DESC;
+
+如果是第一次新增，按照你 SP 的邏輯：
+
+ActionCD = 01
+
+代表：
+
+01 = INSERT
+
+⸻
+
+九、完整判斷流程
+
+你最後可以按照這張表判斷：
+
+測試階段	預期結果
+DJ_Entity 找 FullName	找得到
+Deceased	1
+DJ_SanctionListReference	包含 Japanese Finance
+死亡名單 SELECT	MATCH
+執行前 OFAC_SPEC	最好沒有資料
+執行 SP	成功
+執行後 OFAC_SPEC	有該 FullName
+GROUPID	5
+remark	EntityId
+DInd	N
+SOURCE	JP FINANCE
+OFAC_SPEC_LOG.ActionCD	01
+
+⸻
+
+十、我最推薦你實際測這一組
+
+你可以照這個順序：
+
+① 找測試人
+        ↓
+② 記 EntityId + FullName
+        ↓
+③ 確認 Deceased = 1
+        ↓
+④ 確認 Japanese Finance
+        ↓
+⑤ 確認 OFAC_SPEC 目前沒有
+        ↓
+⑥ EXEC GLSPEC_SyncDJToInternalList
+        ↓
+⑦ 查 OFAC_SPEC
+        ↓
+⑧ 查 OFAC_SPEC_LOG
+
+最後你真正要證明的是這一條：
+
+DJ_Entity
+    EntityId = 123456
+    FullName = TEST NAME
+    Deceased = 1
+          +
+DJ_SanctionListReference
+    Japanese Finance
+          ↓
+GLSPEC_SyncDJToInternalList
+          ↓
+BSADBJP.dbo.OFAC_SPEC
+    spec_name = TEST NAME
+    remark = 123456
+    GROUPID = 5
+    DInd = N
+
+這樣才算把你新增的「BL / PEP / NN 都納入死亡名單掃描」整條流程測完整。
