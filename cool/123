@@ -1,130 +1,95 @@
-以下是兩次執行的詳細時間計算與整理：
-第一張圖（日期：2026/08/05）
-| 項目 (Command) | 開始時間 (Begin Import) | 結束時間 (Process Done) | 執行耗時 |
-|---|---|---|---|
-| TW I CIF | 13:34:16 | 14:15:50 | 41 分 34 秒 (00:41:34) |
-| TW I CUST_NP | 14:28:53 | 14:44:02 | 15 分 09 秒 (00:15:09) |
-| TW I ACCT | 14:55:25 | 14:59:42 | 4 分 17 秒 (00:04:17) |
-| TW I RP_NP | 15:28:38 | 15:30:11 | 1 分 33 秒 (00:01:33) |
-| TW I TRXN | 17:53:39 | 23:25:00 | 5 小時 31 分 21 秒 (05:31:21) |
-| 純執行總耗時 | — | — | 6 小時 34 分 04 秒 |
-第二張圖（日期：2026/08/10）
-| 項目 (Command) | 開始時間 (Begin Import) | 結束時間 (Process Done) | 執行耗時 |
-|---|---|---|---|
-| TW I CIF | 08:27:57 | 09:13:16 | 45 分 19 秒 (00:45:19) |
-| TW I ACCT | 09:16:42 | 09:20:44 | 4 分 02 秒 (00:04:02) |
-| TW I CUST_NP | 09:21:06 | 09:36:45 | 15 分 39 秒 (00:15:39) |
-| TW I RP_NP | 09:42:53 | 09:43:47 | 54 秒 (00:00:54) |
-| TW I TRXN | 09:49:47 | 18:16:18 | 8 小時 26 分 31 秒 (08:26:31) |
-| 純執行總耗時 | — | — | 9 小時 32 分 25 秒 |
+對，那你現在不用執行整支 Stored Procedure。
+你要的是先把「死亡名單掃描」會抓到的資料拉出來，然後指定一個名稱測試。
 
+直接跑這支即可：
 
-
-
-WITH TS_LIST AS
-(
-    SELECT TS_CUST_ID
-    FROM BANCS_SK_CUST_INFO a
-    JOIN Customer_Migrate_buffer b
-        ON a.SK_CUST_ID = b.CustomerNo
-    WHERE a.CUST_RE_NO_FLG IN ('2','3')
-
-    EXCEPT
-
-    SELECT TS_CUST_ID
-    FROM BANCS_SK_CUST_INFO a
-    JOIN Customer_Migrate_buffer b
-        ON a.SK_CUST_ID = b.CustomerNo
-    WHERE a.CUST_RE_NO_FLG = '1'
-)
+USE BSADB;
+GO
+DECLARE @TestName NVARCHAR(350) = N'你要測試的名稱';
 SELECT
-    t.TS_CUST_ID,
-    c.CIF_KEY,
-    np.HIGHRISK  AS NP_HIGHRISK,
-    bsa.HIGHRISK AS BSA_HIGHRISK,
+    A.EntityId,
+    A.FullName,
+    A.Deceased,
+    A.PersonStatus,
+    A.UpdatedDate_UTC,
+    B.SanctionListReference,
     CASE
-        WHEN ISNULL(np.HIGHRISK, '') = ISNULL(bsa.HIGHRISK, '')
-            THEN 'MATCH'
+        WHEN A.Deceased = 1
+         AND B.SanctionListReference LIKE '%Japanese Finance%'
+        THEN 'MATCH'
         ELSE 'NOT MATCH'
-    END AS RESULT
-FROM TS_LIST t
-JOIN Customer_Migrate_buffer c
-    ON t.TS_CUST_ID = c.CustomerNo
-LEFT JOIN Cust_NP_Migrate_buffer np
-    ON c.CIF_KEY = np.CIF_KEY
-LEFT JOIN BSA_SUB_CUST_FACT bsa
-    ON t.TS_CUST_ID = bsa.CustomerNo;
+    END AS TestResult
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B
+    ON A.EntityId = B.EntityId
+WHERE A.FullName LIKE '%' + @TestName + '%'
+ORDER BY
+    A.EntityId,
+    B.SanctionListReference;
 
+例如你要測：
 
+DECLARE @TestName NVARCHAR(350) = N'John';
 
+它會把名稱相關資料拉出來。
 
-你的需求可以拆成幾個步驟：
+如果你要測「死亡名單這段到底會不會抓」
 
-1. 找出 TS_CUST_ID (CUST_RE_NO_FLG IN ('2','3') 但沒有 1)
-2. 用這些 TS_CUST_ID 去找 Customer_Migrate_buffer
-3. Join Cust_NP_Migrate_buffer
-4. Join BSA_SUB_CUST_FACT
-5. 比對兩邊的 HIGHRISK 是否一致
+我更建議直接用這支，只拉真正會進 #tempDJBlacklistJP 的資料：
 
-可以直接一次寫完，不需要一個一個查。
+USE BSADB;
+GO
+DECLARE @TestName NVARCHAR(350) = N'你要測試的名稱';
+SELECT 
+    A.EntityId,
+    A.FullName,
+    A.Deceased,
+    CONVERT(VARCHAR(8), A.UpdatedDate_UTC, 112) AS UpdatedDate,
+    B.SanctionListReference
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B
+    ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND A.FullName LIKE '%' + @TestName + '%'
+ORDER BY A.EntityId;
 
-WITH TS_LIST AS
-(
-    SELECT TS_CUST_ID
-    FROM BANCS_SK_CUST_INFO a
-    JOIN Customer_Migrate_buffer b
-        ON a.SK_CUST_ID = b.CustomerNo
-    WHERE a.CUST_RE_NO_FLG IN ('2','3')
-    EXCEPT
-    SELECT TS_CUST_ID
-    FROM BANCS_SK_CUST_INFO a
-    JOIN Customer_Migrate_buffer b
-        ON a.SK_CUST_ID = b.CustomerNo
-    WHERE a.CUST_RE_NO_FLG = '1'
-)
-SELECT
-    t.TS_CUST_ID,
-    c.CIF_KEY,
-    np.HIGHRISK  AS NP_HIGHRISK,
-    bsa.HIGHRISK AS BSA_HIGHRISK,
-    CASE
-        WHEN np.HIGHRISK = bsa.HIGHRISK THEN 'MATCH'
-        ELSE 'NOT MATCH'
-    END AS RESULT
-FROM TS_LIST t
-JOIN Customer_Migrate_buffer c
-    ON t.TS_CUST_ID = c.CustomerNo
-LEFT JOIN Cust_NP_Migrate_buffer np
-    ON c.CIF_KEY = np.CIF_KEY
-LEFT JOIN BSA_SUB_CUST_FACT bsa
-    ON t.TS_CUST_ID = bsa.CustomerNo;
+如果這支有撈出來，例如：
 
-如果你只想看不一致的資料，再加一個 WHERE：
+EntityId   FullName       Deceased   UpdatedDate   SanctionListReference
+123456     XXX XXXX       1          20260812      Japanese Finance
 
-WHERE
-    ISNULL(np.HIGHRISK,'') <> ISNULL(bsa.HIGHRISK,'');
+就代表：
 
-這樣就會只列出：
-
-TS_CUST_ID	NP_HIGHRISK	BSA_HIGHRISK	RESULT
-Q1645090150	Y	N	NOT MATCH
-…	…	…	…
+這個名稱會被你 SP 的「多加入死亡名單掃描」抓到。 ✅
 
 ⸻
 
-如果你的目的是驗證 ETL 是否真的使用 Cust_NP_Migrate_buffer.HIGHRISK
+如果你想一次把「可以拿來測試的名稱」全部拉出來
 
-其實可以把來源也一起列出，比較好追：
+這個我反而最推薦：
 
-SELECT
-    t.TS_CUST_ID,
-    c.CIF_KEY,
-    np.HIGHRISK  AS Source_HIGHRISK,
-    bsa.HIGHRISK AS Target_HIGHRISK,
-    CASE
-        WHEN ISNULL(np.HIGHRISK,'') = ISNULL(bsa.HIGHRISK,'')
-            THEN 'OK'
-        ELSE 'DIFFERENT'
-    END AS Verify_Result
+USE BSADB;
+GO
+SELECT TOP 100
+    A.EntityId,
+    A.FullName,
+    A.Deceased,
+    CONVERT(VARCHAR(8), A.UpdatedDate_UTC, 112) AS UpdatedDate,
+    B.SanctionListReference
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B
+    ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+ORDER BY A.UpdatedDate_UTC DESC;
 
-這樣一眼就能知道 BSA_SUB_CUST_FACT.HIGHRISK 是否與 Cust_NP_Migrate_buffer.HIGHRISK 相同，也是驗證 ETL 最常用的寫法。
+你從這 100 筆挑一個 FullName，再丟回：
+
+DECLARE @TestName NVARCHAR(350) = N'你挑的名字';
+
+測就可以。
+
+而且這樣最安全，因為目前只是 SELECT，完全不會寫入 BSADBJP..OFAC_SPEC。
+
+如果你的目的下一步是「挑一個死亡名單的人，然後實際 EXEC GLSPEC_SyncDJToInternalList，最後確認 BSADBJP..OFAC_SPEC 有沒有新增」，￼ 我可以直接給你完整的前後測試 SQL。
