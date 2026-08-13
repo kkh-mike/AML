@@ -1,288 +1,198 @@
-# ==========================================
-# SAR_Trxn_Detail_All.sql
-#
-# 功能：
-# 1. 超大型 SQL 使用串流方式讀取，避免記憶體不足
-# 2. 每 10,000 個 SQL 指令切成一個檔案
-# 3. 每個檔案自動加入 USE SARCaseWarehouse;
-# 4. 分割完成後自動依序使用 sqlcmd 執行
-# 5. 每個 SQL 都產生對應 Log
-# 6. 任一 SQL 執行失敗就停止
-# ==========================================
-# ==========================================
-# 1. 基本設定
-# ==========================================
-$SourceFile = "D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\TSEST\SAR_Trxn_Detail_All.sql"
-$BaseFolder   = Split-Path $SourceFile -Parent
-$OutputFolder = Join-Path $BaseFolder "Split"
-$LogFolder    = Join-Path $BaseFolder "Log"
-$Server   = "amlist"
-$User     = "aml"
-$Password = "aml1234"
-$Database = "SARCaseWarehouse"
-# 每個 SQL 檔案包含幾個 SQL 指令
-$RowsPerFile = 10000
-# ==========================================
-# 2. 檢查來源 SQL
-# ==========================================
-if (!(Test-Path $SourceFile)) {
-    Write-Host ""
-    Write-Host "========================================="
-    Write-Host "找不到來源 SQL！"
-    Write-Host "========================================="
-    Write-Host $SourceFile -ForegroundColor Red
-    Write-Host ""
-    Read-Host "按 Enter 結束"
-    exit 1
-}
-# ==========================================
-# 3. 建立資料夾
-# ==========================================
-if (!(Test-Path $OutputFolder)) {
-    New-Item `
-        -ItemType Directory `
-        -Path $OutputFolder `
-        | Out-Null
-}
-if (!(Test-Path $LogFolder)) {
-    New-Item `
-        -ItemType Directory `
-        -Path $LogFolder `
-        | Out-Null
-}
-# ==========================================
-# 4. 清除舊的 SQL / Log
-# ==========================================
-Write-Host ""
-Write-Host "========================================="
-Write-Host "清除舊的 SQL / Log"
-Write-Host "========================================="
-Get-ChildItem `
-    -Path $OutputFolder `
-    -Filter "SAR_Trxn_Detail_All_*.sql" `
-    -ErrorAction SilentlyContinue |
-    Remove-Item -Force
-Get-ChildItem `
-    -Path $LogFolder `
-    -Filter "SAR_Trxn_Detail_All_*.log" `
-    -ErrorAction SilentlyContinue |
-    Remove-Item -Force
-Write-Host "清除完成。"
-Write-Host ""
-# ==========================================
-# 5. 開始分割 SQL
-# ==========================================
-Write-Host "========================================="
-Write-Host "開始分割 SQL"
-Write-Host "========================================="
-Write-Host "來源："
-Write-Host $SourceFile
-Write-Host ""
-Write-Host "每個檔案：$RowsPerFile 個 SQL 指令"
-Write-Host ""
-# 使用 StreamReader
-# 不會一次把整個 SQL 載入記憶體
-$Reader = New-Object System.IO.StreamReader(
-    $SourceFile,
-    [System.Text.Encoding]::Default,
-    $true
-)
-$FileIndex = 1
-$RowCount  = 0
-$TotalRows = 0
-$Writer    = $null
-try {
-    while (($Line = $Reader.ReadLine()) -ne $null) {
-        # ==========================================
-        # 建立新的 SQL 檔案
-        # ==========================================
-        if ($RowCount -eq 0) {
-            # 關閉上一個檔案
-            if ($Writer -ne $null) {
-                $Writer.Close()
-                $Writer.Dispose()
-                $Writer = $null
-            }
-            # 檔案名稱
-            $OutputFile = Join-Path `
-                $OutputFolder `
-                "SAR_Trxn_Detail_All_$FileIndex.sql"
-            # 建立檔案
-            $Writer = New-Object System.IO.StreamWriter(
-                $OutputFile,
-                $false,
-                [System.Text.Encoding]::UTF8
-            )
-            # ==========================================
-            # 每個檔案第一行指定 Database
-            # ==========================================
-            $Writer.WriteLine("USE SARCaseWarehouse;")
-            $Writer.WriteLine("")
-            Write-Host "建立：SAR_Trxn_Detail_All_$FileIndex.sql"
-            $FileIndex++
-        }
-        # ==========================================
-        # 寫入原始 SQL
-        # ==========================================
-        # 完全保留原始內容
-        $Writer.WriteLine($Line)
-        $RowCount++
-        $TotalRows++
-        # ==========================================
-        # 每 10,000 個 SQL 指令切一份
-        # ==========================================
-        if ($RowCount -eq $RowsPerFile) {
-            # 關閉目前檔案
-            $Writer.Close()
-            $Writer.Dispose()
-            $Writer = $null
-            Write-Host "  → 完成 $RowsPerFile 個 SQL"
-            $RowCount = 0
-        }
-    }
-    # ==========================================
-    # 處理最後不足 10,000 個 SQL 的檔案
-    # ==========================================
-    if ($Writer -ne $null) {
-        $Writer.Close()
-        $Writer.Dispose()
-        $Writer = $null
-        Write-Host "  → 完成最後 $RowCount 個 SQL"
-    }
-}
-finally {
-    # 確保 Reader 關閉
-    if ($Reader -ne $null) {
-        $Reader.Close()
-        $Reader.Dispose()
-    }
-    # 確保 Writer 關閉
-    if ($Writer -ne $null) {
-        $Writer.Close()
-        $Writer.Dispose()
-    }
-}
-# ==========================================
-# 6. 計算總檔案數
-# ==========================================
-$TotalFiles = $FileIndex - 1
-Write-Host ""
-Write-Host "========================================="
-Write-Host "SQL 分割完成"
-Write-Host "========================================="
-Write-Host "總 SQL 指令：$TotalRows"
-Write-Host "每檔 SQL 指令：$RowsPerFile"
-Write-Host "總檔案數：$TotalFiles"
-Write-Host ""
-Write-Host "SQL 輸出位置："
-Write-Host $OutputFolder
-Write-Host ""
-# ==========================================
-# 7. 開始依序執行 SQL
-# ==========================================
-Write-Host "========================================="
-Write-Host "開始執行 SQL"
-Write-Host "========================================="
-Write-Host ""
-$Success = 0
-$Failed  = 0
-for ($i = 1; $i -le $TotalFiles; $i++) {
-    # ==========================================
-    # SQL 檔案
-    # ==========================================
-    $SqlFile = Join-Path `
-        $OutputFolder `
-        "SAR_Trxn_Detail_All_$i.sql"
-    # ==========================================
-    # Log 檔案
-    # ==========================================
-    $LogFile = Join-Path `
-        $LogFolder `
-        "SAR_Trxn_Detail_All_$i.log"
-    Write-Host ""
-    Write-Host "========================================="
-    Write-Host "執行 [$i / $TotalFiles]"
-    Write-Host "========================================="
-    Write-Host "SQL：SAR_Trxn_Detail_All_$i.sql"
-    Write-Host "Log：SAR_Trxn_Detail_All_$i.log"
-    Write-Host ""
-    # ==========================================
-    # 執行 sqlcmd
-    # ==========================================
-    sqlcmd `
-        -S $Server `
-        -U $User `
-        -P $Password `
-        -d $Database `
-        -i $SqlFile `
-        -o $LogFile
-    # ==========================================
-    # 判斷執行結果
-    # ==========================================
-    $ExitCode = $LASTEXITCODE
-    if ($ExitCode -eq 0) {
-        Write-Host ""
-        Write-Host "SUCCESS：第 $i 份執行成功" `
-            -ForegroundColor Green
-        $Success++
-    }
-    else {
-        Write-Host ""
-        Write-Host "FAILED：第 $i 份執行失敗" `
-            -ForegroundColor Red
-        Write-Host ""
-        Write-Host "請檢查 Log：" `
-            -ForegroundColor Yellow
-        Write-Host $LogFile
-        $Failed++
-        # ==========================================
-        # 遇到錯誤停止
-        # ==========================================
-        Write-Host ""
-        Write-Host "========================================="
-        Write-Host "SQL 執行失敗"
-        Write-Host "停止後續 SQL 執行"
-        Write-Host "=========================================" `
-            -ForegroundColor Red
-        break
-    }
-}
-# ==========================================
-# 8. 最終結果
-# ==========================================
-Write-Host ""
-Write-Host ""
-Write-Host "========================================="
-Write-Host "全部處理完成"
-Write-Host "========================================="
-Write-Host ""
-Write-Host "總 SQL 指令：$TotalRows"
-Write-Host "總 SQL 檔案：$TotalFiles"
-Write-Host "成功：$Success"
-Write-Host "失敗：$Failed"
-Write-Host ""
-Write-Host "SQL 檔案位置："
-Write-Host $OutputFolder
-Write-Host ""
-Write-Host "Log 檔案位置："
-Write-Host $LogFolder
-# ==========================================
-# 9. 最終狀態
-# ==========================================
-if ($Failed -eq 0) {
-    Write-Host ""
-    Write-Host "========================================="
-    Write-Host "全部 SQL 執行成功！"
-    Write-Host "=========================================" `
-        -ForegroundColor Green
-}
-else {
-    Write-Host ""
-    Write-Host "========================================="
-    Write-Host "有 SQL 執行失敗！"
-    Write-Host "請檢查對應 Log。"
-    Write-Host "=========================================" `
-        -ForegroundColor Red
-}
-Write-Host ""
-Read-Host "按 Enter 結束"
+
+    /*
+        ============================================================
+        第二段：日本金融制裁名單同步（Japanese Finance）
+        目標表：BSADBJP..OFAC_SPEC（GROUPID = 5）
+        ============================================================
+    */
+
+    IF OBJECT_ID('tempdb..#tempDJBlacklistJP') IS NOT NULL
+        DROP TABLE #tempDJBlacklistJP;
+
+    IF OBJECT_ID('tempdb..#tempDJBlacklistDetailsJP') IS NOT NULL
+        DROP TABLE #tempDJBlacklistDetailsJP;
+
+    CREATE TABLE #tempDJBlacklistJP
+    (
+        EntNum      INT NOT NULL,
+        SdnName     NVARCHAR(350) NOT NULL,
+        UpdatedDate VARCHAR(8) NOT NULL
+    );
+
+    CREATE TABLE #tempDJBlacklistDetailsJP
+    (
+        Num         INT,
+        EntNum      INT NOT NULL,
+        SdnName     NVARCHAR(350) NOT NULL,
+        UpdatedDate VARCHAR(8) NOT NULL,
+        Address     NVARCHAR(400),
+        City        NVARCHAR(200),
+        Country     NVARCHAR(100),
+        IdentType   VARCHAR(2),
+        IdentNumber NVARCHAR(44),
+        DOB         VARCHAR(8)
+    );
+
+
+    INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
+    SELECT 
+        A.EntNum, 
+        A.SdnName, 
+        MAX(A.UpdatedDate) AS UpdatedDate
+    FROM BSADB.dbo.DJ_List_Data_A A
+    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
+    WHERE A.NamePropertyBitCode & 1 > 0
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+    GROUP BY A.EntNum, A.SdnName;
+
+    /*
+      DJ_List_Data_A 
+        ============================================================
+        多加入死亡名單掃描，所有的BL、PEP、NN都會納入掃描
+        ============================================================
+    */
+    INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
+    SELECT 
+		A.EntityId, 
+        A.FullName, 
+        MAX(CONVERT(VARCHAR,A.UpdatedDate_UTC,112)) AS UpdatedDate
+    FROM BSADB.dbo.DJ_Entity A
+    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+    WHERE A.Deceased = 1
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+	  AND NOT EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE X.EntNum = A.EntityId)
+    GROUP BY A.EntityId, A.FullName;
+
+
+
+    ;WITH TempAddress AS
+    (
+        SELECT A.EntityId, A.Address, A.City, A.AddressCountry,
+               ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
+        FROM BSADB.dbo.DJ_Address A WITH (NOLOCK)
+        WHERE A.Deleted = 0
+          AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
+    ),
+    TempIdent AS
+    (
+        SELECT A.EntityId,
+               CASE WHEN ISNULL(A.IdentificationType,'') = '' THEN NULL ELSE @OtherIdentMthCode END AS IdentificationType,
+               A.IdentificationNumber,
+               ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
+        FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH (NOLOCK)
+        WHERE A.Deleted = 0
+          AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
+    ),
+    TempDOB AS
+    (
+        SELECT A.EntityId, A.InfoDay, A.InfoMonth, A.InfoYear,
+               ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
+        FROM BSADB.dbo.DJ_DateTypeInfo A WITH (NOLOCK)
+        WHERE A.DateType = 'Date of Birth'
+          AND A.Deleted = 0
+          AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
+    ),
+    TempNUM AS
+    (
+        SELECT A.spec_name, A.updated_date, A.remark, A.ent_num
+        FROM BSADBJP..OFAC_SPEC A
+        WHERE A.GROUPID = 5 AND A.DInd = 'N'
+    )
+
+    INSERT INTO #tempDJBlacklistDetailsJP (Num, EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB)
+    SELECT 
+        E.ent_num,
+        A.EntNum,
+        A.SdnName,
+        A.UpdatedDate,
+        B.Address,
+        LEFT(B.City, 100),
+        LEFT(B.AddressCountry, 100),
+        C.IdentificationType,
+        LEFT(C.IdentificationNumber, 44),
+        CASE WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL 
+             THEN D.InfoYear 
+             ELSE CONVERT(VARCHAR(8), dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) 
+        END
+    FROM #tempDJBlacklistJP A
+    LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1
+    LEFT JOIN TempIdent   C ON A.EntNum = C.EntityId AND C.RowId = 1
+    LEFT JOIN TempDOB     D ON A.EntNum = D.EntityId AND D.RowId = 1
+    LEFT JOIN TempNUM     E ON A.EntNum = E.remark AND A.SdnName = E.spec_name;
+
+
+
+ INSERT INTO #tempDJBlacklistDetailsJP (Num, EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB )
+ SELECT E.ent_num, A.EntNum, A.SdnName, A.UpdatedDate, B.Address, LEFT(B.City,100), LEFT(B.AddressCountry,100),
+   C.IdentificationType, LEFT(C.IdentificationNumber,44) , 
+   CASE WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL THEN D.InfoYear ELSE        CONVERT(VARCHAR(8),dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) END
+ FROM #tempDJBlacklistJP A 
+  LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1 
+  LEFT JOIN TempIdent C ON A.EntNum = C.EntityId AND C.RowId = 1 
+  LEFT JOIN TempDOB D ON A.EntNum = D.EntityId AND D.RowId = 1 
+  LEFT JOIN TempNUM E on A.EntNum = E.remark and A.SdnName = E.spec_name
+
+  DECLARE @MAXNo INT;
+  SELECT @MAXNo = MAX(ent_num) FROM BSADBJP..OFAC_SPEC;
+
+  UPDATE #tempDJBlacklistDetailsJP
+  SET @MAXNo = @MAXNo + 1,
+      Num = @MAXNo
+  WHERE Num IS NULL;
+
+  ;WITH TargetTable AS
+    (
+        SELECT *
+        FROM BSADBJP..OFAC_SPEC
+        WHERE GROUPID = 5
+    )
+    MERGE TargetTable AS T
+    USING (SELECT Num, EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB 
+           FROM #tempDJBlacklistDetailsJP) AS S
+    ON T.spec_name = S.SdnName 
+   AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+
+ 
+ WHEN NOT MATCHED BY TARGET THEN
+        INSERT (spec_name, updated_date, remark, TaxID, IDENT, IDENTO, TaxIDCD, IDNUM, IssBy, DInd,
+                creUserID, STATE, ADDRESS, COUNTRY, GROUPID, SOURCE, EnterFlag, ApprovedBy, ApprovedDate,
+                DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, creDate,
+                updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, creDate_UTC, ent_num, DOB)
+        VALUES (S.SdnName, S.UpdatedDate, S.EntNum, '', S.IdentType, S.IdentNumber, '', '', 'JP', 'N',
+                'System Admin', ISNULL(S.City, ''), S.Address, S.Country, '5', 'JP FINANCE', NULL,
+                'System Admin', GETDATE(), NULL, NULL, NULL, NULL, GETDATE(),
+                GETUTCDATE(), GETUTCDATE(), NULL, NULL, GETUTCDATE(), S.Num, S.DOB)
+
+
+    WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN
+        UPDATE SET 
+            T.DInd = 'Y',
+            T.DelUserID = 'System Admin',
+            T.DelDate = GETDATE(),
+            T.ApproveDelUserID = 'System Admin',
+            T.ApproveDelDate = GETDATE(),
+            T.DelDate_UTC = GETUTCDATE()
+
+    WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN
+        UPDATE SET 
+            T.DInd = 'N',
+            T.updated_date = S.UpdatedDate,
+            T.DelUserID = NULL,
+            T.DelDate = NULL,
+            T.ApproveDelUserID = NULL,
+            T.ApproveDelDate = NULL,
+            T.DelDate_UTC = NULL,
+            T.EnterFlag = 'D',
+            T.updated_date_UTC = GETUTCDATE(),
+            T.ADDRESS = S.Address,
+            T.STATE = ISNULL(S.City, ''),
+            T.COUNTRY = S.Country,
+            T.IDENT = S.IdentType,
+            T.IDNUM = S.IdentNumber,
+            T.DOB = S.DOB
+
+
+
+最後是寫進去 BSADBJP..OFAC_SPEC ?
+
+我要怎麼驗證?
