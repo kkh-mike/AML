@@ -1,24 +1,72 @@
-是的，這段 T-SQL 腳本最終確實是寫入到 BSADBJP..OFAC_SPEC 這張實體資料表。
-腳本中定義了 CTE：
-WITH TargetTable AS
-(
-    SELECT *
-    FROM BSADBJP..OFAC_SPEC
-    WHERE GROUPID = 5
-)
 
-在 SQL Server 中，對更新單一底層資料表的 CTE 或 View 進行 MERGE / INSERT / UPDATE，其異動會直接作用在底層的實體表 BSADBJP..OFAC_SPEC 上。
-注意：程式碼中的一個潛在 Bug
-在提供驗證方式前，請注意程式碼中有重複的區塊：
-在 INSERT INTO #tempDJBlacklistDetailsJP 之後，底下又重複寫了一次一模一樣的 INSERT INTO #tempDJBlacklistDetailsJP。這會導致 #tempDJBlacklistDetailsJP 裡的資料量變成兩倍，進而影響後續的 UPDATE @MAXNo 與 MERGE 邏輯。執行前請先刪除重複的那一段。
-驗證步驟與 SQL 腳本
-驗證可分為**「執行前模擬驗證 (Dry Run)」與「執行後數據對帳 (Post-Check)」**兩個階段：
-階段一：執行前模擬驗證（不真正寫入資料庫）
-利用 BEGIN TRAN + ROLLBACK 搭配 MERGE 的 OUTPUT 子句，可以在不污染正式資料的前提下，精準觀察將會發生多少筆「新增」、「修改」與「軟刪除」。
-將 MERGE 區塊修改為如下進行測試：
-BEGIN TRAN;
+   /*
+        ============================================================
+        第二段：日本金融制裁名單同步（Japanese Finance）
+        目標表：BSADBJP..OFAC_SPEC（GROUPID = 5）
+        ============================================================
+    */
 
--- 建立臨時表收集 MERGE 的異動結果
+    IF OBJECT_ID('tempdb..#tempDJBlacklistJP') IS NOT NULL
+        DROP TABLE #tempDJBlacklistJP;
+
+    IF OBJECT_ID('tempdb..#tempDJBlacklistDetailsJP') IS NOT NULL
+        DROP TABLE #tempDJBlacklistDetailsJP;
+
+    CREATE TABLE #tempDJBlacklistJP
+    (
+        EntNum      INT NOT NULL,
+        SdnName     NVARCHAR(350) NOT NULL,
+        UpdatedDate VARCHAR(8) NOT NULL
+    );
+
+    CREATE TABLE #tempDJBlacklistDetailsJP
+    (
+        Num         INT,
+        EntNum      INT NOT NULL,
+        SdnName     NVARCHAR(350) NOT NULL,
+        UpdatedDate VARCHAR(8) NOT NULL,
+        Address     NVARCHAR(400),
+        City        NVARCHAR(200),
+        Country     NVARCHAR(100),
+        IdentType   VARCHAR(2),
+        IdentNumber NVARCHAR(44),
+        DOB         VARCHAR(8)
+    );
+
+
+    INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
+    SELECT 
+        A.EntNum, 
+        A.SdnName, 
+        MAX(A.UpdatedDate) AS UpdatedDate
+    FROM BSADB.dbo.DJ_List_Data_A A
+    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
+    WHERE A.NamePropertyBitCode & 1 > 0
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+    GROUP BY A.EntNum, A.SdnName;
+
+    /*
+      DJ_List_Data_A 
+        ============================================================
+        多加入死亡名單掃描，所有的BL、PEP、NN都會納入掃描
+        ============================================================
+    */
+    INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
+    SELECT 
+		A.EntityId, 
+        A.FullName, 
+        MAX(CONVERT(VARCHAR,A.UpdatedDate_UTC,112)) AS UpdatedDate
+    FROM BSADB.dbo.DJ_Entity A
+    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+    WHERE A.Deceased = 1
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+	  AND NOT EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE X.EntNum = A.EntityId)
+    GROUP BY A.EntityId, A.FullName;
+
+
+
+
+
 DECLARE @SummaryTable TABLE (
     ChangeType VARCHAR(10),
     EntNum INT,
@@ -90,40 +138,5 @@ SELECT * FROM @SummaryTable;
 -- 測試完畢，強制復原，不寫入 DB
 ROLLBACK TRAN;
 
-階段二：正式執行後的資料對帳 SQL
-同步執行完畢（正式 COMMIT）後，可以執行以下查詢驗證結果：
-1. 總筆數比對（來源 vs 目標）
-來源暫存表與目標表中 GROUPID = 5 且 DInd = 'N' 的有效資料筆數應該要完全一致。
--- 來源有效筆數
-SELECT COUNT(DISTINCT EntNum) AS Source_Count 
-FROM #tempDJBlacklistJP;
 
--- 目標表有效筆數
-SELECT COUNT(*) AS Target_Active_Count 
-FROM BSADBJP..OFAC_SPEC 
-WHERE GROUPID = 5 AND DInd = 'N';
-
-2. 驗證今日更新/新增的紀錄
-確認今日異動的資料欄位設定是否正確（如 GROUPID = '5', SOURCE = 'JP FINANCE', creUserID = 'System Admin'）。
-SELECT ent_num, spec_name, remark, DInd, creDate, updated_date, ADDRESS, COUNTRY, DOB
-FROM BSADBJP..OFAC_SPEC
-WHERE GROUPID = 5 
-  AND (CAST(creDate AS DATE) = CAST(GETDATE() AS DATE) 
-       OR CAST(updated_date_UTC AS DATE) = CAST(GETUTCDATE() AS DATE))
-ORDER BY ent_num DESC;
-
-3. 驗證今日被下架（軟刪除）的紀錄
-確認被標記為 DInd = 'Y' 的紀錄是否正確記錄了刪除者與刪除時間。
-SELECT ent_num, spec_name, remark, DInd, DelUserID, DelDate
-FROM BSADBJP..OFAC_SPEC
-WHERE GROUPID = 5 
-  AND DInd = 'Y'
-  AND CAST(DelDate AS DATE) = CAST(GETDATE() AS DATE);
-
-4. 檢查主鍵流水號 (ent_num) 是否有重複
-確保新增的 ent_num 沒有衝突：
-SELECT ent_num, COUNT(*) 
-FROM BSADBJP..OFAC_SPEC
-GROUP BY ent_num
-HAVING COUNT(*) > 1;
-
+我這樣測試對?
