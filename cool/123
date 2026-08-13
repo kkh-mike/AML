@@ -1,72 +1,126 @@
+-- 1. 開啟交易（確保最後可以 ROLLBACK）
+BEGIN TRAN;
 
-   /*
-        ============================================================
-        第二段：日本金融制裁名單同步（Japanese Finance）
-        目標表：BSADBJP..OFAC_SPEC（GROUPID = 5）
-        ============================================================
-    */
+-- 2. 清除舊暫存表
+IF OBJECT_ID('tempdb..#tempDJBlacklistJP') IS NOT NULL
+    DROP TABLE #tempDJBlacklistJP;
 
-    IF OBJECT_ID('tempdb..#tempDJBlacklistJP') IS NOT NULL
-        DROP TABLE #tempDJBlacklistJP;
+IF OBJECT_ID('tempdb..#tempDJBlacklistDetailsJP') IS NOT NULL
+    DROP TABLE #tempDJBlacklistDetailsJP;
 
-    IF OBJECT_ID('tempdb..#tempDJBlacklistDetailsJP') IS NOT NULL
-        DROP TABLE #tempDJBlacklistDetailsJP;
+-- 3. 建立暫存表
+CREATE TABLE #tempDJBlacklistJP
+(
+    EntNum      INT NOT NULL,
+    SdnName     NVARCHAR(350) NOT NULL,
+    UpdatedDate VARCHAR(8) NOT NULL
+);
 
-    CREATE TABLE #tempDJBlacklistJP
-    (
-        EntNum      INT NOT NULL,
-        SdnName     NVARCHAR(350) NOT NULL,
-        UpdatedDate VARCHAR(8) NOT NULL
-    );
+CREATE TABLE #tempDJBlacklistDetailsJP
+(
+    Num         INT,
+    EntNum      INT NOT NULL,
+    SdnName     NVARCHAR(350) NOT NULL,
+    UpdatedDate VARCHAR(8) NOT NULL,
+    Address     NVARCHAR(400),
+    City        NVARCHAR(200),
+    Country     NVARCHAR(100),
+    IdentType   VARCHAR(2),
+    IdentNumber NVARCHAR(44),
+    DOB         VARCHAR(8)
+);
 
-    CREATE TABLE #tempDJBlacklistDetailsJP
-    (
-        Num         INT,
-        EntNum      INT NOT NULL,
-        SdnName     NVARCHAR(350) NOT NULL,
-        UpdatedDate VARCHAR(8) NOT NULL,
-        Address     NVARCHAR(400),
-        City        NVARCHAR(200),
-        Country     NVARCHAR(100),
-        IdentType   VARCHAR(2),
-        IdentNumber NVARCHAR(44),
-        DOB         VARCHAR(8)
-    );
+-- 4. 寫入第一層黑名單主表
+INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
+SELECT 
+    A.EntNum, 
+    A.SdnName, 
+    MAX(A.UpdatedDate) AS UpdatedDate
+FROM BSADB.dbo.DJ_List_Data_A A
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
+WHERE A.NamePropertyBitCode & 1 > 0
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+GROUP BY A.EntNum, A.SdnName;
 
+INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
+SELECT 
+    A.EntityId, 
+    A.FullName, 
+    MAX(CONVERT(VARCHAR,A.UpdatedDate_UTC,112)) AS UpdatedDate
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND NOT EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE X.EntNum = A.EntityId)
+GROUP BY A.EntityId, A.FullName;
 
-    INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
-    SELECT 
-        A.EntNum, 
-        A.SdnName, 
-        MAX(A.UpdatedDate) AS UpdatedDate
-    FROM BSADB.dbo.DJ_List_Data_A A
-    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
-    WHERE A.NamePropertyBitCode & 1 > 0
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-    GROUP BY A.EntNum, A.SdnName;
+-- 5. 組裝詳細資訊寫入第二層暫存表
+DECLARE @OtherIdentMthCode VARCHAR(2) = ''; 
 
-    /*
-      DJ_List_Data_A 
-        ============================================================
-        多加入死亡名單掃描，所有的BL、PEP、NN都會納入掃描
-        ============================================================
-    */
-    INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
-    SELECT 
-		A.EntityId, 
-        A.FullName, 
-        MAX(CONVERT(VARCHAR,A.UpdatedDate_UTC,112)) AS UpdatedDate
-    FROM BSADB.dbo.DJ_Entity A
-    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-    WHERE A.Deceased = 1
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-	  AND NOT EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE X.EntNum = A.EntityId)
-    GROUP BY A.EntityId, A.FullName;
+;WITH TempAddress AS
+(
+    SELECT A.EntityId, A.Address, A.City, A.AddressCountry,
+           ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
+    FROM BSADB.dbo.DJ_Address A WITH (NOLOCK)
+    WHERE A.Deleted = 0
+      AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
+),
+TempIdent AS
+(
+    SELECT A.EntityId,
+           CASE WHEN ISNULL(A.IdentificationType,'') = '' THEN NULL ELSE @OtherIdentMthCode END AS IdentificationType,
+           A.IdentificationNumber,
+           ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
+    FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH (NOLOCK)
+    WHERE A.Deleted = 0
+      AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
+),
+TempDOB AS
+(
+    SELECT A.EntityId, A.InfoDay, A.InfoMonth, A.InfoYear,
+           ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
+    FROM BSADB.dbo.DJ_DateTypeInfo A WITH (NOLOCK)
+    WHERE A.DateType = 'Date of Birth'
+      AND A.Deleted = 0
+      AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
+),
+TempNUM AS
+(
+    SELECT A.spec_name, A.updated_date, A.remark, A.ent_num
+    FROM BSADBJP..OFAC_SPEC A
+    WHERE A.GROUPID = 5 AND A.DInd = 'N'
+)
+INSERT INTO #tempDJBlacklistDetailsJP (Num, EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB)
+SELECT 
+    E.ent_num,
+    A.EntNum,
+    A.SdnName,
+    A.UpdatedDate,
+    B.Address,
+    LEFT(B.City, 100),
+    LEFT(B.AddressCountry, 100),
+    C.IdentificationType,
+    LEFT(C.IdentificationNumber, 44),
+    CASE WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL 
+         THEN D.InfoYear 
+         ELSE CONVERT(VARCHAR(8), dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) 
+    END
+FROM #tempDJBlacklistJP A
+LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1
+LEFT JOIN TempIdent   C ON A.EntNum = C.EntityId AND C.RowId = 1
+LEFT JOIN TempDOB     D ON A.EntNum = D.EntityId AND D.RowId = 1
+LEFT JOIN TempNUM     E ON A.EntNum = E.remark AND A.SdnName = E.spec_name;
 
+-- 補齊新資料的 ent_num 流水號
+DECLARE @MAXNo INT;
+SELECT @MAXNo = ISNULL(MAX(ent_num), 0) FROM BSADBJP..OFAC_SPEC;
 
+UPDATE #tempDJBlacklistDetailsJP
+SET @MAXNo = @MAXNo + 1,
+    Num = @MAXNo
+WHERE Num IS NULL;
 
-
-
+-- 6. 執行 MERGE 模擬並紀錄異動
 DECLARE @SummaryTable TABLE (
     ChangeType VARCHAR(10),
     EntNum INT,
@@ -74,7 +128,7 @@ DECLARE @SummaryTable TABLE (
     Remark VARCHAR(100)
 );
 
-WITH TargetTable AS
+;WITH TargetTable AS
 (
     SELECT *
     FROM BSADBJP..OFAC_SPEC
@@ -123,20 +177,15 @@ WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN
         T.IDNUM = S.IdentNumber,
         T.DOB = S.DOB
 
--- 印出異動明細
 OUTPUT $action, inserted.ent_num, inserted.spec_name, inserted.remark 
 INTO @SummaryTable;
 
--- 1. 查看各類別異動筆數統計
+-- 7. 顯示統計結果與異動明細
 SELECT ChangeType, COUNT(*) AS [Count]
 FROM @SummaryTable
 GROUP BY ChangeType;
 
--- 2. 查看異動明細前幾筆
 SELECT * FROM @SummaryTable;
 
--- 測試完畢，強制復原，不寫入 DB
+-- 8. 強制復原交易（不影響正式資料庫）
 ROLLBACK TRAN;
-
-
-我這樣測試對?
