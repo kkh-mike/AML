@@ -1,198 +1,58 @@
+你的測試思路完全正確！要驗證「死亡名單（Deceased = 1）」這段新邏輯，最乾淨的方法就是找出一筆來源有、但目標表還沒有的死亡名單案例進行前後對照。
+以下提供完整的測試步驟與查詢 SQL，你可以直接依序執行：
+步驟一：先在來源庫挑出一筆「測試對象」
+執行以下 SQL，找出符合死亡名單條件且目前尚未寫入目標表的客戶：
+SELECT TOP 5 
+    A.EntityId, 
+    A.FullName, 
+    A.Deceased, 
+    B.SanctionListReference
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  -- 排除原本第一段一般黑名單就已經有的資料（確保測試到的是死亡名單專屬邏輯）
+  AND NOT EXISTS (
+      SELECT 1 FROM BSADB.dbo.DJ_List_Data_A X 
+      WHERE X.EntNum = A.EntityId AND X.NamePropertyBitCode & 1 > 0
+  )
+  -- 排除目標表中已經存在的資料
+  AND NOT EXISTS (
+      SELECT 1 FROM BSADBJP..OFAC_SPEC T
+      WHERE T.GROUPID = 5 AND T.remark = CAST(A.EntityId AS VARCHAR(100))
+  );
 
-    /*
-        ============================================================
-        第二段：日本金融制裁名單同步（Japanese Finance）
-        目標表：BSADBJP..OFAC_SPEC（GROUPID = 5）
-        ============================================================
-    */
+> 記下查詢結果中的 EntityId 與 FullName（例如：EntityId = 9876543, FullName = 'Test Deceased Name'）。
+> 
+步驟二：執行前驗證（預期結果：0 筆，查不到）
+拿剛才記下的 EntityId 去目標表查詢：
+SELECT ent_num, spec_name, remark, DInd, SOURCE, creDate
+FROM BSADBJP..OFAC_SPEC
+WHERE GROUPID = 5 
+  AND remark = '9876543'; -- 請替換成步驟一查到的 EntityId
 
-    IF OBJECT_ID('tempdb..#tempDJBlacklistJP') IS NOT NULL
-        DROP TABLE #tempDJBlacklistJP;
+ * 預期結果：完全沒有資料（0 筆）。
+步驟三：執行同步語法
+如果你只想在不污染實體資料庫的情況下測試，可以使用 Transaction 鎖定：
+BEGIN TRAN;
 
-    IF OBJECT_ID('tempdb..#tempDJBlacklistDetailsJP') IS NOT NULL
-        DROP TABLE #tempDJBlacklistDetailsJP;
+-- [此處貼上你完整的同步 SQL 腳本] --
 
-    CREATE TABLE #tempDJBlacklistJP
-    (
-        EntNum      INT NOT NULL,
-        SdnName     NVARCHAR(350) NOT NULL,
-        UpdatedDate VARCHAR(8) NOT NULL
-    );
+-- 執行完同步後，先不要 COMMIT，直接在同一個視窗做步驟四的查詢！
 
-    CREATE TABLE #tempDJBlacklistDetailsJP
-    (
-        Num         INT,
-        EntNum      INT NOT NULL,
-        SdnName     NVARCHAR(350) NOT NULL,
-        UpdatedDate VARCHAR(8) NOT NULL,
-        Address     NVARCHAR(400),
-        City        NVARCHAR(200),
-        Country     NVARCHAR(100),
-        IdentType   VARCHAR(2),
-        IdentNumber NVARCHAR(44),
-        DOB         VARCHAR(8)
-    );
+步驟四：執行後驗證（預期結果：1 筆，查得到）
+在同一個查詢視窗再次執行查詢：
+SELECT ent_num, spec_name, remark, DInd, SOURCE, creDate, updated_date
+FROM BSADBJP..OFAC_SPEC
+WHERE GROUPID = 5 
+  AND remark = '9876543'; -- 請替換成步驟一查到的 EntityId
 
-
-    INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
-    SELECT 
-        A.EntNum, 
-        A.SdnName, 
-        MAX(A.UpdatedDate) AS UpdatedDate
-    FROM BSADB.dbo.DJ_List_Data_A A
-    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
-    WHERE A.NamePropertyBitCode & 1 > 0
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-    GROUP BY A.EntNum, A.SdnName;
-
-    /*
-      DJ_List_Data_A 
-        ============================================================
-        多加入死亡名單掃描，所有的BL、PEP、NN都會納入掃描
-        ============================================================
-    */
-    INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
-    SELECT 
-		A.EntityId, 
-        A.FullName, 
-        MAX(CONVERT(VARCHAR,A.UpdatedDate_UTC,112)) AS UpdatedDate
-    FROM BSADB.dbo.DJ_Entity A
-    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-    WHERE A.Deceased = 1
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-	  AND NOT EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE X.EntNum = A.EntityId)
-    GROUP BY A.EntityId, A.FullName;
-
-
-
-    ;WITH TempAddress AS
-    (
-        SELECT A.EntityId, A.Address, A.City, A.AddressCountry,
-               ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
-        FROM BSADB.dbo.DJ_Address A WITH (NOLOCK)
-        WHERE A.Deleted = 0
-          AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
-    ),
-    TempIdent AS
-    (
-        SELECT A.EntityId,
-               CASE WHEN ISNULL(A.IdentificationType,'') = '' THEN NULL ELSE @OtherIdentMthCode END AS IdentificationType,
-               A.IdentificationNumber,
-               ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
-        FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH (NOLOCK)
-        WHERE A.Deleted = 0
-          AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
-    ),
-    TempDOB AS
-    (
-        SELECT A.EntityId, A.InfoDay, A.InfoMonth, A.InfoYear,
-               ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
-        FROM BSADB.dbo.DJ_DateTypeInfo A WITH (NOLOCK)
-        WHERE A.DateType = 'Date of Birth'
-          AND A.Deleted = 0
-          AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
-    ),
-    TempNUM AS
-    (
-        SELECT A.spec_name, A.updated_date, A.remark, A.ent_num
-        FROM BSADBJP..OFAC_SPEC A
-        WHERE A.GROUPID = 5 AND A.DInd = 'N'
-    )
-
-    INSERT INTO #tempDJBlacklistDetailsJP (Num, EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB)
-    SELECT 
-        E.ent_num,
-        A.EntNum,
-        A.SdnName,
-        A.UpdatedDate,
-        B.Address,
-        LEFT(B.City, 100),
-        LEFT(B.AddressCountry, 100),
-        C.IdentificationType,
-        LEFT(C.IdentificationNumber, 44),
-        CASE WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL 
-             THEN D.InfoYear 
-             ELSE CONVERT(VARCHAR(8), dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) 
-        END
-    FROM #tempDJBlacklistJP A
-    LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1
-    LEFT JOIN TempIdent   C ON A.EntNum = C.EntityId AND C.RowId = 1
-    LEFT JOIN TempDOB     D ON A.EntNum = D.EntityId AND D.RowId = 1
-    LEFT JOIN TempNUM     E ON A.EntNum = E.remark AND A.SdnName = E.spec_name;
-
-
-
- INSERT INTO #tempDJBlacklistDetailsJP (Num, EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB )
- SELECT E.ent_num, A.EntNum, A.SdnName, A.UpdatedDate, B.Address, LEFT(B.City,100), LEFT(B.AddressCountry,100),
-   C.IdentificationType, LEFT(C.IdentificationNumber,44) , 
-   CASE WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL THEN D.InfoYear ELSE        CONVERT(VARCHAR(8),dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) END
- FROM #tempDJBlacklistJP A 
-  LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1 
-  LEFT JOIN TempIdent C ON A.EntNum = C.EntityId AND C.RowId = 1 
-  LEFT JOIN TempDOB D ON A.EntNum = D.EntityId AND D.RowId = 1 
-  LEFT JOIN TempNUM E on A.EntNum = E.remark and A.SdnName = E.spec_name
-
-  DECLARE @MAXNo INT;
-  SELECT @MAXNo = MAX(ent_num) FROM BSADBJP..OFAC_SPEC;
-
-  UPDATE #tempDJBlacklistDetailsJP
-  SET @MAXNo = @MAXNo + 1,
-      Num = @MAXNo
-  WHERE Num IS NULL;
-
-  ;WITH TargetTable AS
-    (
-        SELECT *
-        FROM BSADBJP..OFAC_SPEC
-        WHERE GROUPID = 5
-    )
-    MERGE TargetTable AS T
-    USING (SELECT Num, EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB 
-           FROM #tempDJBlacklistDetailsJP) AS S
-    ON T.spec_name = S.SdnName 
-   AND T.remark = CAST(S.EntNum AS VARCHAR(100))
-
- 
- WHEN NOT MATCHED BY TARGET THEN
-        INSERT (spec_name, updated_date, remark, TaxID, IDENT, IDENTO, TaxIDCD, IDNUM, IssBy, DInd,
-                creUserID, STATE, ADDRESS, COUNTRY, GROUPID, SOURCE, EnterFlag, ApprovedBy, ApprovedDate,
-                DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, creDate,
-                updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, creDate_UTC, ent_num, DOB)
-        VALUES (S.SdnName, S.UpdatedDate, S.EntNum, '', S.IdentType, S.IdentNumber, '', '', 'JP', 'N',
-                'System Admin', ISNULL(S.City, ''), S.Address, S.Country, '5', 'JP FINANCE', NULL,
-                'System Admin', GETDATE(), NULL, NULL, NULL, NULL, GETDATE(),
-                GETUTCDATE(), GETUTCDATE(), NULL, NULL, GETUTCDATE(), S.Num, S.DOB)
-
-
-    WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN
-        UPDATE SET 
-            T.DInd = 'Y',
-            T.DelUserID = 'System Admin',
-            T.DelDate = GETDATE(),
-            T.ApproveDelUserID = 'System Admin',
-            T.ApproveDelDate = GETDATE(),
-            T.DelDate_UTC = GETUTCDATE()
-
-    WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN
-        UPDATE SET 
-            T.DInd = 'N',
-            T.updated_date = S.UpdatedDate,
-            T.DelUserID = NULL,
-            T.DelDate = NULL,
-            T.ApproveDelUserID = NULL,
-            T.ApproveDelDate = NULL,
-            T.DelDate_UTC = NULL,
-            T.EnterFlag = 'D',
-            T.updated_date_UTC = GETUTCDATE(),
-            T.ADDRESS = S.Address,
-            T.STATE = ISNULL(S.City, ''),
-            T.COUNTRY = S.Country,
-            T.IDENT = S.IdentType,
-            T.IDNUM = S.IdentNumber,
-            T.DOB = S.DOB
-
-
-
-最後是寫進去 BSADBJP..OFAC_SPEC ?
-
-我要怎麼驗證?
+ * 預期結果：成功查到 1 筆資料！
+ * 檢查 key 欄位：
+   * DInd 應為 'N'（生效中）
+   * remark 應為該 EntityId
+   * SOURCE 應為 'JP FINANCE'
+步驟五：清理測試環境（若採用交易模擬）
+驗證完畢後：
+ * 如果是模擬測試：執行 ROLLBACK TRAN;（資料庫會還原，剛才寫入的資料會消失）。
+ * 如果是正式執行：執行 COMMIT TRAN;（正式寫入資料庫）。
