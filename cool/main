@@ -1,3 +1,24 @@
+SELECT TOP 1 
+    A.EntityId, 
+    A.FullName, 
+    A.Deceased
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  -- 排除其他大名單，確保這個人在系統裡是全新的
+  AND B.SanctionListReference NOT LIKE '%OFAC%'
+  AND B.SanctionListReference NOT LIKE '%United Nations%'
+  AND B.SanctionListReference NOT LIKE '%European Union%'
+  -- 排除目標表已存在的資料
+  AND NOT EXISTS (
+      SELECT 1 FROM BSADBJP..OFAC_SPEC T
+      WHERE T.GROUPID = 5 AND T.remark = CAST(A.EntityId AS VARCHAR(100))
+  );
+
+
+
+
 這裡為你整理完整的 步驟三同步語法。
 包含完整的暫存表建立、資料組裝與 MERGE 寫入邏輯。請全選以下程式碼並執行：
 -- 1. 開啟交易鎖定（測試期間不寫死進資料庫）
