@@ -1,325 +1,129 @@
-可以。你這次的目的很明確：
-
-拿一個 DJ 的 FullName，確認它符合「死亡名單 + Japanese Finance」條件，然後執行 SP，最後確認 BSADBJP..OFAC_SPEC 是否真的有被同步。
-
-我建議照下面 SOP 做，先查、再測、最後驗證，不要一開始就直接跑 SP。
-
-⸻
-
-一、先找一筆「死亡名單」測試資料
-
-先執行：
+是的，這段 T-SQL 腳本最終確實是寫入到 BSADBJP..OFAC_SPEC 這張實體資料表。
+腳本中定義了 CTE：
+WITH TargetTable AS
+(
+    SELECT *
+    FROM BSADBJP..OFAC_SPEC
+    WHERE GROUPID = 5
+)
+
+在 SQL Server 中，對更新單一底層資料表的 CTE 或 View 進行 MERGE / INSERT / UPDATE，其異動會直接作用在底層的實體表 BSADBJP..OFAC_SPEC 上。
+注意：程式碼中的一個潛在 Bug
+在提供驗證方式前，請注意程式碼中有重複的區塊：
+在 INSERT INTO #tempDJBlacklistDetailsJP 之後，底下又重複寫了一次一模一樣的 INSERT INTO #tempDJBlacklistDetailsJP。這會導致 #tempDJBlacklistDetailsJP 裡的資料量變成兩倍，進而影響後續的 UPDATE @MAXNo 與 MERGE 邏輯。執行前請先刪除重複的那一段。
+驗證步驟與 SQL 腳本
+驗證可分為**「執行前模擬驗證 (Dry Run)」與「執行後數據對帳 (Post-Check)」**兩個階段：
+階段一：執行前模擬驗證（不真正寫入資料庫）
+利用 BEGIN TRAN + ROLLBACK 搭配 MERGE 的 OUTPUT 子句，可以在不污染正式資料的前提下，精準觀察將會發生多少筆「新增」、「修改」與「軟刪除」。
+將 MERGE 區塊修改為如下進行測試：
+BEGIN TRAN;
+
+-- 建立臨時表收集 MERGE 的異動結果
+DECLARE @SummaryTable TABLE (
+    ChangeType VARCHAR(10),
+    EntNum INT,
+    SpecName NVARCHAR(350),
+    Remark VARCHAR(100)
+);
+
+WITH TargetTable AS
+(
+    SELECT *
+    FROM BSADBJP..OFAC_SPEC
+    WHERE GROUPID = 5
+)
+MERGE TargetTable AS T
+USING (SELECT Num, EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB 
+       FROM #tempDJBlacklistDetailsJP) AS S
+ON T.spec_name = S.SdnName 
+AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+
+WHEN NOT MATCHED BY TARGET THEN
+    INSERT (spec_name, updated_date, remark, TaxID, IDENT, IDENTO, TaxIDCD, IDNUM, IssBy, DInd,
+            creUserID, STATE, ADDRESS, COUNTRY, GROUPID, SOURCE, EnterFlag, ApprovedBy, ApprovedDate,
+            DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, creDate,
+            updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, creDate_UTC, ent_num, DOB)
+    VALUES (S.SdnName, S.UpdatedDate, S.EntNum, '', S.IdentType, S.IdentNumber, '', '', 'JP', 'N',
+            'System Admin', ISNULL(S.City, ''), S.Address, S.Country, '5', 'JP FINANCE', NULL,
+            'System Admin', GETDATE(), NULL, NULL, NULL, NULL, GETDATE(),
+            GETUTCDATE(), GETUTCDATE(), NULL, NULL, GETUTCDATE(), S.Num, S.DOB)
+
+WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN
+    UPDATE SET 
+        T.DInd = 'Y',
+        T.DelUserID = 'System Admin',
+        T.DelDate = GETDATE(),
+        T.ApproveDelUserID = 'System Admin',
+        T.ApproveDelDate = GETDATE(),
+        T.DelDate_UTC = GETUTCDATE()
+
+WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN
+    UPDATE SET 
+        T.DInd = 'N',
+        T.updated_date = S.UpdatedDate,
+        T.DelUserID = NULL,
+        T.DelDate = NULL,
+        T.ApproveDelUserID = NULL,
+        T.ApproveDelDate = NULL,
+        T.DelDate_UTC = NULL,
+        T.EnterFlag = 'D',
+        T.updated_date_UTC = GETUTCDATE(),
+        T.ADDRESS = S.Address,
+        T.STATE = ISNULL(S.City, ''),
+        T.COUNTRY = S.Country,
+        T.IDENT = S.IdentType,
+        T.IDNUM = S.IdentNumber,
+        T.DOB = S.DOB
+
+-- 印出異動明細
+OUTPUT $action, inserted.ent_num, inserted.spec_name, inserted.remark 
+INTO @SummaryTable;
+
+-- 1. 查看各類別異動筆數統計
+SELECT ChangeType, COUNT(*) AS [Count]
+FROM @SummaryTable
+GROUP BY ChangeType;
+
+-- 2. 查看異動明細前幾筆
+SELECT * FROM @SummaryTable;
+
+-- 測試完畢，強制復原，不寫入 DB
+ROLLBACK TRAN;
+
+階段二：正式執行後的資料對帳 SQL
+同步執行完畢（正式 COMMIT）後，可以執行以下查詢驗證結果：
+1. 總筆數比對（來源 vs 目標）
+來源暫存表與目標表中 GROUPID = 5 且 DInd = 'N' 的有效資料筆數應該要完全一致。
+-- 來源有效筆數
+SELECT COUNT(DISTINCT EntNum) AS Source_Count 
+FROM #tempDJBlacklistJP;
+
+-- 目標表有效筆數
+SELECT COUNT(*) AS Target_Active_Count 
+FROM BSADBJP..OFAC_SPEC 
+WHERE GROUPID = 5 AND DInd = 'N';
+
+2. 驗證今日更新/新增的紀錄
+確認今日異動的資料欄位設定是否正確（如 GROUPID = '5', SOURCE = 'JP FINANCE', creUserID = 'System Admin'）。
+SELECT ent_num, spec_name, remark, DInd, creDate, updated_date, ADDRESS, COUNTRY, DOB
+FROM BSADBJP..OFAC_SPEC
+WHERE GROUPID = 5 
+  AND (CAST(creDate AS DATE) = CAST(GETDATE() AS DATE) 
+       OR CAST(updated_date_UTC AS DATE) = CAST(GETUTCDATE() AS DATE))
+ORDER BY ent_num DESC;
+
+3. 驗證今日被下架（軟刪除）的紀錄
+確認被標記為 DInd = 'Y' 的紀錄是否正確記錄了刪除者與刪除時間。
+SELECT ent_num, spec_name, remark, DInd, DelUserID, DelDate
+FROM BSADBJP..OFAC_SPEC
+WHERE GROUPID = 5 
+  AND DInd = 'Y'
+  AND CAST(DelDate AS DATE) = CAST(GETDATE() AS DATE);
+
+4. 檢查主鍵流水號 (ent_num) 是否有重複
+確保新增的 ent_num 沒有衝突：
+SELECT ent_num, COUNT(*) 
+FROM BSADBJP..OFAC_SPEC
+GROUP BY ent_num
+HAVING COUNT(*) > 1;
 
-USE BSADB;
-GO
-SELECT TOP 100
-    A.EntityId,
-    A.FullName,
-    A.Deceased,
-    A.PersonStatus,
-    CONVERT(VARCHAR(8), A.UpdatedDate_UTC, 112) AS UpdatedDate,
-    B.SanctionListReference
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_SanctionListReference B
-    ON A.EntityId = B.EntityId
-WHERE A.Deceased = 1
-  AND B.SanctionListReference LIKE '%Japanese Finance%'
-ORDER BY A.UpdatedDate_UTC DESC;
-
-你會拿到類似：
-
-EntityId    FullName          Deceased    PersonStatus    UpdatedDate    SanctionListReference
-123456      TEST NAME         1           Active          20260812       Japanese Finance
-
-這時候記下三個東西
-
-EntityId = 123456
-FullName = TEST NAME
-Deceased = 1
-
-其中 EntityId 很重要，因為你的 SP 實際上是靠 EntityId 去同步，不是靠 FullName。
-
-⸻
-
-二、用 FullName 確認「這筆真的會被死亡名單抓到」
-
-把剛剛的名稱放進去：
-
-USE BSADB;
-GO
-DECLARE @TestName NVARCHAR(350) = N'TEST NAME';
-SELECT 
-    A.EntityId,
-    A.FullName,
-    A.Deceased,
-    A.PersonStatus,
-    CONVERT(VARCHAR(8), A.UpdatedDate_UTC, 112) AS UpdatedDate,
-    B.SanctionListReference,
-    
-    CASE
-        WHEN A.Deceased = 1
-         AND B.SanctionListReference LIKE '%Japanese Finance%'
-        THEN 'MATCH'
-        ELSE 'NOT MATCH'
-    END AS TestResult
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_SanctionListReference B
-    ON A.EntityId = B.EntityId
-WHERE A.FullName = @TestName;
-
-你要看到：
-
-TestResult = MATCH
-
-如果是 MATCH，代表：
-
-這個 FullName 確實符合你 SP 裡這段：
-
-WHERE A.Deceased = 1
-  AND B.SanctionListReference LIKE '%Japanese Finance%'
-
-⸻
-
-三、先確認目前 OFAC_SPEC 有沒有這個人
-
-這一步非常重要。
-
-因為如果這個人本來就已經存在，你後面執行 SP 後看到資料，不代表是這次新增的。
-
-USE BSADBJP;
-GO
-DECLARE @TestName NVARCHAR(350) = N'TEST NAME';
-SELECT
-    ent_num,
-    spec_name,
-    updated_date,
-    remark,
-    DInd,
-    GROUPID,
-    SOURCE,
-    EnterFlag,
-    creDate,
-    DelDate
-FROM BSADBJP.dbo.OFAC_SPEC
-WHERE GROUPID = 5
-  AND spec_name = @TestName;
-
-理想情況
-
-查不到：
-
-0 rows
-
-這樣最好測。
-
-因為等一下執行 SP 後，如果出現：
-
-TEST NAME
-GROUPID = 5
-
-就可以很明確確認是這次同步進來的。
-
-⸻
-
-四、如果 FullName 已經存在，先不要亂刪
-
-例如你查到：
-
-spec_name = TEST NAME
-GROUPID = 5
-DInd = N
-
-不要直接 DELETE。
-
-因為這是正式同步表的話，刪資料可能會影響其他測試。
-
-這種情況建議換另一個目前不存在於 OFAC_SPEC 的死亡名單 FullName。
-
-⸻
-
-五、執行 Stored Procedure
-
-這裡有一個容易搞混的地方。
-
-你的 SP：
-
-CREATE PROCEDURE [dbo].[GLSPEC_SyncDJToInternalList]
-    @GroupId BIGINT
-
-但是你第二段 Japanese Finance：
-
-BSADBJP..OFAC_SPEC
-
-是：
-
-WHERE GROUPID = 5
-
-所以你要測 Japanese Finance，實際上這一段跟你傳入的 @GroupId 沒有直接關係。
-
-你可以依照系統正常執行方式傳入對應的 GroupId。
-
-例如如果你平常就是：
-
-EXEC BSADB.dbo.GLSPEC_SyncDJToInternalList @GroupId = 1;
-
-就照原本系統使用方式執行。
-
-⚠️ 不要為了測 JP 隨便猜一個 GroupId。
-
-⸻
-
-六、執行前，我建議先把 EntityId 記下來
-
-例如：
-
-EntityId = 123456
-FullName = TEST NAME
-
-執行 SP：
-
-USE BSADB;
-GO
-EXEC dbo.GLSPEC_SyncDJToInternalList
-    @GroupId = 你的正常GroupId;
-
-⸻
-
-七、執行完立刻查 OFAC_SPEC
-
-這是最重要的驗證。
-
-USE BSADBJP;
-GO
-DECLARE @TestEntityId INT = 123456;
-DECLARE @TestName NVARCHAR(350) = N'TEST NAME';
-SELECT
-    ent_num,
-    spec_name,
-    updated_date,
-    remark,
-    DInd,
-    GROUPID,
-    SOURCE,
-    EnterFlag,
-    creDate,
-    DelDate,
-    ApprovedDate
-FROM BSADBJP.dbo.OFAC_SPEC
-WHERE GROUPID = 5
-  AND (
-        remark = CAST(@TestEntityId AS VARCHAR(100))
-        OR spec_name = @TestName
-      );
-
-你理想上會看到：
-
-ent_num      ...
-spec_name    TEST NAME
-remark       123456
-DInd         N
-GROUPID      5
-SOURCE       JP FINANCE
-EnterFlag    NULL
-
-這就代表：
-
-✅ 同步成功
-
-⸻
-
-八、再確認 Log
-
-你的 SP 還會寫：
-
-BSADBJP.dbo.OFAC_SPEC_LOG
-
-所以再查：
-
-USE BSADBJP;
-GO
-DECLARE @TestEntityId INT = 123456;
-SELECT TOP 20
-    ent_num,
-    spec_name,
-    updated_date,
-    remark,
-    DInd,
-    GROUPID,
-    SOURCE,
-    ActionCD,
-    ActionDT,
-    UserID
-FROM BSADBJP.dbo.OFAC_SPEC_LOG
-WHERE GROUPID = 5
-  AND remark = CAST(@TestEntityId AS VARCHAR(100))
-ORDER BY ActionDT DESC;
-
-如果是第一次新增，按照你 SP 的邏輯：
-
-ActionCD = 01
-
-代表：
-
-01 = INSERT
-
-⸻
-
-九、完整判斷流程
-
-你最後可以按照這張表判斷：
-
-測試階段	預期結果
-DJ_Entity 找 FullName	找得到
-Deceased	1
-DJ_SanctionListReference	包含 Japanese Finance
-死亡名單 SELECT	MATCH
-執行前 OFAC_SPEC	最好沒有資料
-執行 SP	成功
-執行後 OFAC_SPEC	有該 FullName
-GROUPID	5
-remark	EntityId
-DInd	N
-SOURCE	JP FINANCE
-OFAC_SPEC_LOG.ActionCD	01
-
-⸻
-
-十、我最推薦你實際測這一組
-
-你可以照這個順序：
-
-① 找測試人
-        ↓
-② 記 EntityId + FullName
-        ↓
-③ 確認 Deceased = 1
-        ↓
-④ 確認 Japanese Finance
-        ↓
-⑤ 確認 OFAC_SPEC 目前沒有
-        ↓
-⑥ EXEC GLSPEC_SyncDJToInternalList
-        ↓
-⑦ 查 OFAC_SPEC
-        ↓
-⑧ 查 OFAC_SPEC_LOG
-
-最後你真正要證明的是這一條：
-
-DJ_Entity
-    EntityId = 123456
-    FullName = TEST NAME
-    Deceased = 1
-          +
-DJ_SanctionListReference
-    Japanese Finance
-          ↓
-GLSPEC_SyncDJToInternalList
-          ↓
-BSADBJP.dbo.OFAC_SPEC
-    spec_name = TEST NAME
-    remark = 123456
-    GROUPID = 5
-    DInd = N
-
-這樣才算把你新增的「BL / PEP / NN 都納入死亡名單掃描」整條流程測完整。
