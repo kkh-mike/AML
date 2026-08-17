@@ -1,3 +1,54 @@
+
+在 SQL Server 中，可以直接透過 DELETE ... FROM ... JOIN 或 DELETE ... WHERE ... IN 的方式來完成這項跨資料庫的批次刪除作業。
+1. 先確認即將被刪除的資料（建議先 Preview）
+在執行刪除前，建議先執行此查詢確認目標筆數與內容：
+SELECT T.*
+FROM BSADBJP..OFAC_SPEC T
+INNER JOIN (
+    SELECT DISTINCT A.FullName
+    FROM BSADB.dbo.DJ_Entity A
+    INNER JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+    WHERE A.Deceased = 1
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+) S ON T.spec_name = S.FullName
+WHERE T.GROUPID = '5';
+
+2. 執行刪除語法（含安全事務機制）
+BEGIN TRANSACTION;
+
+DELETE T
+FROM BSADBJP..OFAC_SPEC T
+INNER JOIN (
+    SELECT DISTINCT A.FullName
+    FROM BSADB.dbo.DJ_Entity A
+    INNER JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+    WHERE A.Deceased = 1
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+) S ON T.spec_name = S.FullName
+WHERE T.GROUPID = '5';
+
+-- 檢查受影響的筆數是否正確：
+-- 若正確無誤請執行： COMMIT TRANSACTION;
+-- 若筆數有異請執行： ROLLBACK TRANSACTION;
+
+替代寫法：使用 WHERE ... IN
+BEGIN TRANSACTION;
+
+DELETE FROM BSADBJP..OFAC_SPEC
+WHERE GROUPID = '5'
+  AND spec_name IN (
+      SELECT A.FullName
+      FROM BSADB.dbo.DJ_Entity A
+      INNER JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+      WHERE A.Deceased = 1
+        AND B.SanctionListReference LIKE '%Japanese Finance%'
+  );
+
+COMMIT TRANSACTION;
+
+
+
+
 	SELECT 
 		A.EntityId, 
         A.FullName, 
