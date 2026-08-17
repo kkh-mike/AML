@@ -1,29 +1,53 @@
-在 SQL Server 中，複製 Table 有兩種常見方式，取決於你是否需要完整保留索引（Index）與約束條件：
-方法一：使用 SSMS 產生完整結構腳本（推薦：100% 完整複製）
-從你的畫面可以看到此資料表包含 Identity 自增欄位 及 Index（索引）。若要完整複製所有設定：
- * 在左側 物件總管 (Object Explorer) 找到 BSADB 資料庫下的 dbo.OFAC_GLSpec。
- * 在該資料表上按 右鍵 \rightarrow 編寫資料表的指令碼為 (Script Table as) \rightarrow CREATE 至 (CREATE To) \rightarrow 新增查詢編輯器視窗 (New Query Editor Window)。
- * 將腳本中的舊表名 [OFAC_GLSpec] 全數取代為你的 [新表名稱]（包含索引名稱也建議一併重新命名以避免混淆）。
- * 執行腳本建立新資料表。
- * 若要將舊資料完整倒進去，執行以下語法（因為有 IDENTITY 欄位）：
-SET IDENTITY_INSERT BSADB.dbo.[新表名稱] ON;
 
-INSERT INTO BSADB.dbo.[新表名稱] (spec_name, updated_date, remark, TaxID, IDENT, IDENT0, TaxIDCD, IDNUM, IssBy, DInd, creUserID, STATE, ADDRESS, ent_num /* 請列出所有欄位 */)
+
+
+SET IDENTITY_INSERT BSADB.dbo.OFAC_GLSpec_bak_20260817 ON;
+
+INSERT INTO BSADB.dbo.OFAC_GLSpec_bak_20260817 
+(
+	[spec_name] [nvarchar](510) NULL,
+	[updated_date] [nvarchar](20) NULL,
+	[remark] [nvarchar](2000) NULL,
+	[TaxID] [nvarchar](20) NULL,
+	[IDENT] [nvarchar](2) NULL,
+	[IDENTO] [nvarchar](80) NULL,
+	[TaxIDCD] [nvarchar](2) NULL,
+	[IDNUM] [nvarchar](44) NULL,
+	[IssBy] [nvarchar](4) NULL,
+	[DInd] [nvarchar](2) NULL,
+	[creUserID] [nvarchar](100) NULL,
+	[STATE] [nvarchar](200) NOT NULL,
+	[ADDRESS] [nvarchar](400) NULL,
+	[COUNTRY] [nvarchar](100) NULL,
+	[GROUPID] [bigint] NULL,
+	[SOURCE] [nvarchar](1000) NULL,
+	[EnterFlag] [char](1) NULL,
+	[ApprovedBy] [nvarchar](60) NULL,
+	[ApprovedDate] [datetime] NULL,
+	[DelUserID] [nvarchar](60) NULL,
+	[DelDate] [datetime] NULL,
+	[ApproveDelUserID] [nvarchar](60) NULL,
+	[ApproveDelDate] [datetime] NULL,
+	[creDate] [datetime] NULL,
+	[updated_date_UTC] [datetime] NULL,
+	[ApprovedDate_UTC] [datetime] NULL,
+	[DelDate_UTC] [datetime] NULL,
+	[ApproveDelDate_UTC] [datetime] NULL,
+	[creDate_UTC] [datetime] NULL,
+	[ent_num] [bigint] IDENTITY(1,1) NOT NULL,
+	[spec_name_cn] [nvarchar](255) NULL,
+	[BatchID] [uniqueidentifier] NULL,
+	[ISSBY_STATE] [varchar](2) NULL,
+	[DOB] [nvarchar](8) NULL,
+	[ApproveEditUserID] [nvarchar](60) NULL,
+	[ApproveEditDate] [datetime] NULL,
+	[ApproveEditDate_UTC] [datetime] NULL
+)
 SELECT spec_name, updated_date, remark, TaxID, IDENT, IDENT0, TaxIDCD, IDNUM, IssBy, DInd, creUserID, STATE, ADDRESS, ent_num
 FROM BSADB.dbo.OFAC_GLSpec;
 
-SET IDENTITY_INSERT BSADB.dbo.[新表名稱] OFF;
+SET IDENTITY_INSERT BSADB.dbo.OFAC_GLSpec_bak_20260817 OFF;
 
-方法二：快速語法複製（SELECT INTO）
-如果只是臨時備份資料，不需要保留 Index 等約束：
- * 複製結構 + 資料：
-SELECT * INTO BSADB.dbo.[新表名稱] 
-FROM BSADB.dbo.OFAC_GLSpec;
 
- * 僅複製結構（不要資料）：
-SELECT * INTO BSADB.dbo.[新表名稱] 
-FROM BSADB.dbo.OFAC_GLSpec 
-WHERE 1 = 0;
 
-> 注意： SELECT INTO 會自動帶入 IDENTITY 屬性，但不會複製非叢集索引（Non-clustered Index）、主鍵（Primary Key）與預設值條件。若需完整結構，請優先使用 方法一。
-> 
+這邊幫我寫完整
