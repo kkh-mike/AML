@@ -1,20 +1,5 @@
-直接將這句話轉化為合適的商務英文放入信件中，提供兩種語氣供你選擇：
-版本 A：專業且直接（推薦，明確指出問題點）
-> Hi [寄件人名字],
-> Thanks for reaching out.
-> Due to system security and audit compliance standards, we cannot grant access based on non-exhaustive lists or general terms (such as "e.g." and "etc."). Every permission and report access must be explicitly defined and accounted for.
-> Could you please provide either of the following so we can proceed with the setup?
->  * An exact list of required functions and reports (including full menu paths or screen names).
->  * A reference User ID of a team member whose current access rights Jeffrey should mirror.
-> Thank you for your understanding and cooperation.
-> Best regards,
-> Yu Hao
-> 
-版本 B：簡短有力版
-> Hi [寄件人名字],
-> Thank you for your request.
-> Please note that due to strict audit and security requirements, permissions cannot be provisioned based on open-ended examples (e.g. / etc.). We require a definitive scope to configure the system.
-> Kindly specify the exact functions, screens, and report names needed, or provide a reference colleague's User ID to replicate.
-> Best regards,
-> Yu Hao
-> 
+I cannot be provisioned based on open-ended examples (e.g. / etc.). 
+We require a definitive scope to configure the system.
+ Kindly specify the exact functions
+
+這樣表達可以?
