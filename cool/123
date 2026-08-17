@@ -1,191 +1,29 @@
--- 1. 開啟交易（確保最後可以 ROLLBACK）
-BEGIN TRAN;
+在 SQL Server 中，複製 Table 有兩種常見方式，取決於你是否需要完整保留索引（Index）與約束條件：
+方法一：使用 SSMS 產生完整結構腳本（推薦：100% 完整複製）
+從你的畫面可以看到此資料表包含 Identity 自增欄位 及 Index（索引）。若要完整複製所有設定：
+ * 在左側 物件總管 (Object Explorer) 找到 BSADB 資料庫下的 dbo.OFAC_GLSpec。
+ * 在該資料表上按 右鍵 \rightarrow 編寫資料表的指令碼為 (Script Table as) \rightarrow CREATE 至 (CREATE To) \rightarrow 新增查詢編輯器視窗 (New Query Editor Window)。
+ * 將腳本中的舊表名 [OFAC_GLSpec] 全數取代為你的 [新表名稱]（包含索引名稱也建議一併重新命名以避免混淆）。
+ * 執行腳本建立新資料表。
+ * 若要將舊資料完整倒進去，執行以下語法（因為有 IDENTITY 欄位）：
+SET IDENTITY_INSERT BSADB.dbo.[新表名稱] ON;
 
--- 2. 清除舊暫存表
-IF OBJECT_ID('tempdb..#tempDJBlacklistJP') IS NOT NULL
-    DROP TABLE #tempDJBlacklistJP;
+INSERT INTO BSADB.dbo.[新表名稱] (spec_name, updated_date, remark, TaxID, IDENT, IDENT0, TaxIDCD, IDNUM, IssBy, DInd, creUserID, STATE, ADDRESS, ent_num /* 請列出所有欄位 */)
+SELECT spec_name, updated_date, remark, TaxID, IDENT, IDENT0, TaxIDCD, IDNUM, IssBy, DInd, creUserID, STATE, ADDRESS, ent_num
+FROM BSADB.dbo.OFAC_GLSpec;
 
-IF OBJECT_ID('tempdb..#tempDJBlacklistDetailsJP') IS NOT NULL
-    DROP TABLE #tempDJBlacklistDetailsJP;
+SET IDENTITY_INSERT BSADB.dbo.[新表名稱] OFF;
 
--- 3. 建立暫存表
-CREATE TABLE #tempDJBlacklistJP
-(
-    EntNum      INT NOT NULL,
-    SdnName     NVARCHAR(350) NOT NULL,
-    UpdatedDate VARCHAR(8) NOT NULL
-);
+方法二：快速語法複製（SELECT INTO）
+如果只是臨時備份資料，不需要保留 Index 等約束：
+ * 複製結構 + 資料：
+SELECT * INTO BSADB.dbo.[新表名稱] 
+FROM BSADB.dbo.OFAC_GLSpec;
 
-CREATE TABLE #tempDJBlacklistDetailsJP
-(
-    Num         INT,
-    EntNum      INT NOT NULL,
-    SdnName     NVARCHAR(350) NOT NULL,
-    UpdatedDate VARCHAR(8) NOT NULL,
-    Address     NVARCHAR(400),
-    City        NVARCHAR(200),
-    Country     NVARCHAR(100),
-    IdentType   VARCHAR(2),
-    IdentNumber NVARCHAR(44),
-    DOB         VARCHAR(8)
-);
+ * 僅複製結構（不要資料）：
+SELECT * INTO BSADB.dbo.[新表名稱] 
+FROM BSADB.dbo.OFAC_GLSpec 
+WHERE 1 = 0;
 
--- 4. 寫入第一層黑名單主表
-INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
-SELECT 
-    A.EntNum, 
-    A.SdnName, 
-    MAX(A.UpdatedDate) AS UpdatedDate
-FROM BSADB.dbo.DJ_List_Data_A A
-JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
-WHERE A.NamePropertyBitCode & 1 > 0
-  AND B.SanctionListReference LIKE '%Japanese Finance%'
-GROUP BY A.EntNum, A.SdnName;
-
-INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
-SELECT 
-    A.EntityId, 
-    A.FullName, 
-    MAX(CONVERT(VARCHAR,A.UpdatedDate_UTC,112)) AS UpdatedDate
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-WHERE A.Deceased = 1
-  AND B.SanctionListReference LIKE '%Japanese Finance%'
-  AND NOT EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE X.EntNum = A.EntityId)
-GROUP BY A.EntityId, A.FullName;
-
--- 5. 組裝詳細資訊寫入第二層暫存表
-DECLARE @OtherIdentMthCode VARCHAR(2) = ''; 
-
-;WITH TempAddress AS
-(
-    SELECT A.EntityId, A.Address, A.City, A.AddressCountry,
-           ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
-    FROM BSADB.dbo.DJ_Address A WITH (NOLOCK)
-    WHERE A.Deleted = 0
-      AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
-),
-TempIdent AS
-(
-    SELECT A.EntityId,
-           CASE WHEN ISNULL(A.IdentificationType,'') = '' THEN NULL ELSE @OtherIdentMthCode END AS IdentificationType,
-           A.IdentificationNumber,
-           ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
-    FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH (NOLOCK)
-    WHERE A.Deleted = 0
-      AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
-),
-TempDOB AS
-(
-    SELECT A.EntityId, A.InfoDay, A.InfoMonth, A.InfoYear,
-           ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
-    FROM BSADB.dbo.DJ_DateTypeInfo A WITH (NOLOCK)
-    WHERE A.DateType = 'Date of Birth'
-      AND A.Deleted = 0
-      AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
-),
-TempNUM AS
-(
-    SELECT A.spec_name, A.updated_date, A.remark, A.ent_num
-    FROM BSADBJP..OFAC_SPEC A
-    WHERE A.GROUPID = 5 AND A.DInd = 'N'
-)
-INSERT INTO #tempDJBlacklistDetailsJP (Num, EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB)
-SELECT 
-    E.ent_num,
-    A.EntNum,
-    A.SdnName,
-    A.UpdatedDate,
-    B.Address,
-    LEFT(B.City, 100),
-    LEFT(B.AddressCountry, 100),
-    C.IdentificationType,
-    LEFT(C.IdentificationNumber, 44),
-    CASE WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL 
-         THEN D.InfoYear 
-         ELSE CONVERT(VARCHAR(8), dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) 
-    END
-FROM #tempDJBlacklistJP A
-LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1
-LEFT JOIN TempIdent   C ON A.EntNum = C.EntityId AND C.RowId = 1
-LEFT JOIN TempDOB     D ON A.EntNum = D.EntityId AND D.RowId = 1
-LEFT JOIN TempNUM     E ON A.EntNum = E.remark AND A.SdnName = E.spec_name;
-
--- 補齊新資料的 ent_num 流水號
-DECLARE @MAXNo INT;
-SELECT @MAXNo = ISNULL(MAX(ent_num), 0) FROM BSADBJP..OFAC_SPEC;
-
-UPDATE #tempDJBlacklistDetailsJP
-SET @MAXNo = @MAXNo + 1,
-    Num = @MAXNo
-WHERE Num IS NULL;
-
--- 6. 執行 MERGE 模擬並紀錄異動
-DECLARE @SummaryTable TABLE (
-    ChangeType VARCHAR(10),
-    EntNum INT,
-    SpecName NVARCHAR(350),
-    Remark VARCHAR(100)
-);
-
-;WITH TargetTable AS
-(
-    SELECT *
-    FROM BSADBJP..OFAC_SPEC
-    WHERE GROUPID = 5
-)
-MERGE TargetTable AS T
-USING (SELECT Num, EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB 
-       FROM #tempDJBlacklistDetailsJP) AS S
-ON T.spec_name = S.SdnName 
-AND T.remark = CAST(S.EntNum AS VARCHAR(100))
-
-WHEN NOT MATCHED BY TARGET THEN
-    INSERT (spec_name, updated_date, remark, TaxID, IDENT, IDENTO, TaxIDCD, IDNUM, IssBy, DInd,
-            creUserID, STATE, ADDRESS, COUNTRY, GROUPID, SOURCE, EnterFlag, ApprovedBy, ApprovedDate,
-            DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, creDate,
-            updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, creDate_UTC, ent_num, DOB)
-    VALUES (S.SdnName, S.UpdatedDate, S.EntNum, '', S.IdentType, S.IdentNumber, '', '', 'JP', 'N',
-            'System Admin', ISNULL(S.City, ''), S.Address, S.Country, '5', 'JP FINANCE', NULL,
-            'System Admin', GETDATE(), NULL, NULL, NULL, NULL, GETDATE(),
-            GETUTCDATE(), GETUTCDATE(), NULL, NULL, GETUTCDATE(), S.Num, S.DOB)
-
-WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN
-    UPDATE SET 
-        T.DInd = 'Y',
-        T.DelUserID = 'System Admin',
-        T.DelDate = GETDATE(),
-        T.ApproveDelUserID = 'System Admin',
-        T.ApproveDelDate = GETDATE(),
-        T.DelDate_UTC = GETUTCDATE()
-
-WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN
-    UPDATE SET 
-        T.DInd = 'N',
-        T.updated_date = S.UpdatedDate,
-        T.DelUserID = NULL,
-        T.DelDate = NULL,
-        T.ApproveDelUserID = NULL,
-        T.ApproveDelDate = NULL,
-        T.DelDate_UTC = NULL,
-        T.EnterFlag = 'D',
-        T.updated_date_UTC = GETUTCDATE(),
-        T.ADDRESS = S.Address,
-        T.STATE = ISNULL(S.City, ''),
-        T.COUNTRY = S.Country,
-        T.IDENT = S.IdentType,
-        T.IDNUM = S.IdentNumber,
-        T.DOB = S.DOB
-
-OUTPUT $action, inserted.ent_num, inserted.spec_name, inserted.remark 
-INTO @SummaryTable;
-
--- 7. 顯示統計結果與異動明細
-SELECT ChangeType, COUNT(*) AS [Count]
-FROM @SummaryTable
-GROUP BY ChangeType;
-
-SELECT * FROM @SummaryTable;
-
--- 8. 強制復原交易（不影響正式資料庫）
-ROLLBACK TRAN;
+> 注意： SELECT INTO 會自動帶入 IDENTITY 屬性，但不會複製非叢集索引（Non-clustered Index）、主鍵（Primary Key）與預設值條件。若需完整結構，請優先使用 方法一。
+> 
