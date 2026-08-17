@@ -1,3 +1,7 @@
+="INSERT INTO WORKFLOW_MGMT_AutomatedUserSetting_Taishin (BankNo, ModuleCode, IsByBranch, UserRole, PermCode) VALUES ('" & A2 & "', '" & B2 & "', " & C2 & ", " & D2 & ", '" & E2 & "');"
+
+
+
 
 在 SQL Server 中，可以直接透過 DELETE ... FROM ... JOIN 或 DELETE ... WHERE ... IN 的方式來完成這項跨資料庫的批次刪除作業。
 1. 先確認即將被刪除的資料（建議先 Preview）
