@@ -1,57 +1,97 @@
-可以，完全沒問題！
-不過在把資料倒回原本的資料表（OFAC_GLSpec）時，主要有兩個關鍵注意事項：
-關鍵注意事項
- * IDENTITY（自動編號）欄位限制：
-   從你的截圖中可以看到 ent_num 是 Identity 欄位。若要把包含原本 ent_num 編號的資料直接倒回去，必須先開啟 IDENTITY_INSERT，否則 SQL Server 會報錯不允許手動寫入自增值。
- * 清空原本資料表（如有需要）：
-   * 如果是要完全還原/覆蓋回原本的狀態，倒回去前需要先清空原本的表：
-     * 若無 Foreign Key 關聯：可使用 TRUNCATE TABLE BSADB.dbo.OFAC_GLSpec;（速度快，且會重置 Identity 計數器）。
-     * 或使用 DELETE FROM BSADB.dbo.OFAC_GLSpec;。
-倒回資料的標準語法範例
+要把資料從備份表 OFAC_GLSpec_bak_20260817 倒回原始表 OFAC_GLSpec，語法結構是一模一樣的，只需將 目標表與來源表對調，並將 IDENTITY_INSERT 設定在原始表 OFAC_GLSpec 上。
+建議加上 Transaction 機制，確保操作安全：
+BEGIN TRANSACTION;
+
 -- 1. (選用) 若要完全還原，先清空原本的資料表
 -- TRUNCATE TABLE BSADB.dbo.OFAC_GLSpec;
 
--- 2. 開啟允許寫入自增欄位
+-- 2. 開啟原始表的 Identity 手動寫入權限
 SET IDENTITY_INSERT BSADB.dbo.OFAC_GLSpec ON;
 
--- 3. 將資料從備份表倒回原本的表（需明確列出欄位名稱）
-INSERT INTO BSADB.dbo.OFAC_GLSpec (
-    spec_name, 
-    updated_date, 
-    remark, 
-    TaxID, 
-    IDENT, 
-    IDENT0, 
-    TaxIDCD, 
-    IDNUM, 
-    IssBy, 
-    DInd, 
-    creUserID, 
-    [STATE], 
-    ADDRESS, 
-    ent_num
-    -- 請依實際情況補齊其他所有欄位
+-- 3. 將備份表的資料倒回原始表
+INSERT INTO BSADB.dbo.OFAC_GLSpec 
+(
+    [spec_name],
+    [updated_date],
+    [remark],
+    [TaxID],
+    [IDENT],
+    [IDENTO],
+    [TaxIDCD],
+    [IDNUM],
+    [IssBy],
+    [DInd],
+    [creUserID],
+    [STATE],
+    [ADDRESS],
+    [COUNTRY],
+    [GROUPID],
+    [SOURCE],
+    [EnterFlag],
+    [ApprovedBy],
+    [ApprovedDate],
+    [DelUserID],
+    [DelDate],
+    [ApproveDelUserID],
+    [ApproveDelDate],
+    [creDate],
+    [updated_date_UTC],
+    [ApprovedDate_UTC],
+    [DelDate_UTC],
+    [ApproveDelDate_UTC],
+    [creDate_UTC],
+    [ent_num],
+    [spec_name_cn],
+    [BatchID],
+    [ISSBY_STATE],
+    [DOB],
+    [ApproveEditUserID],
+    [ApproveEditDate],
+    [ApproveEditDate_UTC]
 )
 SELECT 
-    spec_name, 
-    updated_date, 
-    remark, 
-    TaxID, 
-    IDENT, 
-    IDENT0, 
-    TaxIDCD, 
-    IDNUM, 
-    IssBy, 
-    DInd, 
-    creUserID, 
-    [STATE], 
-    ADDRESS, 
-    ent_num
-FROM BSADB.dbo.[你的備份表名稱];
+    [spec_name],
+    [updated_date],
+    [remark],
+    [TaxID],
+    [IDENT],
+    [IDENTO],
+    [TaxIDCD],
+    [IDNUM],
+    [IssBy],
+    [DInd],
+    [creUserID],
+    [STATE],
+    [ADDRESS],
+    [COUNTRY],
+    [GROUPID],
+    [SOURCE],
+    [EnterFlag],
+    [ApprovedBy],
+    [ApprovedDate],
+    [DelUserID],
+    [DelDate],
+    [ApproveDelUserID],
+    [ApproveDelDate],
+    [creDate],
+    [updated_date_UTC],
+    [ApprovedDate_UTC],
+    [DelDate_UTC],
+    [ApproveDelDate_UTC],
+    [creDate_UTC],
+    [ent_num],
+    [spec_name_cn],
+    [BatchID],
+    [ISSBY_STATE],
+    [DOB],
+    [ApproveEditUserID],
+    [ApproveEditDate],
+    [ApproveEditDate_UTC]
+FROM BSADB.dbo.OFAC_GLSpec_bak_20260817;
 
--- 4. 關閉 IDENTITY_INSERT
+-- 4. 關閉 Identity 手動寫入權限
 SET IDENTITY_INSERT BSADB.dbo.OFAC_GLSpec OFF;
 
-補充小建議
- * 在執行倒回或清空動作前，建議先確認備份表的筆數（SELECT COUNT(*) FROM [你的備份表名稱]）與原始資料一致。
- * 建議在執行還原的 SQL 外層包一個 BEGIN TRANSACTION 與 COMMIT / ROLLBACK，確認筆數正確無誤再 COMMIT，操作會更安全。
+-- 5. 確認還原筆數無誤後提交（若有問題可執行 ROLLBACK TRANSACTION;）
+COMMIT TRANSACTION;
+
