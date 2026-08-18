@@ -1,86 +1,222 @@
-你在 INSERT INTO 宣告欄位清單時不需要帶型態與長度（例如 [nvarchar](510)），且 SELECT 的欄位數量與順序必須和 INSERT 完全一致。
-以下為修正後的完整語法：
-SET IDENTITY_INSERT BSADB.dbo.OFAC_GLSpec_bak_20260817 ON;
-
-INSERT INTO BSADB.dbo.OFAC_GLSpec_bak_20260817 
-(
-    [spec_name],
-    [updated_date],
-    [remark],
-    [TaxID],
-    [IDENT],
-    [IDENTO],
-    [TaxIDCD],
-    [IDNUM],
-    [IssBy],
-    [DInd],
-    [creUserID],
-    [STATE],
-    [ADDRESS],
-    [COUNTRY],
-    [GROUPID],
-    [SOURCE],
-    [EnterFlag],
-    [ApprovedBy],
-    [ApprovedDate],
-    [DelUserID],
-    [DelDate],
-    [ApproveDelUserID],
-    [ApproveDelDate],
-    [creDate],
-    [updated_date_UTC],
-    [ApprovedDate_UTC],
-    [DelDate_UTC],
-    [ApproveDelDate_UTC],
-    [creDate_UTC],
-    [ent_num],
-    [spec_name_cn],
-    [BatchID],
-    [ISSBY_STATE],
-    [DOB],
-    [ApproveEditUserID],
-    [ApproveEditDate],
-    [ApproveEditDate_UTC]
+# ============================================
+# Input Path（固定寫死）
+# ============================================
+$folderPath = "D:\AML_Source\20251114_新光資轉\EXE\DTLBK"
+# baseline file
+$baselineFile = Join-Path $folderPath "AML_CHECK_SUM_DTLBK.csv"
+# ============================================
+# Output / Log
+# ============================================
+$basePath = Get-Location
+$outputFile = Join-Path $basePath "result_CHECK_SUM_DTLBK.csv"
+$logFile    = Join-Path $basePath "SKcheck_CHECK_SUM_DTLBK.log"
+# ============================================
+# 刪除舊檔
+# ============================================
+if (Test-Path $outputFile) {
+    Remove-Item $outputFile -Force
+}
+if (Test-Path $logFile) {
+    Remove-Item $logFile -Force
+}
+# ============================================
+# Log function
+# ============================================
+function Write-Log {
+    param([string]$msg)
+    $time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Add-Content -Path $logFile -Value "[$time] $msg"
+}
+# ============================================
+# Start
+# ============================================
+Write-Log "===== JOB START ====="
+Write-Log "Input Path: $folderPath"
+# ============================================
+# 檢查資料夾
+# ============================================
+if (!(Test-Path $folderPath)) {
+    Write-Log "ERROR: Input folder not found"
+    Write-Host "INPUT PATH NOT FOUND"
+    exit 1
+}
+# ============================================
+# 目標檔案
+# ============================================
+$fileList = @(
+    "AML_CHECK_SUM.csv",
+    "RM_OPEN_CASE.csv",
+    "CDC_OPEN_CASE.csv",
+    "BatchControl.Table.sql",
+    "DOC_CUST_LIST.Table.sql",
+    "SAR_Acct_Info.Table.sql",
+    "SAR_Case_Main.Table.sql",
+    "SAR_Case_Trxn_Branch.Table.sql",
+    "SAR_Case_Trxn_Date_Range.Table.sql",
+    "SAR_Conductor_Info.Table.sql",
+    "SAR_Matched_Scenarios.Table.sql",
+    "SAR_Suspect_Info.Table.sql",
+    "SAR_Trxn_Detail.Table.sql",
+    "SAR_Trxn_Detail_All.Table.sql",
+    "SAR_Trxn_Detail_T1200017.Table.sql",
+    "SAR_Trxn_Detail_T1200162.Table.sql",
+    "SAR_Trxn_Summary.Table.sql",
+    "SK_SAR_SuspiciousActivityCharacteristicsDim_TW_20260415.Table.sql"
 )
-SELECT 
-    [spec_name],
-    [updated_date],
-    [remark],
-    [TaxID],
-    [IDENT],
-    [IDENTO],
-    [TaxIDCD],
-    [IDNUM],
-    [IssBy],
-    [DInd],
-    [creUserID],
-    [STATE],
-    [ADDRESS],
-    [COUNTRY],
-    [GROUPID],
-    [SOURCE],
-    [EnterFlag],
-    [ApprovedBy],
-    [ApprovedDate],
-    [DelUserID],
-    [DelDate],
-    [ApproveDelUserID],
-    [ApproveDelDate],
-    [creDate],
-    [updated_date_UTC],
-    [ApprovedDate_UTC],
-    [DelDate_UTC],
-    [ApproveDelDate_UTC],
-    [creDate_UTC],
-    [ent_num],
-    [spec_name_cn],
-    [BatchID],
-    [ISSBY_STATE],
-    [DOB],
-    [ApproveEditUserID],
-    [ApproveEditDate],
-    [ApproveEditDate_UTC]
-FROM BSADB.dbo.OFAC_GLSpec;
+# ============================================
+# 只掃描 EXE 根目錄
+# ============================================
+$files = Get-ChildItem -Path $folderPath -File |
+    Where-Object { $fileList -contains $_.Name } |
+    Sort-Object Name
+Write-Log "Target File Count: $($files.Count)"
+foreach ($f in $files) {
+    Write-Log "FOUND FILE: $($f.FullName)"
+}
+if ($files.Count -eq 0) {
+    Write-Log "WARN: No target files found."
+}
+# ============================================
+# 產生 result.csv
+# ============================================
+Write-Log "===== Generating checksums ====="
+$actualResults = @{}
+$resultList = [System.Collections.Generic.List[string]]::new()
+foreach ($file in $files) {
+    try {
+        Write-Log "Processing: $($file.FullName)"
+        # 計算筆數
+        $lineCount = 0
+        $reader = New-Object System.IO.StreamReader($file.FullName)
+        while ($reader.ReadLine() -ne $null) {
+            $lineCount++
+        }
+        $reader.Close()
+        $reader.Dispose()
+        # MD5
+        $md5Hash = (
+            Get-FileHash `
+                -Path $file.FullName `
+                -Algorithm MD5
+        ).Hash.ToLowerInvariant()
+        $key = $file.Name.Trim().ToLowerInvariant()
+        $value = "$lineCount;$md5Hash"
+        $actualResults[$key] = $value
+        $resultList.Add(
+            "$($file.Name);$lineCount;$md5Hash"
+        )
+    }
+    catch {
+        Write-Log "ERROR: $($file.FullName)"
+        Write-Log $_.Exception.Message
+    }
+}
+$resultList |
+Out-File `
+    -FilePath $outputFile `
+    -Encoding utf8
+Write-Log "Generated result file: $outputFile"
+# ============================================
+# 比對 Baseline
+# ============================================
+Write-Log "===== Comparing with baseline ====="
+$hasError = $false
+if (!(Test-Path $baselineFile)) {
+    Write-Log "ERROR: Baseline not found"
+    Write-Host "BASELINE NOT FOUND"
+    exit 1
+}
+$baseline = @{}
+try {
+    Import-Csv `
+        -Path $baselineFile `
+        -Delimiter ";" `
+        -Header "FileName","Count","MD5" |
+    ForEach-Object {
+        if (
+            [string]::IsNullOrWhiteSpace($_.FileName)
+        ) {
+            return
+        }
+        $key = $_.FileName.Trim().ToLowerInvariant()
+        $value =
+            "$($_.Count.Trim());$($_.MD5.Trim().ToLowerInvariant())"
+        $baseline[$key] = $value
+    }
+}
+catch {
+    Write-Log "ERROR reading baseline"
+    Write-Log $_.Exception.Message
+    Write-Host "BASELINE FILE PARSE ERROR"
+    exit 1
+}
+# ============================================
+# Actual vs Baseline
+# ============================================
+foreach ($key in $actualResults.Keys) {
+    if ($baseline.ContainsKey($key)) {
+        if ($actualResults[$key] -eq $baseline[$key]) {
+            Write-Log "MATCH: $key"
+        }
+        else {
+            Write-Log "MISMATCH: $key"
+            Write-Log "  ACTUAL  : $($actualResults[$key])"
+            Write-Log "  EXPECTED: $($baseline[$key])"
+            $hasError = $true
+        }
+    }
+    else {
+        Write-Log "MISSING IN BASELINE: $key"
+        $hasError = $true
+    }
+}
+# ============================================
+# Baseline 有但資料夾沒有
+# ============================================
+foreach ($key in $baseline.Keys) {
+    if (-not $actualResults.ContainsKey($key)) {
+        Write-Log "MISSING IN FOLDER: $key"
+        $hasError = $true
+    }
+}
+# ============================================
+# End
+# ============================================
+Write-Log "===== JOB END ====="
+if ($hasError) {
+    Write-Log "RETURN CODE: 1 (FAILED)"
+    Write-Host "FAILED"
+    exit 1
+}
+else {
+    Write-Log "RETURN CODE: 0 (SUCCESS)"
+    Write-Host "SUCCESS"
+    exit 0
+}
 
-SET IDENTITY_INSERT BSADB.dbo.OFAC_GLSpec_bak_20260817 OFF;
+
+幫我修改一下
+改成他會去對 AML_CHECK_SUM.csv 這個檔案裏面的
+
+RM_OPEN_CASE.csv;7506;958ac26a737b44a3fb8192a42fb6e6b5
+CDC_OPEN_CASE.csv;2572;08f7910a9dadba7b81fdd974bfc792ee
+BatchControl.sql;3;8e6b739874051757ac686294d1790c3e
+SAR_Acct_Info.sql;9457;495c1c6dbe932404db5a97e8b489b845
+SAR_Case_Main.sql;3407;84254aaee8b4db92b97dabe229a99e36
+SAR_Case_Trxn_Branch.sql;4555;b3e88696a6721774d07451ca3633f511
+SAR_Case_Trxn_Date_Range.sql;3406;e4267efa920c923ec41327c3e107eb6c
+SAR_Conductor_Info.sql;198;83c9ad4f2c79e1a2d3287df7d4eca2f5
+SAR_Matched_Scenarios.sql;22420;b66946165d8ec0b1a4d04c8e4b5a43cb
+SAR_Suspect_Info.sql;3980;ae0abdc6f73e82000aefdfb0550acb02
+SAR_Trxn_Detail.sql;2091283;224db97cf4fc29c61e2577cc012418d8
+SAR_Trxn_Detail_All.sql;4179918;4fb58e2fcde73af600557e4905b21c89
+SAR_Trxn_Detail_T1200017.sql;2;351cc0ce84be76ddf4733487a1c2c4e9
+SAR_Trxn_Detail_T1200162.sql;2;351cc0ce84be76ddf4733487a1c2c4e9
+SAR_Trxn_Summary.sql;6006;fab8d5fff5aa25531268ebc7f293f245
+SK_SAR_SuspiciousActivityCharacteristicsDim_TW_20260415.Table.sql;938;d13e29ed747d4bd2fbb48d8dfe0a8ff3
+
+
+這些
+
+如果都一樣代表正確 就輸出1  不正確輸出0 
 
