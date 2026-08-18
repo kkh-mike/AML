@@ -3,8 +3,8 @@
 # ==========================================
 
 $SourceFiles = @(
-    "D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\TSEST\SAR_Trxn_Detail_All.sql",
-    "D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\TSEST\SAR_Trxn_Detail.sql"
+    "D:\AML\SK\EXE\DTLBK\SAR_Trxn_Detail_All.sql",
+    "D:\AML\SK\EXE\DTLBK\SAR_Trxn_Detail.sql"
 )
 
 # 每個檔案 50,000 個 SQL 指令
@@ -145,3 +145,16 @@ Write-Host "========================================="
 Write-Host ""
 
 Read-Host "按 Enter 結束"
+
+
+
+幫我修改一下 
+先清空資料夾
+然後開始作業
+分割出來的一句讀取的檔案名稱去儲存
+例如SAR_Trxn_Detail_1
+例如SAR_Trxn_Detail_All_1
+
+如果都沒有錯不用按任意鍵
+直接輸出1 
+如果有錯輸出0
