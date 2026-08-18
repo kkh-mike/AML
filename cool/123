@@ -1,21 +1,5 @@
-[2026-08-18 11:26:57] ============================================
-[2026-08-18 11:26:57] JOB START
-[2026-08-18 11:26:57] ============================================
-[2026-08-18 11:26:57] Input Path   : D:\AML_Source\20251114_新光資轉\EXE\DTLBK
-[2026-08-18 11:26:57] Baseline File: D:\AML_Source\20251114_新光資轉\EXE\DTLBK\AML_CHECK_SUM.csv
-[2026-08-18 11:26:57] Output Path  : D:\AML_Source\20251114_新光資轉\EXE\DTLBK
-[2026-08-18 11:26:57] Result File  : D:\AML_Source\20251114_新光資轉\EXE\DTLBK\CHECK_RESULT_DTLBK.txt
-[2026-08-18 11:26:57] Log File     : D:\AML_Source\20251114_新光資轉\EXE\DTLBK\SKcheck_CHECK_SUM_DTLBK.log
-[2026-08-18 11:26:57] ============================================
-[2026-08-18 11:26:57] ============================================
-[2026-08-18 11:26:57] ERROR TYPE : FILE NOT FOUND
-[2026-08-18 11:26:57] FILE       : SK_SAR_SuspiciousActivityCharacteristicsDim_TW_20260415.Table.sql
-[2026-08-18 11:26:57] PATH       : D:\AML_Source\20251114_新光資轉\EXE\DTLBK\SK_SAR_SuspiciousActivityCharacteristicsDim_TW_20260415.Table.sql
-[2026-08-18 11:26:57] ============================================
-[2026-08-18 11:28:11] ============================================
-[2026-08-18 11:28:11] FINAL RESULT: 0
-[2026-08-18 11:28:11] STATUS      : FAILED
-[2026-08-18 11:28:11] ============================================
-
-
-為啥找不到 我明明路徑上有這個檔案
+Get-ChildItem "D:\AML_Source\20251114_新光資轉\EXE\DTLBK" -File |
+Where-Object {
+    $_.Name -like "*SK_SAR_SuspiciousActivityCharacteristicsDim*"
+} |
+Select-Object Name, FullName
