@@ -1,279 +1,147 @@
-
-
 # ==========================================
-# 1. 基本設定
+# 1. 基本設定（支援多個來源檔案）
 # ==========================================
 
-$SourceFile = "D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\TSEST\SAR_Trxn_Detail_All.sql"
-
-$BaseFolder   = Split-Path $SourceFile -Parent
-$OutputFolder = Join-Path $BaseFolder "Split"
-$LogFolder    = Join-Path $BaseFolder "Log"
-
-
+$SourceFiles = @(
+    "D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\TSEST\SAR_Trxn_Detail_All.sql",
+    "D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\TSEST\SAR_Trxn_Detail.sql"
+)
 
 # 每個檔案 50,000 個 SQL 指令
 $RowsPerFile = 50000
 
 
 # ==========================================
-# 2. 檢查來源 SQL
+# 2. 迴圈處理各個 SQL 檔案
 # ==========================================
 
-if (!(Test-Path $SourceFile)) {
+foreach ($SourceFile in $SourceFiles) {
+
+    $FileNameWithoutExt = [System.IO.Path]::GetFileNameWithoutExtension($SourceFile)
+    $BaseFolder         = Split-Path $SourceFile -Parent
+    $OutputFolder       = Join-Path $BaseFolder "Split"
+    $LogFolder          = Join-Path $BaseFolder "Log"
 
     Write-Host ""
-    Write-Host "找不到來源 SQL：" -ForegroundColor Red
-    Write-Host $SourceFile
+    Write-Host "=========================================" -ForegroundColor Cyan
+    Write-Host "開始處理檔案：$FileNameWithoutExt.sql" -ForegroundColor Cyan
+    Write-Host "=========================================" -ForegroundColor Cyan
+
+
+    # 檢查來源 SQL
+    if (!(Test-Path $SourceFile)) {
+        Write-Host "找不到來源 SQL：$SourceFile" -ForegroundColor Red
+        continue
+    }
+
+    # 建立資料夾
+    if (!(Test-Path $OutputFolder)) {
+        New-Item -ItemType Directory -Path $OutputFolder | Out-Null
+    }
+    if (!(Test-Path $LogFolder)) {
+        New-Item -ItemType Directory -Path $LogFolder | Out-Null
+    }
+
+
+    # 清除舊的 SQL / Log (針對當前檔案前綴)
+    Write-Host "清除舊的 ${FileNameWithoutExt}_*.sql / log..."
+    Get-ChildItem -Path $OutputFolder -Filter "${FileNameWithoutExt}_*.sql" -ErrorAction SilentlyContinue | Remove-Item -Force
+    Get-ChildItem -Path $LogFolder -Filter "${FileNameWithoutExt}_*.log" -ErrorAction SilentlyContinue | Remove-Item -Force
+    Write-Host "清除完成。"
     Write-Host ""
 
-    Read-Host "按 Enter 結束"
-    exit
-}
 
+    # 開始分割 SQL
+    $Reader = New-Object System.IO.StreamReader(
+        $SourceFile,
+        [System.Text.Encoding]::Default,
+        $true
+    )
 
-# ==========================================
-# 3. 建立資料夾
-# ==========================================
+    $FileIndex = 1
+    $RowCount  = 0
+    $TotalRows = 0
+    $Writer    = $null
 
-if (!(Test-Path $OutputFolder)) {
-    New-Item -ItemType Directory -Path $OutputFolder | Out-Null
-}
+    try {
+        while (($Line = $Reader.ReadLine()) -ne $null) {
 
-if (!(Test-Path $LogFolder)) {
-    New-Item -ItemType Directory -Path $LogFolder | Out-Null
-}
+            # 建立新的分割檔案
+            if ($RowCount -eq 0) {
+                if ($Writer -ne $null) {
+                    $Writer.Close()
+                    $Writer.Dispose()
+                    $Writer = $null
+                }
 
+                $OutputFileName = "${FileNameWithoutExt}_$FileIndex.sql"
+                $OutputFile     = Join-Path $OutputFolder $OutputFileName
 
-# ==========================================
-# 4. 清除舊的 SQL / Log
-# ==========================================
+                $Writer = New-Object System.IO.StreamWriter(
+                    $OutputFile,
+                    $false,
+                    [System.Text.Encoding]::UTF8
+                )
 
-Write-Host ""
-Write-Host "========================================="
-Write-Host "清除舊的 SQL / Log"
-Write-Host "========================================="
+                # 每個檔案指定 Database
+                $Writer.WriteLine("USE SARCaseWarehouse;")
+                $Writer.WriteLine("")
 
-Get-ChildItem `
-    -Path $OutputFolder `
-    -Filter "SAR_Trxn_Detail_All_*.sql" `
-    -ErrorAction SilentlyContinue |
-    Remove-Item -Force
-
-Get-ChildItem `
-    -Path $LogFolder `
-    -Filter "SAR_Trxn_Detail_All_*.log" `
-    -ErrorAction SilentlyContinue |
-    Remove-Item -Force
-
-Write-Host "清除完成。"
-Write-Host ""
-
-
-# ==========================================
-# 5. 開始分割 SQL
-# ==========================================
-
-Write-Host "========================================="
-Write-Host "開始分割 SQL"
-Write-Host "========================================="
-Write-Host ""
-Write-Host "來源：$SourceFile"
-Write-Host "每個檔案：$RowsPerFile 個 SQL 指令"
-Write-Host ""
-
-
-# 使用 StreamReader
-# 不會一次把整個 SQL 載入記憶體
-$Reader = New-Object System.IO.StreamReader(
-    $SourceFile,
-    [System.Text.Encoding]::Default,
-    $true
-)
-
-$FileIndex = 1
-$RowCount  = 0
-$TotalRows = 0
-$Writer    = $null
-
-
-try {
-
-    while (($Line = $Reader.ReadLine()) -ne $null) {
-
-
-        # ==========================================
-        # 建立新的 SQL 檔案
-        # ==========================================
-
-        if ($RowCount -eq 0) {
-
-            if ($Writer -ne $null) {
-
-                $Writer.Close()
-                $Writer.Dispose()
-
-                $Writer = $null
+                Write-Host "建立：$OutputFileName"
+                $FileIndex++
             }
 
+            # 寫入 SQL 行
+            $Writer.WriteLine($Line)
+            $RowCount++
+            $TotalRows++
 
-            $OutputFile = Join-Path `
-                $OutputFolder `
-                "SAR_Trxn_Detail_All_$FileIndex.sql"
+            # 每 50,000 個指令切一份
+            if ($RowCount -eq $RowsPerFile) {
+                $Writer.Close()
+                $Writer.Dispose()
+                $Writer = $null
 
-
-            $Writer = New-Object System.IO.StreamWriter(
-                $OutputFile,
-                $false,
-                [System.Text.Encoding]::UTF8
-            )
-
-
-            # 每個檔案指定 Database
-            $Writer.WriteLine("USE SARCaseWarehouse;")
-            $Writer.WriteLine("")
-
-
-            Write-Host "建立：SAR_Trxn_Detail_All_$FileIndex.sql"
-
-
-            $FileIndex++
+                Write-Host "  → 完成 $RowsPerFile 個 SQL"
+                $RowCount = 0
+            }
         }
 
-
-        # ==========================================
-        # 原始 SQL 原封不動寫入
-        # ==========================================
-
-        $Writer.WriteLine($Line)
-
-        $RowCount++
-        $TotalRows++
-
-
-        # ==========================================
-        # 每 50,000 個 SQL 指令切一份
-        # ==========================================
-
-        if ($RowCount -eq $RowsPerFile) {
-
+        # 處理剩餘的末尾檔案
+        if ($Writer -ne $null) {
             $Writer.Close()
             $Writer.Dispose()
-
             $Writer = $null
-
-            Write-Host "  → 完成 $RowsPerFile 個 SQL"
-
-            $RowCount = 0
+            Write-Host "  → 完成最後 $RowCount 個 SQL"
+        }
+    }
+    finally {
+        if ($Reader -ne $null) {
+            $Reader.Close()
+            $Reader.Dispose()
+        }
+        if ($Writer -ne $null) {
+            $Writer.Close()
+            $Writer.Dispose()
         }
     }
 
-
-    # ==========================================
-    # 處理最後一個檔案
-    # ==========================================
-
-    if ($Writer -ne $null) {
-
-        $Writer.Close()
-        $Writer.Dispose()
-
-        $Writer = $null
-
-        Write-Host "  → 完成最後 $RowCount 個 SQL"
-    }
-
-}
-finally {
-
-    if ($Reader -ne $null) {
-
-        $Reader.Close()
-        $Reader.Dispose()
-    }
-
-    if ($Writer -ne $null) {
-
-        $Writer.Close()
-        $Writer.Dispose()
-    }
-}
-
-
-# ==========================================
-# 6. 計算總檔案數
-# ==========================================
-
-$TotalFiles = $FileIndex - 1
-
-
-Write-Host ""
-Write-Host "========================================="
-Write-Host "SQL 分割完成"
-Write-Host "========================================="
-
-Write-Host "總 SQL 指令：$TotalRows"
-Write-Host "每檔 SQL 指令：$RowsPerFile"
-Write-Host "總檔案數：$TotalFiles"
-
-Write-Host ""
-Write-Host "SQL 輸出位置："
-Write-Host $OutputFolder
-Write-Host ""
-
-
-# ==========================================
-# 8. 最終結果
-# ==========================================
-
-Write-Host ""
-Write-Host ""
-Write-Host "========================================="
-Write-Host "全部處理完成"
-Write-Host "========================================="
-
-Write-Host ""
-Write-Host "總 SQL 指令：$TotalRows"
-Write-Host "總 SQL 檔案：$TotalFiles"
-Write-Host "成功：$Success"
-Write-Host "失敗：$Failed"
-
-Write-Host ""
-Write-Host "SQL 檔案位置："
-Write-Host $OutputFolder
-
-Write-Host ""
-Write-Host "Log 檔案位置："
-Write-Host $LogFolder
-
-
-if ($Failed -eq 0) {
-
+    $TotalFiles = $FileIndex - 1
     Write-Host ""
-    Write-Host "========================================="
-    Write-Host "全部 SQL 執行成功！"
-    Write-Host "=========================================" `
-        -ForegroundColor Green
-
-}
-else {
-
-    Write-Host ""
-    Write-Host "========================================="
-    Write-Host "有 SQL 執行失敗！"
-    Write-Host "請檢查對應 Log。"
-    Write-Host "=========================================" `
-        -ForegroundColor Red
+    Write-Host "[$FileNameWithoutExt.sql] 分割完成！" -ForegroundColor Green
+    Write-Host "  - 總 SQL 行數：$TotalRows"
+    Write-Host "  - 切割檔案數：$TotalFiles"
 }
 
+
+# ==========================================
+# 3. 結束
+# ==========================================
 
 Write-Host ""
+Write-Host "========================================="
+Write-Host "清單內所有 SQL 檔案皆已處理完畢！" -ForegroundColor Green
+Write-Host "========================================="
+Write-Host ""
+
 Read-Host "按 Enter 結束"
-
-
-
-
-因為我還有一個檔案要做
-D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\TSEST\SAR_Trxn_Detail.sql
-
-幫我改
