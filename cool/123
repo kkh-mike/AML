@@ -1,9 +1,111 @@
+# ==========================================
+# 1. 基本連線與路徑設定
+# ==========================================
+$Server     = "amlist"
+$User       = "aml"
+$Password   = "aml1234"
 
-$Server   = "amlist"
-$User     = "aml"
-$Password = "aml1234"
+# 存放 .sql 檔案的目標資料夾 (可依實際路徑調整)
+$SqlFolder  = "D:\AML\SK\EXE\DTLBK\Split"
+$LogFolder  = Join-Path (Split-Path $SqlFolder -Parent) "Log"
 
+# 確保 Log 目錄存在
+if (!(Test-Path $LogFolder)) {
+    New-Item -ItemType Directory -Path $LogFolder | Out-Null
+}
 
-我要跑資料夾內所有的.sql
+$Timestamp   = Get-Date -Format "yyyyMMdd_HHmmss"
+$LogFilePath = Join-Path $LogFolder "ExecuteSql_$Timestamp.log"
 
-幫我用power shell 寫
+$HasError    = $false
+
+# ==========================================
+# 2. Log 輸出函式
+# ==========================================
+function Write-Log {
+    param (
+        [string]$Message,
+        [string]$Level = "INFO"
+    )
+    $LogTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $LogLine = "[$LogTime] [$Level] $Message"
+    
+    Write-Output $LogLine
+    $LogLine | Out-File -FilePath $LogFilePath -Append -Encoding UTF8
+}
+
+# ==========================================
+# 3. 檢查目錄並取得所有 .sql 檔案
+# ==========================================
+Write-Log "========== 開始批次執行 SQL 檔案 =========="
+Write-Log "目標 Server : $Server"
+Write-Log "執行路徑    : $SqlFolder"
+
+if (!(Test-Path $SqlFolder)) {
+    Write-Log "錯誤：找不到 SQL 目錄 ($SqlFolder)" "ERROR"
+    exit 1
+}
+
+# 取得目錄下所有 .sql 檔並依檔名排序
+$SqlFiles = Get-ChildItem -Path $SqlFolder -Filter "*.sql" | Sort-Object Name
+
+if ($SqlFiles.Count -eq 0) {
+    Write-Log "警告：目錄內沒有任何 .sql 檔案" "WARN"
+    exit 0
+}
+
+Write-Log "共找到 $($SqlFiles.Count) 個 SQL 檔案準備執行"
+
+# ==========================================
+# 4. 迴圈執行各個 SQL 檔案 (透過 sqlcmd)
+# ==========================================
+foreach ($file in $SqlFiles) {
+    $filePath = $file.FullName
+    Write-Log "------------------------------------------"
+    Write-Log "正在執行: $($file.Name)"
+
+    # sqlcmd 參數說明:
+    # -S 伺服器, -U 帳號, -P 密碼, -i 輸入檔案, -b 發生錯誤時回傳非零代碼
+    $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $processInfo.FileName = "sqlcmd.exe"
+    $processInfo.Arguments = "-S `"$Server`" -U `"$User`" -P `"$Password`" -i `"$filePath`" -b"
+    $processInfo.RedirectStandardOutput = $true
+    $processInfo.RedirectStandardError  = $true
+    $processInfo.UseShellExecute        = $false
+    $processInfo.CreateNoWindow         = $true
+
+    $process = [System.Diagnostics.Process]::Start($processInfo)
+    $stdout = $process.StandardOutput.ReadToEnd()
+    $stderr = $process.StandardError.ReadToEnd()
+    $process.WaitForExit()
+
+    # 輸出 SQL 執行內容 Log
+    if (-not [string]::IsNullOrWhiteSpace($stdout)) {
+        Write-Log "SQL Output:`n$stdout"
+    }
+
+    if ($process.ExitCode -ne 0 -or -not [string]::IsNullOrWhiteSpace($stderr)) {
+        $HasError = $true
+        Write-Log "執行失敗: $($file.Name)" "ERROR"
+        if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+            Write-Log "Error Message:`n$stderr" "ERROR"
+        }
+        # 遇到錯誤直接中斷後續執行
+        break
+    }
+    else {
+        Write-Log "執行成功: $($file.Name)"
+    }
+}
+
+# ==========================================
+# 5. 結束狀態回傳
+# ==========================================
+Write-Log "=========================================="
+if ($HasError) {
+    Write-Log "批次執行失敗中斷 (Exit Code: 1)" "ERROR"
+    exit 1
+} else {
+    Write-Log "所有 SQL 檔案均順利執行完成 (Exit Code: 0)" "INFO"
+    exit 0
+}
