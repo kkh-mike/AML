@@ -1,16 +1,136 @@
-# 1. 載入 PatriotOfficer 相關的服務元件 DLL
-Add-Type -Path "D:\AML\SK\EXE\PatriotOfficer.Services.dll"
-# 若有介面或依賴元件也可一併載入
-# Add-Type -Path "D:\AML\SK\EXE\PatriotOfficer.Services.Interfaces.dll"
+# ==========================================
+# 1. 基本設定
+# ==========================================
 
-# 2. 建立 DefaultEncryptionService 物件實例
-$encService = New-Object PatriotOfficer.Services.DefaultEncryptionService
+$SourceFiles = @(
+    "D:\AML\SK\EXE\DTLBK\SAR_Trxn_Detail_All.sql",
+    "D:\AML\SK\EXE\DTLBK\SAR_Trxn_Detail.sql"
+)
 
-# 3. 填入你的加密連線字串
-$cipherText = "SU6j1K3QlxIXmfXVbW59pmdhbnY4VbgpWJaO2UpgqqRQ0XYNHt7/hNgSkglYt5PdGfWrR7Eu00JGdtJF6gC4QJ2f97K/+fCE9VIowB7Od2JOkSmIpXno2AqlDo3YIeDF7s5gLy6s0pHvvfqL9YMSAjhP7uI6aZFCRMFdzEVQ5F3V93ssJmd4+6fjhCZWyi23wCO4NBsB+ItKnVHX5uJ+QfX2Bv24T/5CFKmqu2Otw/pSmp1SkAVjiiA/AgD0/pcIokzoHmg1XqmAwK/8qYisKoimdZht88kM/Rsd7Y7dI6M="
+$RowsPerFile = 50000
+$HasError = $false
 
-# 4. 呼叫解密方法 (通常為 Decrypt 或 DecryptString)
-$plainText = $encService.Decrypt($cipherText)
 
-# 5. 輸出解密後的連線資訊
-Write-Output $plainText
+# ==========================================
+# 2. 事前建立並清空資料夾
+# ==========================================
+
+try {
+    # 取得共用目錄（以清單第一個檔案所在目錄為主）
+    $BaseFolder   = Split-Path $SourceFiles[0] -Parent
+    $OutputFolder = Join-Path $BaseFolder "Split"
+    $LogFolder    = Join-Path $BaseFolder "Log"
+
+    # 確保資料夾存在
+    if (!(Test-Path $OutputFolder)) { New-Item -ItemType Directory -Path $OutputFolder | Out-Null }
+    if (!(Test-Path $LogFolder))    { New-Item -ItemType Directory -Path $LogFolder | Out-Null }
+
+    # 清空資料夾所有內容
+    Get-ChildItem -Path $OutputFolder -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+    Get-ChildItem -Path $LogFolder -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+}
+catch {
+    $HasError = $true
+}
+
+
+# ==========================================
+# 3. 迴圈處理各個 SQL 檔案
+# ==========================================
+
+if (-not $HasError) {
+    foreach ($SourceFile in $SourceFiles) {
+
+        # 檢查來源 SQL 是否存在
+        if (!(Test-Path $SourceFile)) {
+            $HasError = $true
+            break
+        }
+
+        $FileNameWithoutExt = [System.IO.Path]::GetFileNameWithoutExtension($SourceFile)
+
+        $Reader = $null
+        $Writer = $null
+
+        try {
+            $Reader = New-Object System.IO.StreamReader(
+                $SourceFile,
+                [System.Text.Encoding]::Default,
+                $true
+            )
+
+            $FileIndex = 1
+            $RowCount  = 0
+
+            while (($Line = $Reader.ReadLine()) -ne $null) {
+
+                # 建立新的分割檔案
+                if ($RowCount -eq 0) {
+                    if ($Writer -ne $null) {
+                        $Writer.Close()
+                        $Writer.Dispose()
+                        $Writer = $null
+                    }
+
+                    $OutputFileName = "${FileNameWithoutExt}_$FileIndex.sql"
+                    $OutputFile     = Join-Path $OutputFolder $OutputFileName
+
+                    $Writer = New-Object System.IO.StreamWriter(
+                        $OutputFile,
+                        $false,
+                        [System.Text.Encoding]::UTF8
+                    )
+
+                    # 指定 Database
+                    $Writer.WriteLine("USE SARCaseWarehouse;")
+                    $Writer.WriteLine("")
+
+                    $FileIndex++
+                }
+
+                $Writer.WriteLine($Line)
+                $RowCount++
+
+                # 達到每檔行數上限時關閉檔案
+                if ($RowCount -eq $RowsPerFile) {
+                    $Writer.Close()
+                    $Writer.Dispose()
+                    $Writer = $null
+                    $RowCount = 0
+                }
+            }
+        }
+        catch {
+            $HasError = $true
+            break
+        }
+        finally {
+            if ($Writer -ne $null) {
+                $Writer.Close()
+                $Writer.Dispose()
+            }
+            if ($Reader -ne $null) {
+                $Reader.Close()
+                $Reader.Dispose()
+            }
+        }
+    }
+}
+
+
+# ==========================================
+# 4. 輸出執行狀態
+# ==========================================
+
+if ($HasError) {
+    Write-Output 0
+    exit 0
+} else {
+    Write-Output 1
+    exit 1
+}
+
+
+
+幫我修改一下
+然後他最後應該要把執行完的log 寫到 log folder 裡面
