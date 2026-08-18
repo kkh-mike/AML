@@ -166,3 +166,12 @@ if ($HasError) {
     Write-Log "作業全部順利完成 (Exit Code: 0)" "INFO"
     exit 0
 }
+
+
+
+
+需要在幫我改一下
+
+切出來的每個sql 最上面都要有
+USE [SARCaseWarehouse]
+GO
