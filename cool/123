@@ -1,6 +1,16 @@
-<add name="GCMAINDB" connectionString="SU6j1K3QlxIXmfXVbW59pmdhbnY4VbgpWJaO2UpgqqRQ0XYNHt7/hNgSkglYt5PdGfWrR7Eu00JGdtJF6gC4QJ2f97K/+fCE9VIowB7Od2JOkSmIpXno2AqlDo3YIeDF7s5gLy6s0pHvvfqL9YMSAjhP7uI6aZFCRMFdzEVQ5F3V93ssJmd4+6fjhCZWyi23wCO4NBsB+ItKnVHX5uJ+QfX2Bv24T/5CFKmqu2Otw/pSmp1SkAVjiiA/AgD0/pcIokzoHmg1XqmAwK/8qYisKoimdZht88kM/Rsd7Y7dI6M=" />
+# 1. 載入 PatriotOfficer 相關的服務元件 DLL
+Add-Type -Path "D:\AML\SK\EXE\PatriotOfficer.Services.dll"
+# 若有介面或依賴元件也可一併載入
+# Add-Type -Path "D:\AML\SK\EXE\PatriotOfficer.Services.Interfaces.dll"
 
+# 2. 建立 DefaultEncryptionService 物件實例
+$encService = New-Object PatriotOfficer.Services.DefaultEncryptionService
 
-我可以用powershell 解析然後取得我要的資料庫
+# 3. 填入你的加密連線字串
+$cipherText = "SU6j1K3QlxIXmfXVbW59pmdhbnY4VbgpWJaO2UpgqqRQ0XYNHt7/hNgSkglYt5PdGfWrR7Eu00JGdtJF6gC4QJ2f97K/+fCE9VIowB7Od2JOkSmIpXno2AqlDo3YIeDF7s5gLy6s0pHvvfqL9YMSAjhP7uI6aZFCRMFdzEVQ5F3V93ssJmd4+6fjhCZWyi23wCO4NBsB+ItKnVHX5uJ+QfX2Bv24T/5CFKmqu2Otw/pSmp1SkAVjiiA/AgD0/pcIokzoHmg1XqmAwK/8qYisKoimdZht88kM/Rsd7Y7dI6M="
 
-登入資訊?
+# 4. 呼叫解密方法 (通常為 Decrypt 或 DecryptString)
+$plainText = $encService.Decrypt($cipherText)
+
+# 5. 輸出解密後的連線資訊
+Write-Output $plainText
