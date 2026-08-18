@@ -1,14 +1,397 @@
-[2026-08-18 11:15:43] ERROR: FILE NOT FOUND
-[2026-08-18 11:15:43] File: SK_SAR_SuspiciousActivityCharacteristicsDim_TW_20260415.Table.sql
-[2026-08-18 11:15:43] Path: D:\AML_Source\20251114_新光資轉\EXE\DTLBK\SK_SAR_SuspiciousActivityCharacteristicsDim_TW_20260415.Table.sql
-[2026-08-18 11:16:56] ============================================
-[2026-08-18 11:16:56] FINAL RESULT: 0
-[2026-08-18 11:16:56] STATUS: FAILED
-[2026-08-18 11:16:56] ============================================
+# ============================================
+# Input Path
+# ============================================
+$folderPath = "D:\AML_Source\20251114_新光資轉\EXE\DTLBK"
 
-log
-我需要知道為什麼FAILED   是數量 還是MD5 還是檔案名稱
+# ============================================
+# Baseline File
+# ============================================
+$baselineFile = Join-Path `
+    $folderPath `
+    "AML_CHECK_SUM.csv"
 
-然後為什麼我的log 那些是寫在 這個位置D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾
+# ============================================
+# Output Path
+# ★ 這裡定義所有輸出檔案的位置
+# ============================================
+$outputPath = "D:\AML_Source\20251114_新光資轉\EXE\DTLBK"
 
-定義在哪裡?
+# ============================================
+# Output Files
+# ============================================
+$resultFile = Join-Path `
+    $outputPath `
+    "CHECK_RESULT_DTLBK.txt"
+
+$logFile = Join-Path `
+    $outputPath `
+    "SKcheck_CHECK_SUM_DTLBK.log"
+
+# ============================================
+# 刪除舊結果
+# ============================================
+if (Test-Path $resultFile) {
+    Remove-Item $resultFile -Force
+}
+
+if (Test-Path $logFile) {
+    Remove-Item $logFile -Force
+}
+
+# ============================================
+# Log Function
+# ============================================
+function Write-Log {
+    param(
+        [string]$msg
+    )
+
+    $time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+
+    Add-Content `
+        -Path $logFile `
+        -Value "[$time] $msg"
+}
+
+# ============================================
+# Start
+# ============================================
+Write-Log "============================================"
+Write-Log "JOB START"
+Write-Log "============================================"
+Write-Log "Input Path   : $folderPath"
+Write-Log "Baseline File: $baselineFile"
+Write-Log "Output Path  : $outputPath"
+Write-Log "Result File  : $resultFile"
+Write-Log "Log File     : $logFile"
+Write-Log "============================================"
+
+# ============================================
+# 預設結果
+# 0 = FAILED
+# 1 = SUCCESS
+# ============================================
+$hasError = $false
+
+# ============================================
+# 檢查 Input Folder
+# ============================================
+if (!(Test-Path $folderPath)) {
+
+    Write-Log "ERROR TYPE : INPUT FOLDER NOT FOUND"
+    Write-Log "PATH       : $folderPath"
+
+    $hasError = $true
+}
+
+# ============================================
+# 檢查 Baseline
+# ============================================
+if (!$hasError -and !(Test-Path $baselineFile)) {
+
+    Write-Log "ERROR TYPE : BASELINE FILE NOT FOUND"
+    Write-Log "FILE       : AML_CHECK_SUM.csv"
+    Write-Log "PATH       : $baselineFile"
+
+    $hasError = $true
+}
+
+# ============================================
+# 如果基本環境就錯誤
+# ============================================
+if ($hasError) {
+
+    "0" | Out-File `
+        -FilePath $resultFile `
+        -Encoding utf8
+
+    Write-Log "============================================"
+    Write-Log "FINAL RESULT: 0"
+    Write-Log "STATUS      : FAILED"
+    Write-Log "============================================"
+
+    Write-Host "0"
+
+    exit 1
+}
+
+# ============================================
+# 讀取 AML_CHECK_SUM.csv
+# ============================================
+$baseline = @{}
+
+try {
+
+    $lines = Get-Content `
+        -Path $baselineFile `
+        -Encoding utf8
+
+    foreach ($line in $lines) {
+
+        # 忽略空白行
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+
+        # ====================================
+        # 分割
+        # ====================================
+        $parts = $line.Split(";")
+
+        if ($parts.Count -lt 3) {
+
+            Write-Log "============================================"
+            Write-Log "ERROR TYPE : BASELINE FORMAT ERROR"
+            Write-Log "LINE       : $line"
+            Write-Log "============================================"
+
+            $hasError = $true
+
+            continue
+        }
+
+        $fileName = $parts[0].Trim()
+        $countText = $parts[1].Trim()
+        $md5 = $parts[2].Trim().ToLowerInvariant()
+
+        # ====================================
+        # 檢查檔名
+        # ====================================
+        if ([string]::IsNullOrWhiteSpace($fileName)) {
+
+            Write-Log "============================================"
+            Write-Log "ERROR TYPE : EMPTY FILE NAME"
+            Write-Log "LINE       : $line"
+            Write-Log "============================================"
+
+            $hasError = $true
+
+            continue
+        }
+
+        # ====================================
+        # Count 轉數字
+        # ====================================
+        $expectedCount = 0
+
+        if (-not [int64]::TryParse(
+            $countText,
+            [ref]$expectedCount
+        )) {
+
+            Write-Log "============================================"
+            Write-Log "ERROR TYPE : INVALID COUNT"
+            Write-Log "FILE       : $fileName"
+            Write-Log "COUNT      : $countText"
+            Write-Log "============================================"
+
+            $hasError = $true
+
+            continue
+        }
+
+        # ====================================
+        # MD5 格式
+        # ====================================
+        if ($md5 -notmatch '^[0-9a-f]{32}$') {
+
+            Write-Log "============================================"
+            Write-Log "ERROR TYPE : INVALID MD5"
+            Write-Log "FILE       : $fileName"
+            Write-Log "MD5        : $md5"
+            Write-Log "============================================"
+
+            $hasError = $true
+
+            continue
+        }
+
+        # ====================================
+        # 存入 Baseline
+        # ====================================
+        $key = $fileName.ToLowerInvariant()
+
+        $baseline[$key] = @{
+            FileName = $fileName
+            Count    = $expectedCount
+            MD5      = $md5
+        }
+    }
+
+}
+catch {
+
+    Write-Log "============================================"
+    Write-Log "ERROR TYPE : BASELINE READ ERROR"
+    Write-Log "MESSAGE    : $($_.Exception.Message)"
+    Write-Log "============================================"
+
+    $hasError = $true
+}
+
+# ============================================
+# Baseline 有問題
+# ============================================
+if ($hasError) {
+
+    "0" | Out-File `
+        -FilePath $resultFile `
+        -Encoding utf8
+
+    Write-Log "FINAL RESULT: 0"
+    Write-Log "STATUS      : FAILED"
+
+    Write-Host "0"
+
+    exit 1
+}
+
+# ============================================
+# 開始逐檔比對
+# ============================================
+foreach ($key in $baseline.Keys) {
+
+    $expectedFileName = $baseline[$key].FileName
+    $expectedCount    = $baseline[$key].Count
+    $expectedMD5      = $baseline[$key].MD5
+
+    $actualFile = Join-Path `
+        $folderPath `
+        $expectedFileName
+
+    # ========================================
+    # 1. 檢查檔案是否存在
+    # ========================================
+    if (!(Test-Path $actualFile)) {
+
+        Write-Log "============================================"
+        Write-Log "ERROR TYPE : FILE NOT FOUND"
+        Write-Log "FILE       : $expectedFileName"
+        Write-Log "PATH       : $actualFile"
+        Write-Log "============================================"
+
+        $hasError = $true
+
+        continue
+    }
+
+    # ========================================
+    # 2. 計算 Count + MD5
+    # ========================================
+    try {
+
+        # ------------------------------------
+        # Count
+        # ------------------------------------
+        $actualCount = 0
+
+        $reader = New-Object System.IO.StreamReader(
+            $actualFile
+        )
+
+        try {
+
+            while ($reader.ReadLine() -ne $null) {
+                $actualCount++
+            }
+
+        }
+        finally {
+
+            $reader.Close()
+            $reader.Dispose()
+        }
+
+        # ------------------------------------
+        # MD5
+        # ------------------------------------
+        $actualMD5 = (
+            Get-FileHash `
+                -Path $actualFile `
+                -Algorithm MD5
+        ).Hash.ToLowerInvariant()
+
+        # ====================================
+        # Count 比對
+        # ====================================
+        if ($actualCount -ne $expectedCount) {
+
+            Write-Log "============================================"
+            Write-Log "ERROR TYPE : COUNT MISMATCH"
+            Write-Log "FILE       : $expectedFileName"
+            Write-Log "EXPECTED   : $expectedCount"
+            Write-Log "ACTUAL     : $actualCount"
+            Write-Log "============================================"
+
+            $hasError = $true
+        }
+
+        # ====================================
+        # MD5 比對
+        # ====================================
+        if ($actualMD5 -ne $expectedMD5) {
+
+            Write-Log "============================================"
+            Write-Log "ERROR TYPE : MD5 MISMATCH"
+            Write-Log "FILE       : $expectedFileName"
+            Write-Log "EXPECTED   : $expectedMD5"
+            Write-Log "ACTUAL     : $actualMD5"
+            Write-Log "============================================"
+
+            $hasError = $true
+        }
+
+    }
+    catch {
+
+        Write-Log "============================================"
+        Write-Log "ERROR TYPE : FILE PROCESS ERROR"
+        Write-Log "FILE       : $expectedFileName"
+        Write-Log "MESSAGE    : $($_.Exception.Message)"
+        Write-Log "============================================"
+
+        $hasError = $true
+    }
+}
+
+# ============================================
+# Final Result
+# ============================================
+Write-Log "============================================"
+
+if ($hasError) {
+
+    # ========================================
+    # 有任何錯誤
+    # ========================================
+    "0" | Out-File `
+        -FilePath $resultFile `
+        -Encoding utf8
+
+    Write-Log "FINAL RESULT: 0"
+    Write-Log "STATUS      : FAILED"
+
+    Write-Log "============================================"
+
+    Write-Host "0"
+
+    exit 1
+}
+else {
+
+    # ========================================
+    # 全部正確
+    # ========================================
+    "1" | Out-File `
+        -FilePath $resultFile `
+        -Encoding utf8
+
+    Write-Log "FINAL RESULT: 1"
+    Write-Log "STATUS      : SUCCESS"
+
+    Write-Log "============================================"
+
+    Write-Host "1"
+
+    exit 0
+}
