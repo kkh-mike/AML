@@ -1,436 +1,166 @@
-# ============================================
-# Input Path
-# ============================================
-$folderPath = "D:\AML_Source\20251114_新光資轉\EXE\DTLBK"
-
-# Baseline
-$baselineFile = Join-Path $folderPath "AML_CHECK_SUM.csv"
-
-# ============================================
-# Output / Log
-# ============================================
-$basePath = Get-Location
-
-$resultDetailFile = Join-Path $basePath "result_CHECK_SUM_DTLBK.csv"
-$resultFile       = Join-Path $basePath "CHECK_RESULT_DTLBK.txt"
-$logFile          = Join-Path $basePath "SKcheck_CHECK_SUM_DTLBK.log"
-
-# ============================================
-# 刪除舊檔
-# ============================================
-foreach ($file in @(
-    $resultDetailFile,
-    $resultFile,
-    $logFile
-)) {
-    if (Test-Path $file) {
-        Remove-Item $file -Force
-    }
-}
-
-# ============================================
-# Log Function
-# ============================================
-function Write-Log {
-    param(
-        [string]$msg
-    )
-
-    $time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-
-    Add-Content `
-        -Path $logFile `
-        -Value "[$time] $msg"
-}
-
-# ============================================
-# Start
-# ============================================
-Write-Log "============================================"
-Write-Log "===== JOB START ====="
-Write-Log "Input Path   : $folderPath"
-Write-Log "Baseline File: $baselineFile"
-Write-Log "============================================"
-
-# ============================================
-# 預設結果 = 0
-# 只有全部成功才會改成 1
-# ============================================
-$finalResult = 0
-
-# ============================================
-# 檢查資料夾
-# ============================================
-if (!(Test-Path $folderPath)) {
-
-    Write-Log "ERROR: Input folder not found"
-
-    "0" | Out-File `
-        -FilePath $resultFile `
-        -Encoding utf8
-
-    Write-Host "0"
-
-    exit 1
-}
-
-# ============================================
-# 檢查 Baseline
-# ============================================
-if (!(Test-Path $baselineFile)) {
-
-    Write-Log "ERROR: AML_CHECK_SUM.csv not found"
-
-    "0" | Out-File `
-        -FilePath $resultFile `
-        -Encoding utf8
-
-    Write-Host "0"
-
-    exit 1
-}
-
-# ============================================
-# 讀取 Baseline
-# ============================================
-Write-Log "===== Reading AML_CHECK_SUM.csv ====="
-
-$baseline = @{}
-
-try {
-
-    $lines = Get-Content `
-        -Path $baselineFile `
-        -Encoding utf8
-
-    foreach ($line in $lines) {
-
-        # 忽略空白行
-        if ([string]::IsNullOrWhiteSpace($line)) {
-            continue
-        }
-
-        $parts = $line.Split(";")
-
-        if ($parts.Count -lt 3) {
-
-            Write-Log "ERROR: Invalid baseline format"
-            Write-Log "LINE: $line"
-
-            "0" | Out-File `
-                -FilePath $resultFile `
-                -Encoding utf8
-
-            Write-Host "0"
-
-            exit 1
-        }
-
-        $fileName = $parts[0].Trim()
-        $count    = $parts[1].Trim()
-        $md5      = $parts[2].Trim().ToLowerInvariant()
-
-        $countNumber = 0
-
-        if (-not [int64]::TryParse(
-            $count,
-            [ref]$countNumber
-        )) {
-
-            Write-Log "ERROR: Invalid Count"
-            Write-Log "FileName: $fileName"
-            Write-Log "Count   : $count"
-
-            "0" | Out-File `
-                -FilePath $resultFile `
-                -Encoding utf8
-
-            Write-Host "0"
-
-            exit 1
-        }
-
-        $key = $fileName.ToLowerInvariant()
-
-        $baseline[$key] = @{
-            FileName = $fileName
-            Count    = $countNumber
-            MD5      = $md5
-        }
-
-    }
-
-}
-catch {
-
-    Write-Log "ERROR reading AML_CHECK_SUM.csv"
-    Write-Log $_.Exception.Message
-
-    "0" | Out-File `
-        -FilePath $resultFile `
-        -Encoding utf8
-
-    Write-Host "0"
-
-    exit 1
-}
-
-Write-Log "Baseline Count: $($baseline.Count)"
-
-# ============================================
-# 建立詳細結果 CSV
-# ============================================
-"FileName;ExpectedCount;ActualCount;CountResult;ExpectedMD5;ActualMD5;MD5Result;Result" |
-    Out-File `
-        -FilePath $resultDetailFile `
-        -Encoding utf8
-
-# ============================================
-# 開始逐檔比對
-# ============================================
-Write-Log "============================================"
-Write-Log "===== START CHECK ====="
-Write-Log "============================================"
-
-$hasError = $false
-
-foreach ($key in $baseline.Keys) {
-
-    $expectedFileName = $baseline[$key].FileName
-    $expectedCount    = $baseline[$key].Count
-    $expectedMD5      = $baseline[$key].MD5
-
-    $actualFile = Join-Path `
-        $folderPath `
-        $expectedFileName
-
-    Write-Log "--------------------------------------------"
-    Write-Log "CHECK FILE: $expectedFileName"
-
-    # ========================================
-    # 預設
-    # ========================================
-    $actualCount = ""
-    $actualMD5   = ""
-
-    $countResult = "FAIL"
-    $md5Result   = "FAIL"
-    $fileResult  = "FAIL"
-
-    # ========================================
-    # 檔案不存在
-    # ========================================
-    if (!(Test-Path $actualFile)) {
-
-        Write-Log "ERROR: FILE NOT FOUND"
-        Write-Log "Path: $actualFile"
-
-        $hasError = $true
-
-        $resultLine = "$expectedFileName;$expectedCount;;FAIL;$expectedMD5;;FAIL;FILE_NOT_FOUND"
-
-        Add-Content `
-            -Path $resultDetailFile `
-            -Value $resultLine
-
-        continue
-    }
-
-    try {
-
-        # ====================================
-        # 計算行數
-        # ====================================
-        $actualCount = 0
-
-        $reader = New-Object System.IO.StreamReader(
-            $actualFile
-        )
-
-        try {
-
-            while ($reader.ReadLine() -ne $null) {
-                $actualCount++
-            }
-
-        }
-        finally {
-
-            $reader.Close()
-            $reader.Dispose()
-        }
-
-        # ====================================
-        # 計算 MD5
-        # ====================================
-        $actualMD5 = (
-            Get-FileHash `
-                -Path $actualFile `
-                -Algorithm MD5
-        ).Hash.ToLowerInvariant()
-
-        # ====================================
-        # Count 比對
-        # ====================================
-        if ($actualCount -eq $expectedCount) {
-
-            $countResult = "OK"
-
-            Write-Log "COUNT : OK"
-            Write-Log "  EXPECTED = $expectedCount"
-            Write-Log "  ACTUAL   = $actualCount"
-
-        }
-        else {
-
-            $countResult = "FAIL"
-
-            Write-Log "COUNT : FAIL"
-            Write-Log "  EXPECTED = $expectedCount"
-            Write-Log "  ACTUAL   = $actualCount"
-
-            $hasError = $true
-        }
-
-        # ====================================
-        # MD5 比對
-        # ====================================
-        if ($actualMD5 -eq $expectedMD5) {
-
-            $md5Result = "OK"
-
-            Write-Log "MD5   : OK"
-            Write-Log "  EXPECTED = $expectedMD5"
-            Write-Log "  ACTUAL   = $actualMD5"
-
-        }
-        else {
-
-            $md5Result = "FAIL"
-
-            Write-Log "MD5   : FAIL"
-            Write-Log "  EXPECTED = $expectedMD5"
-            Write-Log "  ACTUAL   = $actualMD5"
-
-            $hasError = $true
-        }
-
-        # ====================================
-        # 最終檔案結果
-        # ====================================
-        if (
-            ($countResult -eq "OK") -and
-            ($md5Result -eq "OK")
-        ) {
-
-            $fileResult = "MATCH"
-
-            Write-Log "RESULT: MATCH"
-
-        }
-        else {
-
-            $fileResult = "MISMATCH"
-
-            Write-Log "RESULT: MISMATCH"
-        }
-
-        # ====================================
-        # 寫入詳細結果
-        # ====================================
-        $resultLine = @(
-            $expectedFileName
-            $expectedCount
-            $actualCount
-            $countResult
-            $expectedMD5
-            $actualMD5
-            $md5Result
-            $fileResult
-        ) -join ";"
-
-        Add-Content `
-            -Path $resultDetailFile `
-            -Value $resultLine
-
-    }
-    catch {
-
-        $hasError = $true
-
-        Write-Log "ERROR PROCESSING FILE"
-        Write-Log $_.Exception.Message
-
-        $resultLine = @(
-            $expectedFileName
-            $expectedCount
-            ""
-            "ERROR"
-            $expectedMD5
-            ""
-            "ERROR"
-            "ERROR"
-        ) -join ";"
-
-        Add-Content `
-            -Path $resultDetailFile `
-            -Value $resultLine
-    }
-}
-
-# ============================================
-# 最終結果
-# ============================================
-Write-Log "============================================"
-Write-Log "===== FINAL RESULT ====="
-Write-Log "============================================"
-
-if ($hasError) {
-
-    $finalResult = 0
-
-    Write-Log "FINAL RESULT: 0"
-    Write-Log "STATUS: FAILED"
-
-}
-else {
-
-    $finalResult = 1
-
-    Write-Log "FINAL RESULT: 1"
-    Write-Log "STATUS: SUCCESS"
-}
-
-# ============================================
-# 輸出 1 / 0
-# ============================================
-$finalResult |
-    Out-File `
-        -FilePath $resultFile `
-        -Encoding utf8
-
-Write-Log "Result File: $resultFile"
-Write-Log "Detail File: $resultDetailFile"
-Write-Log "Log File   : $logFile"
-
-Write-Log "===== JOB END ====="
-
-# ============================================
-# Console
-# ============================================
-Write-Host ""
-Write-Host "============================================"
-Write-Host "FINAL RESULT: $finalResult"
-Write-Host "============================================"
-Write-Host ""
-Write-Host "Detail : $resultDetailFile"
-Write-Host "Result : $resultFile"
-Write-Host "Log    : $logFile"
-Write-Host ""
-
-if ($finalResult -eq 1) {
-    exit 0
-}
-else {
-    exit 1
-}
+[2026-08-18 11:08:46] ============================================
+[2026-08-18 11:08:46] ===== JOB START =====
+[2026-08-18 11:08:46] Input Path   : D:\AML_Source\20251114_新光資轉\EXE\DTLBK
+[2026-08-18 11:08:46] Baseline File: D:\AML_Source\20251114_新光資轉\EXE\DTLBK\AML_CHECK_SUM.csv
+[2026-08-18 11:08:46] ============================================
+[2026-08-18 11:08:46] ===== Reading AML_CHECK_SUM.csv =====
+[2026-08-18 11:08:46] Baseline Count: 16
+[2026-08-18 11:08:46] ============================================
+[2026-08-18 11:08:46] ===== START CHECK =====
+[2026-08-18 11:08:46] ============================================
+[2026-08-18 11:08:46] --------------------------------------------
+[2026-08-18 11:08:46] CHECK FILE: SK_SAR_SuspiciousActivityCharacteristicsDim_TW_20260415.Table.sql
+[2026-08-18 11:08:46] ERROR: FILE NOT FOUND
+[2026-08-18 11:08:46] Path: D:\AML_Source\20251114_新光資轉\EXE\DTLBK\SK_SAR_SuspiciousActivityCharacteristicsDim_TW_20260415.Table.sql
+[2026-08-18 11:08:46] --------------------------------------------
+[2026-08-18 11:08:46] CHECK FILE: CDC_OPEN_CASE.csv
+[2026-08-18 11:08:46] COUNT : OK
+[2026-08-18 11:08:46]   EXPECTED = 2572
+[2026-08-18 11:08:46]   ACTUAL   = 2572
+[2026-08-18 11:08:46] MD5   : OK
+[2026-08-18 11:08:46]   EXPECTED = 08f7910a9dadba7b81fdd974bfc792ee
+[2026-08-18 11:08:46]   ACTUAL   = 08f7910a9dadba7b81fdd974bfc792ee
+[2026-08-18 11:08:46] RESULT: MATCH
+[2026-08-18 11:08:46] --------------------------------------------
+[2026-08-18 11:08:46] CHECK FILE: RM_OPEN_CASE.csv
+[2026-08-18 11:08:46] COUNT : OK
+[2026-08-18 11:08:46]   EXPECTED = 7506
+[2026-08-18 11:08:46]   ACTUAL   = 7506
+[2026-08-18 11:08:46] MD5   : OK
+[2026-08-18 11:08:46]   EXPECTED = 958ac26a737b44a3fb8192a42fb6e6b5
+[2026-08-18 11:08:46]   ACTUAL   = 958ac26a737b44a3fb8192a42fb6e6b5
+[2026-08-18 11:08:46] RESULT: MATCH
+[2026-08-18 11:08:46] --------------------------------------------
+[2026-08-18 11:08:46] CHECK FILE: SAR_Trxn_Detail.sql
+[2026-08-18 11:09:10] COUNT : OK
+[2026-08-18 11:09:10]   EXPECTED = 2091283
+[2026-08-18 11:09:10]   ACTUAL   = 2091283
+[2026-08-18 11:09:10] MD5   : OK
+[2026-08-18 11:09:10]   EXPECTED = 224db97cf4fc29c61e2577cc012418d8
+[2026-08-18 11:09:10]   ACTUAL   = 224db97cf4fc29c61e2577cc012418d8
+[2026-08-18 11:09:10] RESULT: MATCH
+[2026-08-18 11:09:10] --------------------------------------------
+[2026-08-18 11:09:10] CHECK FILE: BatchControl.sql
+[2026-08-18 11:09:10] COUNT : OK
+[2026-08-18 11:09:10]   EXPECTED = 3
+[2026-08-18 11:09:10]   ACTUAL   = 3
+[2026-08-18 11:09:10] MD5   : OK
+[2026-08-18 11:09:10]   EXPECTED = 8e6b739874051757ac686294d1790c3e
+[2026-08-18 11:09:10]   ACTUAL   = 8e6b739874051757ac686294d1790c3e
+[2026-08-18 11:09:10] RESULT: MATCH
+[2026-08-18 11:09:10] --------------------------------------------
+[2026-08-18 11:09:10] CHECK FILE: SAR_Trxn_Summary.sql
+[2026-08-18 11:09:10] COUNT : OK
+[2026-08-18 11:09:10]   EXPECTED = 6006
+[2026-08-18 11:09:10]   ACTUAL   = 6006
+[2026-08-18 11:09:10] MD5   : OK
+[2026-08-18 11:09:10]   EXPECTED = fab8d5fff5aa25531268ebc7f293f245
+[2026-08-18 11:09:10]   ACTUAL   = fab8d5fff5aa25531268ebc7f293f245
+[2026-08-18 11:09:10] RESULT: MATCH
+[2026-08-18 11:09:10] --------------------------------------------
+[2026-08-18 11:09:10] CHECK FILE: SAR_Case_Main.sql
+[2026-08-18 11:09:10] COUNT : OK
+[2026-08-18 11:09:10]   EXPECTED = 3407
+[2026-08-18 11:09:10]   ACTUAL   = 3407
+[2026-08-18 11:09:10] MD5   : OK
+[2026-08-18 11:09:10]   EXPECTED = 84254aaee8b4db92b97dabe229a99e36
+[2026-08-18 11:09:10]   ACTUAL   = 84254aaee8b4db92b97dabe229a99e36
+[2026-08-18 11:09:10] RESULT: MATCH
+[2026-08-18 11:09:10] --------------------------------------------
+[2026-08-18 11:09:10] CHECK FILE: SAR_Case_Trxn_Branch.sql
+[2026-08-18 11:09:10] COUNT : OK
+[2026-08-18 11:09:10]   EXPECTED = 4555
+[2026-08-18 11:09:10]   ACTUAL   = 4555
+[2026-08-18 11:09:10] MD5   : OK
+[2026-08-18 11:09:10]   EXPECTED = b3e88696a6721774d07451ca3633f511
+[2026-08-18 11:09:10]   ACTUAL   = b3e88696a6721774d07451ca3633f511
+[2026-08-18 11:09:10] RESULT: MATCH
+[2026-08-18 11:09:10] --------------------------------------------
+[2026-08-18 11:09:10] CHECK FILE: SAR_Case_Trxn_Date_Range.sql
+[2026-08-18 11:09:10] COUNT : OK
+[2026-08-18 11:09:10]   EXPECTED = 3406
+[2026-08-18 11:09:10]   ACTUAL   = 3406
+[2026-08-18 11:09:10] MD5   : OK
+[2026-08-18 11:09:10]   EXPECTED = e4267efa920c923ec41327c3e107eb6c
+[2026-08-18 11:09:10]   ACTUAL   = e4267efa920c923ec41327c3e107eb6c
+[2026-08-18 11:09:10] RESULT: MATCH
+[2026-08-18 11:09:10] --------------------------------------------
+[2026-08-18 11:09:10] CHECK FILE: SAR_Matched_Scenarios.sql
+[2026-08-18 11:09:11] COUNT : OK
+[2026-08-18 11:09:11]   EXPECTED = 22420
+[2026-08-18 11:09:11]   ACTUAL   = 22420
+[2026-08-18 11:09:11] MD5   : OK
+[2026-08-18 11:09:11]   EXPECTED = b66946165d8ec0b1a4d04c8e4b5a43cb
+[2026-08-18 11:09:11]   ACTUAL   = b66946165d8ec0b1a4d04c8e4b5a43cb
+[2026-08-18 11:09:11] RESULT: MATCH
+[2026-08-18 11:09:11] --------------------------------------------
+[2026-08-18 11:09:11] CHECK FILE: SAR_Trxn_Detail_All.sql
+[2026-08-18 11:09:59] COUNT : OK
+[2026-08-18 11:09:59]   EXPECTED = 4179918
+[2026-08-18 11:09:59]   ACTUAL   = 4179918
+[2026-08-18 11:09:59] MD5   : OK
+[2026-08-18 11:09:59]   EXPECTED = 4fb58e2fcde73af600557e4905b21c89
+[2026-08-18 11:09:59]   ACTUAL   = 4fb58e2fcde73af600557e4905b21c89
+[2026-08-18 11:09:59] RESULT: MATCH
+[2026-08-18 11:09:59] --------------------------------------------
+[2026-08-18 11:09:59] CHECK FILE: SAR_Conductor_Info.sql
+[2026-08-18 11:09:59] COUNT : OK
+[2026-08-18 11:09:59]   EXPECTED = 198
+[2026-08-18 11:09:59]   ACTUAL   = 198
+[2026-08-18 11:09:59] MD5   : OK
+[2026-08-18 11:10:00]   EXPECTED = 83c9ad4f2c79e1a2d3287df7d4eca2f5
+[2026-08-18 11:10:00]   ACTUAL   = 83c9ad4f2c79e1a2d3287df7d4eca2f5
+[2026-08-18 11:10:00] RESULT: MATCH
+[2026-08-18 11:10:00] --------------------------------------------
+[2026-08-18 11:10:00] CHECK FILE: SAR_Suspect_Info.sql
+[2026-08-18 11:10:00] COUNT : OK
+[2026-08-18 11:10:00]   EXPECTED = 3980
+[2026-08-18 11:10:00]   ACTUAL   = 3980
+[2026-08-18 11:10:00] MD5   : OK
+[2026-08-18 11:10:00]   EXPECTED = ae0abdc6f73e82000aefdfb0550acb02
+[2026-08-18 11:10:00]   ACTUAL   = ae0abdc6f73e82000aefdfb0550acb02
+[2026-08-18 11:10:00] RESULT: MATCH
+[2026-08-18 11:10:00] --------------------------------------------
+[2026-08-18 11:10:00] CHECK FILE: SAR_Acct_Info.sql
+[2026-08-18 11:10:00] COUNT : OK
+[2026-08-18 11:10:00]   EXPECTED = 9457
+[2026-08-18 11:10:00]   ACTUAL   = 9457
+[2026-08-18 11:10:00] MD5   : OK
+[2026-08-18 11:10:00]   EXPECTED = 495c1c6dbe932404db5a97e8b489b845
+[2026-08-18 11:10:00]   ACTUAL   = 495c1c6dbe932404db5a97e8b489b845
+[2026-08-18 11:10:00] RESULT: MATCH
+[2026-08-18 11:10:00] --------------------------------------------
+[2026-08-18 11:10:00] CHECK FILE: SAR_Trxn_Detail_T1200162.sql
+[2026-08-18 11:10:00] COUNT : OK
+[2026-08-18 11:10:00]   EXPECTED = 2
+[2026-08-18 11:10:00]   ACTUAL   = 2
+[2026-08-18 11:10:00] MD5   : OK
+[2026-08-18 11:10:00]   EXPECTED = 351cc0ce84be76ddf4733487a1c2c4e9
+[2026-08-18 11:10:00]   ACTUAL   = 351cc0ce84be76ddf4733487a1c2c4e9
+[2026-08-18 11:10:00] RESULT: MATCH
+[2026-08-18 11:10:00] --------------------------------------------
+[2026-08-18 11:10:00] CHECK FILE: SAR_Trxn_Detail_T1200017.sql
+[2026-08-18 11:10:00] COUNT : OK
+[2026-08-18 11:10:00]   EXPECTED = 2
+[2026-08-18 11:10:00]   ACTUAL   = 2
+[2026-08-18 11:10:00] MD5   : OK
+[2026-08-18 11:10:00]   EXPECTED = 351cc0ce84be76ddf4733487a1c2c4e9
+[2026-08-18 11:10:00]   ACTUAL   = 351cc0ce84be76ddf4733487a1c2c4e9
+[2026-08-18 11:10:00] RESULT: MATCH
+[2026-08-18 11:10:00] ============================================
+[2026-08-18 11:10:00] ===== FINAL RESULT =====
+[2026-08-18 11:10:00] ============================================
+[2026-08-18 11:10:00] FINAL RESULT: 0
+[2026-08-18 11:10:00] STATUS: FAILED
+[2026-08-18 11:10:00] Result File: D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\CHECK_RESULT_DTLBK.txt
+[2026-08-18 11:10:00] Detail File: D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\result_CHECK_SUM_DTLBK.csv
+[2026-08-18 11:10:00] Log File   : D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\SKcheck_CHECK_SUM_DTLBK.log
+[2026-08-18 11:10:00] ===== JOB END =====
+
+
+我應該都match 吧
+為什麼輸出是0 
+
+我是如果對的話輸出要給 1  
+
+如果有錯才要顯示錯誤訊log訊息
