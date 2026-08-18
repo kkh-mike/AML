@@ -8,7 +8,35 @@ $SourceFiles = @(
 )
 
 $RowsPerFile = 50000
-$HasError = $false
+$HasError    = $false
+$ErrorMessage = ""
+
+# 取得共用目錄與 Log/Output 路徑
+$BaseFolder   = Split-Path $SourceFiles[0] -Parent
+$OutputFolder = Join-Path $BaseFolder "Split"
+$LogFolder    = Join-Path $BaseFolder "Log"
+
+# 產生帶有時間戳記的 Log 檔名
+$Timestamp   = Get-Date -Format "yyyyMMdd_HHmmss"
+$LogFilePath = Join-Path $LogFolder "SplitJob_$Timestamp.log"
+
+# 定義 Log 輸出函式 (同時輸出到 Console 與 Log 檔案)
+function Write-Log {
+    param (
+        [string]$Message,
+        [string]$Level = "INFO"
+    )
+    $LogTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $LogLine = "[$LogTime] [$Level] $Message"
+    
+    # 輸出至 Console (Control-M Output 可見)
+    Write-Output $LogLine
+    
+    # 寫入實體 Log 檔
+    if (Test-Path $LogFolder) {
+        $LogLine | Out-File -FilePath $LogFilePath -Append -Encoding UTF8
+    }
+}
 
 
 # ==========================================
@@ -16,21 +44,21 @@ $HasError = $false
 # ==========================================
 
 try {
-    # 取得共用目錄（以清單第一個檔案所在目錄為主）
-    $BaseFolder   = Split-Path $SourceFiles[0] -Parent
-    $OutputFolder = Join-Path $BaseFolder "Split"
-    $LogFolder    = Join-Path $BaseFolder "Log"
-
     # 確保資料夾存在
     if (!(Test-Path $OutputFolder)) { New-Item -ItemType Directory -Path $OutputFolder | Out-Null }
     if (!(Test-Path $LogFolder))    { New-Item -ItemType Directory -Path $LogFolder | Out-Null }
 
-    # 清空資料夾所有內容
+    # 開始記錄
+    Write-Log "========== 開始執行 SQL 檔案分割作業 =========="
+
+    # 清空 Output 資料夾所有內容 (Log 資料夾建議保留歷史記錄，或可視需求僅清空舊檔案)
+    Write-Log "正在清空輸出目錄: $OutputFolder"
     Get-ChildItem -Path $OutputFolder -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
-    Get-ChildItem -Path $LogFolder -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
 }
 catch {
     $HasError = $true
+    $ErrorMessage = $_.Exception.Message
+    Write-Log "初始化目錄發生錯誤: $ErrorMessage" "ERROR"
 }
 
 
@@ -44,10 +72,13 @@ if (-not $HasError) {
         # 檢查來源 SQL 是否存在
         if (!(Test-Path $SourceFile)) {
             $HasError = $true
+            $ErrorMessage = "來源檔案不存在: $SourceFile"
+            Write-Log $ErrorMessage "ERROR"
             break
         }
 
         $FileNameWithoutExt = [System.IO.Path]::GetFileNameWithoutExtension($SourceFile)
+        Write-Log "開始處理檔案: $SourceFile"
 
         $Reader = $null
         $Writer = $null
@@ -59,8 +90,9 @@ if (-not $HasError) {
                 $true
             )
 
-            $FileIndex = 1
-            $RowCount  = 0
+            $FileIndex  = 1
+            $RowCount   = 0
+            $TotalRows  = 0
 
             while (($Line = $Reader.ReadLine()) -ne $null) {
 
@@ -90,6 +122,7 @@ if (-not $HasError) {
 
                 $Writer.WriteLine($Line)
                 $RowCount++
+                $TotalRows++
 
                 # 達到每檔行數上限時關閉檔案
                 if ($RowCount -eq $RowsPerFile) {
@@ -99,9 +132,13 @@ if (-not $HasError) {
                     $RowCount = 0
                 }
             }
+
+            Write-Log "檔案 [$SourceFile] 分割完成，共讀取 $TotalRows 行，產出 $($FileIndex - 1) 個分割檔"
         }
         catch {
             $HasError = $true
+            $ErrorMessage = "分割檔案時發生錯誤 ($SourceFile): $($_.Exception.Message)"
+            Write-Log $ErrorMessage "ERROR"
             break
         }
         finally {
@@ -119,18 +156,13 @@ if (-not $HasError) {
 
 
 # ==========================================
-# 4. 輸出執行狀態
+# 4. 輸出執行狀態與結束代碼 (Control-M 判定標準)
 # ==========================================
 
 if ($HasError) {
-    Write-Output 0
-    exit 0
-} else {
-    Write-Output 1
+    Write-Log "作業失敗結束 (Exit Code: 1)" "ERROR"
     exit 1
+} else {
+    Write-Log "作業全部順利完成 (Exit Code: 0)" "INFO"
+    exit 0
 }
-
-
-
-幫我修改一下
-然後他最後應該要把執行完的log 寫到 log folder 裡面
