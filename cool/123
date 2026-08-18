@@ -51,7 +51,7 @@ try {
     # 開始記錄
     Write-Log "========== 開始執行 SQL 檔案分割作業 =========="
 
-    # 清空 Output 資料夾所有內容 (Log 資料夾建議保留歷史記錄，或可視需求僅清空舊檔案)
+    # 清空 Output 資料夾所有內容
     Write-Log "正在清空輸出目錄: $OutputFolder"
     Get-ChildItem -Path $OutputFolder -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
 }
@@ -113,8 +113,9 @@ if (-not $HasError) {
                         [System.Text.Encoding]::UTF8
                     )
 
-                    # 指定 Database
-                    $Writer.WriteLine("USE SARCaseWarehouse;")
+                    # 指定 Database 及 Batch 分隔符號
+                    $Writer.WriteLine("USE [SARCaseWarehouse]")
+                    $Writer.WriteLine("GO")
                     $Writer.WriteLine("")
 
                     $FileIndex++
@@ -166,12 +167,3 @@ if ($HasError) {
     Write-Log "作業全部順利完成 (Exit Code: 0)" "INFO"
     exit 0
 }
-
-
-
-
-需要在幫我改一下
-
-切出來的每個sql 最上面都要有
-USE [SARCaseWarehouse]
-GO
