@@ -1,3 +1,6 @@
+這裡已將比對邏輯全面升級為多重副檔名與名稱容錯機制：
+ * 無論 CSV 記錄的是 .sql、.Table.sql 或 .csv，若預設路徑找不到，腳本會自動在資料夾中比對同主檔名的 .sql、.Table.sql 或 .csv 實體檔案。
+ * 只要 AML_CHECK_SUM.csv 裡有列出的每一筆紀錄（包含 SQL 與 CSV），全部都會依序執行行數（Count）與 MD5 完整性比對。
 # ============================================
 # Input Path
 # ============================================
@@ -12,7 +15,6 @@ $baselineFile = Join-Path `
 
 # ============================================
 # Output Path
-# ★ 這裡定義所有輸出檔案的位置
 # ============================================
 $outputPath = "D:\AML_Source\20251114_新光資轉\EXE\DTLBK"
 
@@ -66,21 +68,14 @@ Write-Log "Result File  : $resultFile"
 Write-Log "Log File     : $logFile"
 Write-Log "============================================"
 
-# ============================================
-# 預設結果
-# 0 = FAILED
-# 1 = SUCCESS
-# ============================================
 $hasError = $false
 
 # ============================================
 # 檢查 Input Folder
 # ============================================
 if (!(Test-Path $folderPath)) {
-
     Write-Log "ERROR TYPE : INPUT FOLDER NOT FOUND"
     Write-Log "PATH       : $folderPath"
-
     $hasError = $true
 }
 
@@ -88,30 +83,22 @@ if (!(Test-Path $folderPath)) {
 # 檢查 Baseline
 # ============================================
 if (!$hasError -and !(Test-Path $baselineFile)) {
-
     Write-Log "ERROR TYPE : BASELINE FILE NOT FOUND"
     Write-Log "FILE       : AML_CHECK_SUM.csv"
     Write-Log "PATH       : $baselineFile"
-
     $hasError = $true
 }
 
 # ============================================
-# 如果基本環境就錯誤
+# 基本環境錯誤處理
 # ============================================
 if ($hasError) {
-
-    "0" | Out-File `
-        -FilePath $resultFile `
-        -Encoding utf8
-
+    "0" | Out-File -FilePath $resultFile -Encoding utf8
     Write-Log "============================================"
     Write-Log "FINAL RESULT: 0"
     Write-Log "STATUS      : FAILED"
     Write-Log "============================================"
-
     Write-Host "0"
-
     exit 1
 }
 
@@ -121,133 +108,84 @@ if ($hasError) {
 $baseline = @{}
 
 try {
-
-    $lines = Get-Content `
-        -Path $baselineFile `
-        -Encoding utf8
+    $lines = Get-Content -Path $baselineFile -Encoding utf8
 
     foreach ($line in $lines) {
-
-        # 忽略空白行
         if ([string]::IsNullOrWhiteSpace($line)) {
             continue
         }
 
-        # ====================================
-        # 分割
-        # ====================================
         $parts = $line.Split(";")
 
         if ($parts.Count -lt 3) {
-
             Write-Log "============================================"
             Write-Log "ERROR TYPE : BASELINE FORMAT ERROR"
             Write-Log "LINE       : $line"
             Write-Log "============================================"
-
             $hasError = $true
-
             continue
         }
 
-        $fileName = $parts[0].Trim()
+        $fileName  = $parts[0].Trim()
         $countText = $parts[1].Trim()
-        $md5 = $parts[2].Trim().ToLowerInvariant()
+        $md5       = $parts[2].Trim().ToLowerInvariant()
 
-        # ====================================
-        # 檢查檔名
-        # ====================================
         if ([string]::IsNullOrWhiteSpace($fileName)) {
-
             Write-Log "============================================"
             Write-Log "ERROR TYPE : EMPTY FILE NAME"
             Write-Log "LINE       : $line"
             Write-Log "============================================"
-
             $hasError = $true
-
             continue
         }
 
-        # ====================================
-        # Count 轉數字
-        # ====================================
         $expectedCount = 0
-
-        if (-not [int64]::TryParse(
-            $countText,
-            [ref]$expectedCount
-        )) {
-
+        if (-not [int64]::TryParse($countText, [ref]$expectedCount)) {
             Write-Log "============================================"
             Write-Log "ERROR TYPE : INVALID COUNT"
             Write-Log "FILE       : $fileName"
             Write-Log "COUNT      : $countText"
             Write-Log "============================================"
-
             $hasError = $true
-
             continue
         }
 
-        # ====================================
-        # MD5 格式
-        # ====================================
         if ($md5 -notmatch '^[0-9a-f]{32}$') {
-
             Write-Log "============================================"
             Write-Log "ERROR TYPE : INVALID MD5"
             Write-Log "FILE       : $fileName"
             Write-Log "MD5        : $md5"
             Write-Log "============================================"
-
             $hasError = $true
-
             continue
         }
 
-        # ====================================
-        # 存入 Baseline
-        # ====================================
         $key = $fileName.ToLowerInvariant()
-
         $baseline[$key] = @{
             FileName = $fileName
             Count    = $expectedCount
             MD5      = $md5
         }
     }
-
 }
 catch {
-
     Write-Log "============================================"
     Write-Log "ERROR TYPE : BASELINE READ ERROR"
     Write-Log "MESSAGE    : $($_.Exception.Message)"
     Write-Log "============================================"
-
     $hasError = $true
 }
 
-# ============================================
-# Baseline 有問題
-# ============================================
 if ($hasError) {
-
-    "0" | Out-File `
-        -FilePath $resultFile `
-        -Encoding utf8
-
+    "0" | Out-File -FilePath $resultFile -Encoding utf8
     Write-Log "FINAL RESULT: 0"
     Write-Log "STATUS      : FAILED"
-
     Write-Host "0"
-
     exit 1
 }
 
 # ============================================
-# 開始逐檔比對
+# 開始逐檔比對 (支援 SQL & CSV 自動尋找相應檔案)
 # ============================================
 foreach ($key in $baseline.Keys) {
 
@@ -255,101 +193,98 @@ foreach ($key in $baseline.Keys) {
     $expectedCount    = $baseline[$key].Count
     $expectedMD5      = $baseline[$key].MD5
 
-    $actualFile = Join-Path `
-        $folderPath `
-        $expectedFileName
+    $targetFile = $null
 
-    # ========================================
-    # 1. 檢查檔案是否存在
-    # ========================================
-    if (!(Test-Path $actualFile)) {
+    # 1. 直接比對原始檔名
+    $directPath = Join-Path $folderPath $expectedFileName
+    if (Test-Path $directPath) {
+        $targetFile = $directPath
+    }
+    else {
+        # 2. 自動嘗試變體名（容錯 .Table.sql / .sql / .csv）
+        $baseStem = $expectedFileName -replace '(\.Table)?\.(sql|csv)$', ''
+        
+        $candidateFiles = @(
+            (Join-Path $folderPath "$baseStem.sql"),
+            (Join-Path $folderPath "$baseStem.Table.sql"),
+            (Join-Path $folderPath "$baseStem.csv")
+        )
 
+        foreach ($candidate in $candidateFiles) {
+            if (Test-Path $candidate) {
+                $targetFile = $candidate
+                $matchedLeaf = Split-Path $targetFile -Leaf
+                Write-Log "INFO: Matched '$expectedFileName' -> local file '$matchedLeaf'"
+                break
+            }
+        }
+    }
+
+    # 檢查是否成功定位檔案
+    if ($null -eq $targetFile) {
         Write-Log "============================================"
         Write-Log "ERROR TYPE : FILE NOT FOUND"
         Write-Log "FILE       : $expectedFileName"
-        Write-Log "PATH       : $actualFile"
+        Write-Log "PATH       : $directPath"
         Write-Log "============================================"
-
         $hasError = $true
-
         continue
     }
 
     # ========================================
-    # 2. 計算 Count + MD5
+    # 計算 Count + MD5
     # ========================================
     try {
-
-        # ------------------------------------
-        # Count
-        # ------------------------------------
+        # Count 計算
         $actualCount = 0
-
-        $reader = New-Object System.IO.StreamReader(
-            $actualFile
-        )
-
+        $reader = New-Object System.IO.StreamReader($targetFile)
         try {
-
             while ($reader.ReadLine() -ne $null) {
                 $actualCount++
             }
-
         }
         finally {
-
             $reader.Close()
             $reader.Dispose()
         }
 
-        # ------------------------------------
-        # MD5
-        # ------------------------------------
+        # MD5 計算
         $actualMD5 = (
             Get-FileHash `
-                -Path $actualFile `
+                -Path $targetFile `
                 -Algorithm MD5
         ).Hash.ToLowerInvariant()
 
-        # ====================================
-        # Count 比對
-        # ====================================
+        # 比對 Count
         if ($actualCount -ne $expectedCount) {
-
             Write-Log "============================================"
             Write-Log "ERROR TYPE : COUNT MISMATCH"
             Write-Log "FILE       : $expectedFileName"
+            Write-Log "ACTUAL FILE: $(Split-Path $targetFile -Leaf)"
             Write-Log "EXPECTED   : $expectedCount"
             Write-Log "ACTUAL     : $actualCount"
             Write-Log "============================================"
-
             $hasError = $true
         }
 
-        # ====================================
-        # MD5 比對
-        # ====================================
+        # 比對 MD5
         if ($actualMD5 -ne $expectedMD5) {
-
             Write-Log "============================================"
             Write-Log "ERROR TYPE : MD5 MISMATCH"
             Write-Log "FILE       : $expectedFileName"
+            Write-Log "ACTUAL FILE: $(Split-Path $targetFile -Leaf)"
             Write-Log "EXPECTED   : $expectedMD5"
             Write-Log "ACTUAL     : $actualMD5"
             Write-Log "============================================"
-
             $hasError = $true
         }
-
     }
     catch {
-
         Write-Log "============================================"
         Write-Log "ERROR TYPE : FILE PROCESS ERROR"
         Write-Log "FILE       : $expectedFileName"
         Write-Log "MESSAGE    : $($_.Exception.Message)"
         Write-Log "============================================"
-
         $hasError = $true
     }
 }
@@ -360,66 +295,19 @@ foreach ($key in $baseline.Keys) {
 Write-Log "============================================"
 
 if ($hasError) {
-
-    # ========================================
-    # 有任何錯誤
-    # ========================================
-    "0" | Out-File `
-        -FilePath $resultFile `
-        -Encoding utf8
-
+    "0" | Out-File -FilePath $resultFile -Encoding utf8
     Write-Log "FINAL RESULT: 0"
     Write-Log "STATUS      : FAILED"
-
     Write-Log "============================================"
-
     Write-Host "0"
-
     exit 1
 }
 else {
-
-    # ========================================
-    # 全部正確
-    # ========================================
-    "1" | Out-File `
-        -FilePath $resultFile `
-        -Encoding utf8
-
+    "1" | Out-File -FilePath $resultFile -Encoding utf8
     Write-Log "FINAL RESULT: 1"
     Write-Log "STATUS      : SUCCESS"
-
     Write-Log "============================================"
-
     Write-Host "1"
-
     exit 0
 }
 
-
-
-幫我看一下我要怎麼改
-因為他給我這個
-
-[2026-08-18 11:26:57] ============================================
-[2026-08-18 11:26:57] JOB START
-[2026-08-18 11:26:57] ============================================
-[2026-08-18 11:26:57] Input Path   : D:\AML_Source\20251114_新光資轉\EXE\DTLBK
-[2026-08-18 11:26:57] Baseline File: D:\AML_Source\20251114_新光資轉\EXE\DTLBK\AML_CHECK_SUM.csv
-[2026-08-18 11:26:57] Output Path  : D:\AML_Source\20251114_新光資轉\EXE\DTLBK
-[2026-08-18 11:26:57] Result File  : D:\AML_Source\20251114_新光資轉\EXE\DTLBK\CHECK_RESULT_DTLBK.txt
-[2026-08-18 11:26:57] Log File     : D:\AML_Source\20251114_新光資轉\EXE\DTLBK\SKcheck_CHECK_SUM_DTLBK.log
-[2026-08-18 11:26:57] ============================================
-[2026-08-18 11:26:57] ============================================
-[2026-08-18 11:26:57] ERROR TYPE : FILE NOT FOUND
-[2026-08-18 11:26:57] FILE       : SK_SAR_SuspiciousActivityCharacteristicsDim_TW_20260415.Table.sql
-[2026-08-18 11:26:57] PATH       : D:\AML_Source\20251114_新光資轉\EXE\DTLBK\SK_SAR_SuspiciousActivityCharacteristicsDim_TW_20260415.Table.sql
-[2026-08-18 11:26:57] ============================================
-[2026-08-18 11:28:11] ============================================
-[2026-08-18 11:28:11] FINAL RESULT: 0
-[2026-08-18 11:28:11] STATUS      : FAILED
-[2026-08-18 11:28:11] ============================================
-
-
-
-但我看我沒什麼錯
