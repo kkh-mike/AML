@@ -1,313 +1,279 @@
-這裡已將比對邏輯全面升級為多重副檔名與名稱容錯機制：
- * 無論 CSV 記錄的是 .sql、.Table.sql 或 .csv，若預設路徑找不到，腳本會自動在資料夾中比對同主檔名的 .sql、.Table.sql 或 .csv 實體檔案。
- * 只要 AML_CHECK_SUM.csv 裡有列出的每一筆紀錄（包含 SQL 與 CSV），全部都會依序執行行數（Count）與 MD5 完整性比對。
-# ============================================
-# Input Path
-# ============================================
-$folderPath = "D:\AML_Source\20251114_新光資轉\EXE\DTLBK"
 
-# ============================================
-# Baseline File
-# ============================================
-$baselineFile = Join-Path `
-    $folderPath `
-    "AML_CHECK_SUM.csv"
 
-# ============================================
-# Output Path
-# ============================================
-$outputPath = "D:\AML_Source\20251114_新光資轉\EXE\DTLBK"
+# ==========================================
+# 1. 基本設定
+# ==========================================
 
-# ============================================
-# Output Files
-# ============================================
-$resultFile = Join-Path `
-    $outputPath `
-    "CHECK_RESULT_DTLBK.txt"
+$SourceFile = "D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\TSEST\SAR_Trxn_Detail_All.sql"
 
-$logFile = Join-Path `
-    $outputPath `
-    "SKcheck_CHECK_SUM_DTLBK.log"
+$BaseFolder   = Split-Path $SourceFile -Parent
+$OutputFolder = Join-Path $BaseFolder "Split"
+$LogFolder    = Join-Path $BaseFolder "Log"
 
-# ============================================
-# 刪除舊結果
-# ============================================
-if (Test-Path $resultFile) {
-    Remove-Item $resultFile -Force
+
+
+# 每個檔案 50,000 個 SQL 指令
+$RowsPerFile = 50000
+
+
+# ==========================================
+# 2. 檢查來源 SQL
+# ==========================================
+
+if (!(Test-Path $SourceFile)) {
+
+    Write-Host ""
+    Write-Host "找不到來源 SQL：" -ForegroundColor Red
+    Write-Host $SourceFile
+    Write-Host ""
+
+    Read-Host "按 Enter 結束"
+    exit
 }
 
-if (Test-Path $logFile) {
-    Remove-Item $logFile -Force
+
+# ==========================================
+# 3. 建立資料夾
+# ==========================================
+
+if (!(Test-Path $OutputFolder)) {
+    New-Item -ItemType Directory -Path $OutputFolder | Out-Null
 }
 
-# ============================================
-# Log Function
-# ============================================
-function Write-Log {
-    param(
-        [string]$msg
-    )
-
-    $time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-
-    Add-Content `
-        -Path $logFile `
-        -Value "[$time] $msg"
+if (!(Test-Path $LogFolder)) {
+    New-Item -ItemType Directory -Path $LogFolder | Out-Null
 }
 
-# ============================================
-# Start
-# ============================================
-Write-Log "============================================"
-Write-Log "JOB START"
-Write-Log "============================================"
-Write-Log "Input Path   : $folderPath"
-Write-Log "Baseline File: $baselineFile"
-Write-Log "Output Path  : $outputPath"
-Write-Log "Result File  : $resultFile"
-Write-Log "Log File     : $logFile"
-Write-Log "============================================"
 
-$hasError = $false
+# ==========================================
+# 4. 清除舊的 SQL / Log
+# ==========================================
 
-# ============================================
-# 檢查 Input Folder
-# ============================================
-if (!(Test-Path $folderPath)) {
-    Write-Log "ERROR TYPE : INPUT FOLDER NOT FOUND"
-    Write-Log "PATH       : $folderPath"
-    $hasError = $true
-}
+Write-Host ""
+Write-Host "========================================="
+Write-Host "清除舊的 SQL / Log"
+Write-Host "========================================="
 
-# ============================================
-# 檢查 Baseline
-# ============================================
-if (!$hasError -and !(Test-Path $baselineFile)) {
-    Write-Log "ERROR TYPE : BASELINE FILE NOT FOUND"
-    Write-Log "FILE       : AML_CHECK_SUM.csv"
-    Write-Log "PATH       : $baselineFile"
-    $hasError = $true
-}
+Get-ChildItem `
+    -Path $OutputFolder `
+    -Filter "SAR_Trxn_Detail_All_*.sql" `
+    -ErrorAction SilentlyContinue |
+    Remove-Item -Force
 
-# ============================================
-# 基本環境錯誤處理
-# ============================================
-if ($hasError) {
-    "0" | Out-File -FilePath $resultFile -Encoding utf8
-    Write-Log "============================================"
-    Write-Log "FINAL RESULT: 0"
-    Write-Log "STATUS      : FAILED"
-    Write-Log "============================================"
-    Write-Host "0"
-    exit 1
-}
+Get-ChildItem `
+    -Path $LogFolder `
+    -Filter "SAR_Trxn_Detail_All_*.log" `
+    -ErrorAction SilentlyContinue |
+    Remove-Item -Force
 
-# ============================================
-# 讀取 AML_CHECK_SUM.csv
-# ============================================
-$baseline = @{}
+Write-Host "清除完成。"
+Write-Host ""
+
+
+# ==========================================
+# 5. 開始分割 SQL
+# ==========================================
+
+Write-Host "========================================="
+Write-Host "開始分割 SQL"
+Write-Host "========================================="
+Write-Host ""
+Write-Host "來源：$SourceFile"
+Write-Host "每個檔案：$RowsPerFile 個 SQL 指令"
+Write-Host ""
+
+
+# 使用 StreamReader
+# 不會一次把整個 SQL 載入記憶體
+$Reader = New-Object System.IO.StreamReader(
+    $SourceFile,
+    [System.Text.Encoding]::Default,
+    $true
+)
+
+$FileIndex = 1
+$RowCount  = 0
+$TotalRows = 0
+$Writer    = $null
+
 
 try {
-    $lines = Get-Content -Path $baselineFile -Encoding utf8
 
-    foreach ($line in $lines) {
-        if ([string]::IsNullOrWhiteSpace($line)) {
-            continue
-        }
+    while (($Line = $Reader.ReadLine()) -ne $null) {
 
-        $parts = $line.Split(";")
 
-        if ($parts.Count -lt 3) {
-            Write-Log "============================================"
-            Write-Log "ERROR TYPE : BASELINE FORMAT ERROR"
-            Write-Log "LINE       : $line"
-            Write-Log "============================================"
-            $hasError = $true
-            continue
-        }
+        # ==========================================
+        # 建立新的 SQL 檔案
+        # ==========================================
 
-        $fileName  = $parts[0].Trim()
-        $countText = $parts[1].Trim()
-        $md5       = $parts[2].Trim().ToLowerInvariant()
+        if ($RowCount -eq 0) {
 
-        if ([string]::IsNullOrWhiteSpace($fileName)) {
-            Write-Log "============================================"
-            Write-Log "ERROR TYPE : EMPTY FILE NAME"
-            Write-Log "LINE       : $line"
-            Write-Log "============================================"
-            $hasError = $true
-            continue
-        }
+            if ($Writer -ne $null) {
 
-        $expectedCount = 0
-        if (-not [int64]::TryParse($countText, [ref]$expectedCount)) {
-            Write-Log "============================================"
-            Write-Log "ERROR TYPE : INVALID COUNT"
-            Write-Log "FILE       : $fileName"
-            Write-Log "COUNT      : $countText"
-            Write-Log "============================================"
-            $hasError = $true
-            continue
-        }
+                $Writer.Close()
+                $Writer.Dispose()
 
-        if ($md5 -notmatch '^[0-9a-f]{32}$') {
-            Write-Log "============================================"
-            Write-Log "ERROR TYPE : INVALID MD5"
-            Write-Log "FILE       : $fileName"
-            Write-Log "MD5        : $md5"
-            Write-Log "============================================"
-            $hasError = $true
-            continue
-        }
-
-        $key = $fileName.ToLowerInvariant()
-        $baseline[$key] = @{
-            FileName = $fileName
-            Count    = $expectedCount
-            MD5      = $md5
-        }
-    }
-}
-catch {
-    Write-Log "============================================"
-    Write-Log "ERROR TYPE : BASELINE READ ERROR"
-    Write-Log "MESSAGE    : $($_.Exception.Message)"
-    Write-Log "============================================"
-    $hasError = $true
-}
-
-if ($hasError) {
-    "0" | Out-File -FilePath $resultFile -Encoding utf8
-    Write-Log "FINAL RESULT: 0"
-    Write-Log "STATUS      : FAILED"
-    Write-Host "0"
-    exit 1
-}
-
-# ============================================
-# 開始逐檔比對 (支援 SQL & CSV 自動尋找相應檔案)
-# ============================================
-foreach ($key in $baseline.Keys) {
-
-    $expectedFileName = $baseline[$key].FileName
-    $expectedCount    = $baseline[$key].Count
-    $expectedMD5      = $baseline[$key].MD5
-
-    $targetFile = $null
-
-    # 1. 直接比對原始檔名
-    $directPath = Join-Path $folderPath $expectedFileName
-    if (Test-Path $directPath) {
-        $targetFile = $directPath
-    }
-    else {
-        # 2. 自動嘗試變體名（容錯 .Table.sql / .sql / .csv）
-        $baseStem = $expectedFileName -replace '(\.Table)?\.(sql|csv)$', ''
-        
-        $candidateFiles = @(
-            (Join-Path $folderPath "$baseStem.sql"),
-            (Join-Path $folderPath "$baseStem.Table.sql"),
-            (Join-Path $folderPath "$baseStem.csv")
-        )
-
-        foreach ($candidate in $candidateFiles) {
-            if (Test-Path $candidate) {
-                $targetFile = $candidate
-                $matchedLeaf = Split-Path $targetFile -Leaf
-                Write-Log "INFO: Matched '$expectedFileName' -> local file '$matchedLeaf'"
-                break
+                $Writer = $null
             }
+
+
+            $OutputFile = Join-Path `
+                $OutputFolder `
+                "SAR_Trxn_Detail_All_$FileIndex.sql"
+
+
+            $Writer = New-Object System.IO.StreamWriter(
+                $OutputFile,
+                $false,
+                [System.Text.Encoding]::UTF8
+            )
+
+
+            # 每個檔案指定 Database
+            $Writer.WriteLine("USE SARCaseWarehouse;")
+            $Writer.WriteLine("")
+
+
+            Write-Host "建立：SAR_Trxn_Detail_All_$FileIndex.sql"
+
+
+            $FileIndex++
+        }
+
+
+        # ==========================================
+        # 原始 SQL 原封不動寫入
+        # ==========================================
+
+        $Writer.WriteLine($Line)
+
+        $RowCount++
+        $TotalRows++
+
+
+        # ==========================================
+        # 每 50,000 個 SQL 指令切一份
+        # ==========================================
+
+        if ($RowCount -eq $RowsPerFile) {
+
+            $Writer.Close()
+            $Writer.Dispose()
+
+            $Writer = $null
+
+            Write-Host "  → 完成 $RowsPerFile 個 SQL"
+
+            $RowCount = 0
         }
     }
 
-    # 檢查是否成功定位檔案
-    if ($null -eq $targetFile) {
-        Write-Log "============================================"
-        Write-Log "ERROR TYPE : FILE NOT FOUND"
-        Write-Log "FILE       : $expectedFileName"
-        Write-Log "PATH       : $directPath"
-        Write-Log "============================================"
-        $hasError = $true
-        continue
+
+    # ==========================================
+    # 處理最後一個檔案
+    # ==========================================
+
+    if ($Writer -ne $null) {
+
+        $Writer.Close()
+        $Writer.Dispose()
+
+        $Writer = $null
+
+        Write-Host "  → 完成最後 $RowCount 個 SQL"
     }
 
-    # ========================================
-    # 計算 Count + MD5
-    # ========================================
-    try {
-        # Count 計算
-        $actualCount = 0
-        $reader = New-Object System.IO.StreamReader($targetFile)
-        try {
-            while ($reader.ReadLine() -ne $null) {
-                $actualCount++
-            }
-        }
-        finally {
-            $reader.Close()
-            $reader.Dispose()
-        }
+}
+finally {
 
-        # MD5 計算
-        $actualMD5 = (
-            Get-FileHash `
-                -Path $targetFile `
-                -Algorithm MD5
-        ).Hash.ToLowerInvariant()
+    if ($Reader -ne $null) {
 
-        # 比對 Count
-        if ($actualCount -ne $expectedCount) {
-            Write-Log "============================================"
-            Write-Log "ERROR TYPE : COUNT MISMATCH"
-            Write-Log "FILE       : $expectedFileName"
-            Write-Log "ACTUAL FILE: $(Split-Path $targetFile -Leaf)"
-            Write-Log "EXPECTED   : $expectedCount"
-            Write-Log "ACTUAL     : $actualCount"
-            Write-Log "============================================"
-            $hasError = $true
-        }
-
-        # 比對 MD5
-        if ($actualMD5 -ne $expectedMD5) {
-            Write-Log "============================================"
-            Write-Log "ERROR TYPE : MD5 MISMATCH"
-            Write-Log "FILE       : $expectedFileName"
-            Write-Log "ACTUAL FILE: $(Split-Path $targetFile -Leaf)"
-            Write-Log "EXPECTED   : $expectedMD5"
-            Write-Log "ACTUAL     : $actualMD5"
-            Write-Log "============================================"
-            $hasError = $true
-        }
+        $Reader.Close()
+        $Reader.Dispose()
     }
-    catch {
-        Write-Log "============================================"
-        Write-Log "ERROR TYPE : FILE PROCESS ERROR"
-        Write-Log "FILE       : $expectedFileName"
-        Write-Log "MESSAGE    : $($_.Exception.Message)"
-        Write-Log "============================================"
-        $hasError = $true
+
+    if ($Writer -ne $null) {
+
+        $Writer.Close()
+        $Writer.Dispose()
     }
 }
 
-# ============================================
-# Final Result
-# ============================================
-Write-Log "============================================"
 
-if ($hasError) {
-    "0" | Out-File -FilePath $resultFile -Encoding utf8
-    Write-Log "FINAL RESULT: 0"
-    Write-Log "STATUS      : FAILED"
-    Write-Log "============================================"
-    Write-Host "0"
-    exit 1
+# ==========================================
+# 6. 計算總檔案數
+# ==========================================
+
+$TotalFiles = $FileIndex - 1
+
+
+Write-Host ""
+Write-Host "========================================="
+Write-Host "SQL 分割完成"
+Write-Host "========================================="
+
+Write-Host "總 SQL 指令：$TotalRows"
+Write-Host "每檔 SQL 指令：$RowsPerFile"
+Write-Host "總檔案數：$TotalFiles"
+
+Write-Host ""
+Write-Host "SQL 輸出位置："
+Write-Host $OutputFolder
+Write-Host ""
+
+
+# ==========================================
+# 8. 最終結果
+# ==========================================
+
+Write-Host ""
+Write-Host ""
+Write-Host "========================================="
+Write-Host "全部處理完成"
+Write-Host "========================================="
+
+Write-Host ""
+Write-Host "總 SQL 指令：$TotalRows"
+Write-Host "總 SQL 檔案：$TotalFiles"
+Write-Host "成功：$Success"
+Write-Host "失敗：$Failed"
+
+Write-Host ""
+Write-Host "SQL 檔案位置："
+Write-Host $OutputFolder
+
+Write-Host ""
+Write-Host "Log 檔案位置："
+Write-Host $LogFolder
+
+
+if ($Failed -eq 0) {
+
+    Write-Host ""
+    Write-Host "========================================="
+    Write-Host "全部 SQL 執行成功！"
+    Write-Host "=========================================" `
+        -ForegroundColor Green
+
 }
 else {
-    "1" | Out-File -FilePath $resultFile -Encoding utf8
-    Write-Log "FINAL RESULT: 1"
-    Write-Log "STATUS      : SUCCESS"
-    Write-Log "============================================"
-    Write-Host "1"
-    exit 0
+
+    Write-Host ""
+    Write-Host "========================================="
+    Write-Host "有 SQL 執行失敗！"
+    Write-Host "請檢查對應 Log。"
+    Write-Host "=========================================" `
+        -ForegroundColor Red
 }
 
+
+Write-Host ""
+Read-Host "按 Enter 結束"
+
+
+
+
+因為我還有一個檔案要做
+D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾\TSEST\SAR_Trxn_Detail.sql
+
+幫我改
