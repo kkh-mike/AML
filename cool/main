@@ -1,10 +1,10 @@
 # ==========================================
-# 自動抓取 LDAP 連線資訊 + 批次執行 Split 資料夾內所有 SQL
+# 自動抓取 LDAP 連線資訊 + 批次執行 Split 資料夾內 SQL + 執行 BatchID Update
 # ==========================================
 
 # 1. 資料夾準備與全域 Log 初始化
 $LogFolder = Join-Path -Path $PSScriptRoot -ChildPath "Log"
-if (-not (Test-Path -Path $LogFolder)) {
+if (!(Test-Path $LogFolder)) {
     New-Item -ItemType Directory -Path $LogFolder | Out-Null
 }
 
@@ -17,14 +17,14 @@ function Write-Log {
         [ConsoleColor]$ForegroundColor = [ConsoleColor]::White,
         [switch]$IsError
     )
-    $timePrefix   = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $timePrefix = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $formattedMsg = "[$timePrefix] $Message"
     
     Write-Host $Message -ForegroundColor $ForegroundColor
     Add-Content -Path $MainLogFile -Value $formattedMsg -Encoding UTF8
 }
 
-Write-Log "=== 開始執行 Split 資料夾 SQL 批次處理作業 ===" -ForegroundColor Cyan
+Write-Log "=== 開始執行 SQL 批次處理與更新作業 ===" -ForegroundColor Cyan
 Write-Log "主執行紀錄檔: $MainLogFile" -ForegroundColor DarkGray
 
 # ==========================================
@@ -56,16 +56,13 @@ catch {
     exit 1
 }
 
-# ==========================================
 # 3. 自動解析連線字串參數
-# ==========================================
 $Server   = if ($connStr -match '(?:Data Source|Server)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
 $Database = if ($connStr -match '(?:Initial Catalog|Database)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
 $User     = if ($connStr -match '(?:User ID|UID)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
 $Password = if ($connStr -match '(?:Password|PWD)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
 
-$authMode = if ([string]::IsNullOrWhiteSpace($User)) { "Windows 信任驗證 (-E)" } else { "SQL 驗證 (User: $User)" }
-Write-Log "解析連線資訊 -> Server: $Server | DB: $Database | 驗證模式: $authMode" -ForegroundColor DarkCyan
+Write-Log "解析連線資訊 -> Server: $Server | DB: $Database | User: $User" -ForegroundColor DarkCyan
 
 if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($Database)) {
     Write-Log "錯誤：無法正確解析 Server 或 Database 連線資訊！" -ForegroundColor Red -IsError
@@ -82,9 +79,7 @@ if (-not (Test-Path -Path $SplitFolder -PathType Container)) {
     exit 1
 }
 
-# 使用自然排序邏輯（避免 10_xxx.sql 排在 2_xxx.sql 前面）
-$SqlFiles = Get-ChildItem -Path $SplitFolder -Filter "*.sql" -File | 
-    Sort-Object { [regex]::Replace($_.Name, '\d+', { $args[0].Value.PadLeft(8, '0') }) }
+$SqlFiles = Get-ChildItem -Path $SplitFolder -Filter "*.sql" -File | Sort-Object Name
 
 if ($SqlFiles.Count -eq 0) {
     Write-Log "錯誤：在 Split 資料夾內找不到任何 .sql 檔案，結束作業。" -ForegroundColor Red -IsError
@@ -94,60 +89,156 @@ if ($SqlFiles.Count -eq 0) {
 Write-Log "共在 Split 資料夾中確認 $($SqlFiles.Count) 個 SQL 檔案待處理。" -ForegroundColor Green
 
 # ==========================================
-# 5. 逐一執行各 SQL 檔案
+# 5. 逐一執行 Split 內的各 SQL 檔案
 # ==========================================
 $HasError = $false
 
 foreach ($file in $SqlFiles) {
     $BaseName = $file.BaseName
-    $FileLog  = Join-Path -Path $LogFolder -ChildPath "detail_$($BaseName)_$Timestamp.log"
+    $FileLog  = Join-Path $LogFolder "$($BaseName)_$Timestamp.log"
 
     Write-Log ""
     Write-Log "-----------------------------------------"
     Write-Log "開始執行檔案: $($file.Name)" -ForegroundColor Yellow
 
-    # 動態組裝 sqlcmd 參數陣列
-    $sqlcmdParams = @(
-        "-b",                    # 遇錯回傳非 0 狀態碼
-        "-r", "1",               # 錯誤訊息重導輸出
-        "-f", "65001",           # 設定字碼頁為 UTF-8，防止中文與特殊符號亂碼
-        "-S", $Server,
-        "-d", $Database,
-        "-i", $file.FullName,
-        "-o", $FileLog
-    )
-
-    # 判斷是 SQL 驗證還是 Windows 驗證
-    if (-not [string]::IsNullOrWhiteSpace($User)) {
-        $sqlcmdParams += @("-U", $User, "-P", $Password)
-    } else {
-        $sqlcmdParams += "-E"
-    }
-
-    # 執行 sqlcmd
-    & sqlcmd.exe @sqlcmdParams
+    sqlcmd `
+        -b `
+        -r 1 `
+        -S $Server `
+        -U $User `
+        -P $Password `
+        -d $Database `
+        -i $file.FullName `
+        -o $FileLog
 
     if ($LASTEXITCODE -eq 0) {
         Write-Log "SUCCESS：$($file.Name) 執行成功" -ForegroundColor Green
     } else {
-        Write-Log "FAILED：$($file.Name) 執行失敗！(ExitCode: $LASTEXITCODE)" -ForegroundColor Red -IsError
-        Write-Log "請檢查詳細錯誤紀錄：$FileLog" -ForegroundColor Yellow
+        Write-Log "FAILED：$($file.Name) 執行失敗！" -ForegroundColor Red
+        Write-Log "請檢查錯誤紀錄：$FileLog" -ForegroundColor Yellow
         $HasError = $true
         break
     }
 }
 
+if ($HasError) {
+    Write-Log "Split SQL 執行過程發生錯誤，終止後續 Update 作業！" -ForegroundColor Red -IsError
+    exit 1
+}
+
 # ==========================================
-# 6. 最終結果與 Exit Code 回傳
+# 6. 解析 BatchControl.sql 取得 BatchID 並執行 UPDATE
+# ==========================================
+Write-Log ""
+Write-Log "-----------------------------------------"
+Write-Log "開始處理 BatchControl.sql 取得 BatchID 並執行關聯更新..." -ForegroundColor Cyan
+
+# 優先在腳本根目錄尋找，找不到則至 Split 目錄尋找
+$BatchControlPath = Join-Path -Path $PSScriptRoot -ChildPath "BatchControl.sql"
+if (-not (Test-Path $BatchControlPath)) {
+    $BatchControlPath = Join-Path -Path $SplitFolder -ChildPath "BatchControl.sql"
+}
+
+if (-not (Test-Path $BatchControlPath)) {
+    Write-Log "錯誤：找不到 BatchControl.sql 檔案！" -ForegroundColor Red -IsError
+    exit 1
+}
+
+# 讀取檔案內容並以正則表達式擷取 BatchID (支援 VALUES (N'...' 或 VALUES ('...')
+$batchFileContent = Get-Content -Path $BatchControlPath -Raw -Encoding UTF8
+if ($batchFileContent -match "VALUES\s*\(\s*N?'([^']+)'") {
+    $ExtractedBatchID = $matches[1].Trim()
+    Write-Log "成功取得 BatchID: $ExtractedBatchID" -ForegroundColor Green
+} else {
+    Write-Log "錯誤：無法從 BatchControl.sql 中解析出 BatchID！" -ForegroundColor Red -IsError
+    exit 1
+}
+
+# 動態組裝 7 筆 UPDATE SQL
+$UpdateSqlContent = @"
+USE [SARCaseWarehouse]
+GO
+
+-- 1. SAR_Acct_Info
+UPDATE s
+SET s.CustomerNo = c.TS_CUST_ID
+FROM SAR_Acct_Info s
+INNER JOIN BSADBTW..BANCS_SK_CUST_INFO c ON s.CustomerNo = c.SK_CUST_ID
+WHERE s.BatchID = '$ExtractedBatchID';
+
+-- 2. SAR_Conductor_Info
+UPDATE s
+SET s.CustomerNo = c.TS_CUST_ID
+FROM SAR_Conductor_Info s
+INNER JOIN BSADBTW..BANCS_SK_CUST_INFO c ON s.CustomerNo = c.SK_CUST_ID
+WHERE s.BatchID = '$ExtractedBatchID';
+
+-- 3. SAR_Matched_Scenarios
+UPDATE s
+SET s.CustomerNo = c.TS_CUST_ID
+FROM SAR_Matched_Scenarios s
+INNER JOIN BSADBTW..BANCS_SK_CUST_INFO c ON s.CustomerNo = c.SK_CUST_ID
+WHERE s.BatchID = '$ExtractedBatchID';
+
+-- 4. SAR_Suspect_Info
+UPDATE s
+SET s.CustomerNo = c.TS_CUST_ID
+FROM SAR_Suspect_Info s
+INNER JOIN BSADBTW..BANCS_SK_CUST_INFO c ON s.CustomerNo = c.SK_CUST_ID
+WHERE s.BatchID = '$ExtractedBatchID';
+
+-- 5. SAR_Trxn_Detail
+UPDATE s
+SET s.CustomerNo = c.TS_CUST_ID
+FROM SAR_Trxn_Detail s
+INNER JOIN BSADBTW..BANCS_SK_CUST_INFO c ON s.CustomerNo = c.SK_CUST_ID
+WHERE s.BatchID = '$ExtractedBatchID';
+
+-- 6. SAR_Trxn_Detail_All
+UPDATE s
+SET s.CustomerNo = c.TS_CUST_ID
+FROM SAR_Trxn_Detail_All s
+INNER JOIN BSADBTW..BANCS_SK_CUST_INFO c ON s.CustomerNo = c.SK_CUST_ID
+WHERE s.BatchID = '$ExtractedBatchID';
+
+-- 7. SAR_Trxn_Detail_T1200017
+UPDATE s
+SET s.CustomerNo = c.TS_CUST_ID
+FROM SAR_Trxn_Detail_T1200017 s
+INNER JOIN BSADBTW..BANCS_SK_CUST_INFO c ON s.CustomerNo = c.SK_CUST_ID
+WHERE s.BatchID = '$ExtractedBatchID';
+GO
+"@
+
+$UpdateSqlFile = Join-Path -Path $LogFolder -ChildPath "Update_CustomerNo_$Timestamp.sql"
+$UpdateLogFile = Join-Path -Path $LogFolder -ChildPath "Update_CustomerNo_$Timestamp.log"
+
+Set-Content -Path $UpdateSqlFile -Value $UpdateSqlContent -Encoding UTF8
+
+Write-Log "正在執行 BatchID ($ExtractedBatchID) CustomerNo 更新作業..." -ForegroundColor Yellow
+
+sqlcmd `
+    -b `
+    -r 1 `
+    -S $Server `
+    -U $User `
+    -P $Password `
+    -d $Database `
+    -i $UpdateSqlFile `
+    -o $UpdateLogFile
+
+if ($LASTEXITCODE -eq 0) {
+    Write-Log "SUCCESS：CustomerNo 更新指令執行成功" -ForegroundColor Green
+} else {
+    Write-Log "FAILED：CustomerNo 更新失敗！請檢查 $UpdateLogFile" -ForegroundColor Red -IsError
+    exit 1
+}
+
+# ==========================================
+# 7. 最終結果與 Exit Code 回傳
 # ==========================================
 Write-Log ""
 Write-Log "========================================="
-if (-not $HasError) {
-    Write-Log "全部 SQL 檔案皆已成功執行完成！" -ForegroundColor Green
-    Write-Log "========================================="
-    exit 0
-} else {
-    Write-Log "作業未完全執行，發生錯誤中斷！" -ForegroundColor Red
-    Write-Log "========================================="
-    exit 1
-}
+Write-Log "全部 SQL 檔案與 BatchID 更新作業皆已成功執行完成！" -ForegroundColor Green
+Write-Log "========================================="
+exit 0
