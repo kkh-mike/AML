@@ -1,22 +1,20 @@
 # ==========================================
-# 自動抓取 LDAP 連線資訊 + 依序執行 Split 資料夾內的所有 SQL
+# 自動抓取 LDAP 連線資訊 + 指定清單 SQL 分割執行
 # ==========================================
 
 # 1. 資料夾準備與全域 Log 初始化
-$SqlFolder = Join-Path -Path $PSScriptRoot -ChildPath "Split"
-$LogFolder = Join-Path -Path $PSScriptRoot -ChildPath "Log"
+$OutputFolder = Join-Path -Path $PSScriptRoot -ChildPath "Split"
+$LogFolder    = Join-Path -Path $PSScriptRoot -ChildPath "Log"
 
-if (!(Test-Path $SqlFolder)) {
-    Write-Host "錯誤：找不到目錄 $SqlFolder" -ForegroundColor Red
-    exit 1
+if (!(Test-Path $OutputFolder)) {
+    New-Item -ItemType Directory -Path $OutputFolder | Out-Null
 }
-
 if (!(Test-Path $LogFolder)) {
     New-Item -ItemType Directory -Path $LogFolder | Out-Null
 }
 
-$Timestamp   = Get-Date -Format "yyyyMMdd_HHmmss"
-$MainLogFile = Join-Path -Path $LogFolder -ChildPath "Execution_$Timestamp.log"
+$Timestamp    = Get-Date -Format "yyyyMMdd_HHmmss"
+$MainLogFile  = Join-Path -Path $LogFolder -ChildPath "Execution_$Timestamp.log"
 
 # 定義雙向輸出函式 (螢幕 + 主 Log 檔)
 function Write-Log {
@@ -34,8 +32,12 @@ function Write-Log {
     Add-Content -Path $MainLogFile -Value $formattedMsg -Encoding UTF8
 }
 
-Write-Log "=== 開始執行 Split 資料夾內的 SQL 批次作業 ===" -ForegroundColor Cyan
+Write-Log "=== 開始執行指定 SQL 批次處理作業 ===" -ForegroundColor Cyan
 Write-Log "主執行紀錄檔: $MainLogFile" -ForegroundColor DarkGray
+
+# 清除舊的分割 SQL 檔案
+Write-Log "清除舊的 Split 檔案..."
+Remove-Item "$OutputFolder\*.sql" -Force -ErrorAction SilentlyContinue
 
 # ==========================================
 # 2. 載入 LDAP DLL 並取得連線字串
@@ -60,6 +62,7 @@ try {
     $iCStr = 7
 
     $connStr = $App.GetRunBat($sApp, $iCStr)
+    # Write-Log "成功取得 LDAP 連線字串: $connStr" -ForegroundColor Cyan
 }
 catch {
     Write-Log "錯誤：讀取 LDAP 連線資訊時發生例外: $($_.Exception.Message)" -ForegroundColor Red -IsError
@@ -80,54 +83,109 @@ if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($Data
 }
 
 # ==========================================
-# 4. 取得 Split 目錄下所有 .sql 檔案並排序
+# 4. 定義欲指定的 SQL 檔案清單並驗證存在性
 # ==========================================
-# 透過 Regex 拆分檔名中的文字與數字進行自然排序 (避免 file_10.sql 排在 file_2.sql 之前)
-$SqlFiles = Get-ChildItem -Path $SqlFolder -Filter "*.sql" | 
-            Sort-Object { [regex]::Replace($_.Name, '\d+', { $args[0].Value.PadLeft(8, '0') }) }
+$TargetFileList = @(
+    "BRANCH_SK.sql",
+    "BatchControl.sql",
+    "SAR_Acct_Info.sql",
+    "SAR_Case_Main.sql",
+    "SAR_Case_Trxn_Branch.sql",
+    "SAR_Case_Trxn_Date_Range.sql",
+    "SAR_Conductor_Info.sql",
+    "SAR_Matched_Scenarios.sql",
+    "SAR_Suspect_Info.sql",
+    "SAR_Trxn_Detail_T1200017.sql",
+    "SAR_Trxn_Detail_T1200162.sql",
+    "SAR_Trxn_Summary.sql",
+    "SK_SAR_SuspiciousActivityCharacteristicsDim.Table.sql"
+)
+
+$SqlFiles = @()
+
+foreach ($rawName in $TargetFileList) {
+    # 去除多餘空白或分號
+    $cleanName = $rawName.Trim().TrimEnd(';')
+    $fullPath  = Join-Path -Path $PSScriptRoot -ChildPath $cleanName
+
+    if (Test-Path -Path $fullPath) {
+        $SqlFiles += Get-Item -Path $fullPath
+    } else {
+        Write-Log "警告：指定檔案不存在，已略過 -> $cleanName" -ForegroundColor Yellow
+    }
+}
 
 if ($SqlFiles.Count -eq 0) {
-    Write-Log "錯誤：在 [$SqlFolder] 內找不到任何 .sql 檔案，結束作業。" -ForegroundColor Red -IsError
+    Write-Log "錯誤：找不到任何有效的指定 SQL 檔案，結束作業。" -ForegroundColor Red -IsError
     exit 1
 }
 
-Write-Log "在 Split 目錄中共找到 $($SqlFiles.Count) 個 .sql 檔案待執行。" -ForegroundColor Green
+Write-Log "共確認 $($SqlFiles.Count) 個指定 SQL 檔案待處理。" -ForegroundColor Green
 
 # ==========================================
-# 5. 依序執行 SQL 檔案
+# 5. 逐一處理每個 SQL 檔案
 # ==========================================
 $HasError = $false
-$CurrentIndex = 1
-$TotalCount = $SqlFiles.Count
 
 foreach ($file in $SqlFiles) {
     $BaseName = $file.BaseName
-    $SqlFileFullPath = $file.FullName
-    $BatchLogFile = Join-Path $LogFolder "$($BaseName).log"
+    Write-Log ""
+    Write-Log "=========================================" -ForegroundColor Yellow
+    Write-Log "開始處理檔案: $($file.Name)" -ForegroundColor Yellow
+    Write-Log "=========================================" -ForegroundColor Yellow
 
-    Write-Log "-----------------------------------------"
-    Write-Log "執行 [$CurrentIndex / $TotalCount] -> $($file.Name)" -ForegroundColor Yellow
-    
-    # 呼叫 sqlcmd 執行 (-b 代表發生 SQL Error 時中斷並回傳非 0 ExitCode)
-    sqlcmd `
-        -b `
-        -S $Server `
-        -U $User `
-        -P $Password `
-        -d $Database `
-        -i $SqlFileFullPath `
-        -o $BatchLogFile
+    # 讀取並依 GO 分割
+    $Content = Get-Content $file.FullName -Raw
+    $Batches = [regex]::Split($Content, '(?im)^\s*GO\s*;?\s*$') | 
+               Where-Object { ![string]::IsNullOrWhiteSpace($_) }
 
-    $ExitCode = $LASTEXITCODE
-    if ($ExitCode -eq 0) {
-        Write-Log "SUCCESS：[$($file.Name)] 執行成功" -ForegroundColor Green
-    } else {
-        Write-Log "FAILED：[$($file.Name)] 執行失敗！" -ForegroundColor Red
-        Write-Log "請檢查 Log 檔：$BatchLogFile" -ForegroundColor Yellow
-        $HasError = $true
+    Write-Log "共切割為 $($Batches.Count) 個 Batch"
+
+    # 產出分割檔
+    $BatchFiles = @()
+    $Index = 1
+    foreach ($Batch in $Batches) {
+        $OutputFile = Join-Path $OutputFolder "$($BaseName)_$Index.sql"
+        $SqlContent = $Batch.Trim() + "`r`nGO`r`n"
+        Set-Content -Path $OutputFile -Value $SqlContent -Encoding UTF8
+        $BatchFiles += $OutputFile
+        $Index++
+    }
+
+    # 依序執行分割後的 SQL
+    $CurrentIndex = 1
+    foreach ($SqlFile in $BatchFiles) {
+        $BatchLogFile = Join-Path $LogFolder "$($BaseName)_$CurrentIndex.log"
+
+        Write-Log "-----------------------------------------"
+        Write-Log "執行 [$CurrentIndex / $($Batches.Count)] -> $(Split-Path $SqlFile -Leaf)"
+        
+        # 呼叫 sqlcmd 執行 (-b 代表發生 SQL Error 時中斷並回傳非 0 ExitCode)
+        sqlcmd `
+            -b `
+            -S $Server `
+            -U $User `
+            -P $Password `
+            -d $Database `
+            -i $SqlFile `
+            -o $BatchLogFile
+
+        $ExitCode = $LASTEXITCODE
+        if ($ExitCode -eq 0) {
+            Write-Log "SUCCESS：第 $CurrentIndex 份執行成功" -ForegroundColor Green
+        } else {
+            Write-Log "FAILED：第 $CurrentIndex 份執行失敗！" -ForegroundColor Red
+            Write-Log "請檢查 Batch Log：$BatchLogFile" -ForegroundColor Yellow
+            $HasError = $true
+            break
+        }
+        $CurrentIndex++
+    }
+
+    if ($HasError) {
+        Write-Log "檔案 [$($file.Name)] 執行發生錯誤，中斷後續所有作業。" -ForegroundColor Red
         break
     }
-    $CurrentIndex++
 }
 
 # ==========================================
@@ -136,11 +194,14 @@ foreach ($file in $SqlFiles) {
 Write-Log ""
 Write-Log "========================================="
 if (-not $HasError) {
-    Write-Log "Split 資料夾內所有 SQL 檔案皆已成功執行完成！" -ForegroundColor Green
+    Write-Log "全部指定 SQL 檔案與 Batch 皆已成功執行完成！" -ForegroundColor Green
     Write-Log "========================================="
     exit 0
 } else {
-    Write-Log "作業未完全執行，已中斷作業！" -ForegroundColor Red
+    Write-Log "作業未完全執行，發生錯誤！" -ForegroundColor Red
     Write-Log "========================================="
     exit 1
 }
+
+
+這個一開始的split 資料夾要幹嘛的
