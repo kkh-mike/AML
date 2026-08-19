@@ -1,12 +1,31 @@
-# 1. 載入系統的 DLL (請替換為實際系統安裝路徑與 DLL 檔名)
-$dllPath = "C:\PatriotOfficer\bin\VendorSecurity.dll"
-Add-Type -Path $dllPath
-
-# 2. 加密字串
+$binDir = "D:\tfs\...\bin"  # 請換成圖片中的完整資料夾路徑
 $encryptedStr = "SU6j1K3QlxIXmfXVbW59pmdhbnY4VbgpWJaO2UpgqqRQ0XYNHt7/hNgSkglYt5PdGfWrR7Eu00JGdtJF6gC4QJ2f97K/+fCE9VIowB7Od2JOkSmIpXno2AqlDo3YIeDF7s5gLy6s0pHvvfqL9YMSAjhP7uI6aZFCRMFdzEVQ5F3V93ssJmd4+6fjhCZWyi23wCO4NBsB+ItKnVHX5uJ+QfX2Bv24T/5CFKmqu2Otw/pSmp1SkAVjiiA/AgD0/pcIokzoHmg1XqmAwK/8qYisKoimdZht88kM/Rsd7Y7dI6M="
 
-# 3. 呼叫該 Class 的靜態解密方法 (類別與方法名稱需對應 DLL 內部的命名)
-$connectionString = [VendorSecurity.Crypto]::Decrypt($encryptedStr)
-
-Write-Host "解密成功：" -ForegroundColor Green
-Write-Host $connectionString
+# 依序搜尋目錄下的 DLL 與 EXE
+Get-ChildItem -Path $binDir -Include "*.dll", "*.exe" -File | ForEach-Object {
+    try {
+        $asm = [System.Reflection.Assembly]::LoadFrom($_.FullName)
+        foreach ($type in $asm.GetExportedTypes()) {
+            # 尋找名稱包含 Decrypt 的靜態方法
+            $methods = $type.GetMethods([System.Reflection.BindingFlags]'Public,Static') | Where-Object { 
+                $_.Name -like "*Decrypt*" -and $_.GetParameters().Count -eq 1 
+            }
+            
+            foreach ($m in $methods) {
+                try {
+                    $result = $m.Invoke($null, @($encryptedStr))
+                    if ($result -like "*Data Source=*") {
+                        Write-Host "==========================================" -ForegroundColor Green
+                        Write-Host "[成功找到解密方法！]" -ForegroundColor Green
+                        Write-Host "檔案: $($_.FullName)"
+                        Write-Host "類別 (Type): [$($type.FullName)]" -ForegroundColor Cyan
+                        Write-Host "方法 (Method): $($m.Name)" -ForegroundColor Cyan
+                        Write-Host "解密結果: $result" -ForegroundColor Yellow
+                        Write-Host "==========================================" -ForegroundColor Green
+                        return
+                    }
+                } catch {}
+            }
+        }
+    } catch {}
+}
