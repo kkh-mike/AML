@@ -1,1 +1,5 @@
-Start-Process powershell.exe -ArgumentList "-NoProfile -File `"$PSScriptRoot\your_script.ps1`""
+D:\TEST>Start-Process powershell.exe -ArgumentList "-NoProfile -File GODB.ps1
+'Start-Process' 不是內部或外部命令、可執行的程式或批次檔。
+
+D:\TEST>
+
