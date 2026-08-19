@@ -1,24 +1,36 @@
-$cipherBase64 = "SU6j1K3QlxIXmfXVbW59pmdhbnY4VbgpWJaO2UpgqqRQ0XYNHt7/hNgSkglYt5PdGfWrR7Eu00JGdtJF6gC4QJ2f97K/+fCE9VIowB7Od2JOkSmIpXno2AqlDo3YIeDF7s5gLy6s0pHvvfqL9YMSAjhP7uI6aZFCRMFdzEVQ5F3V93ssJmd4+6fjhCZWyi23wCO4NBsB+ItKnVHX5uJ+QfX2Bv24T/5CFKmqu2Otw/pSmp1SkAVjiiA/AgD0/pcIokzoHmg1XqmAwK/8qYisKoimdZht88kM/Rsd7Y7dI6M="
-
-# 1. 填入該系統使用的 Key 與 IV（通常為 16/24/32 字節）
-$keyString = "請替換為你的金鑰KEY"
-$ivString  = "請替換為你的向量IV"
-
-# 2. 轉換為 Byte 陣列
-$cipherBytes = [System.Convert]::FromBase64String($cipherBase64)
-$keyBytes    = [System.Text.Encoding]::UTF8.GetBytes($keyString)
-$ivBytes     = [System.Text.Encoding]::UTF8.GetBytes($ivString)
-
-# 3. 初始化 AES 解密器
-$aes = [System.Security.Cryptography.Aes]::Create()
-$aes.Key = $keyBytes
-$aes.IV  = $ivBytes
-$aes.Mode = [System.Security.Cryptography.CipherMode]::CBC
-$aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
-
-# 4. 執行解密
-$decryptor = $aes.CreateDecryptor()
-$plainBytes = $decryptor.TransformFinalBlock($cipherBytes, 0, $cipherBytes.Length)
-$plainText  = [System.Text.Encoding]::UTF8.GetString($plainBytes)
-
-Write-Output $plainText
+PS D:\AML\SK\EXE\DTLBK> D:\AML\SK\EXE\DTLBK\TEST.ps1
+設定 "Key" 時發生例外狀況: "指定的金鑰不是此演算法的有效大小。"
+位於 D:\AML\SK\EXE\DTLBK\TEST.ps1:14 字元:1
++ $aes.Key = $keyBytes
++ ~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], SetValueInvocationException
+    + FullyQualifiedErrorId : ExceptionWhenSetting
+ 
+設定 "IV" 時發生例外狀況: "指定的初始化向量 (IV) 不符合此演算法的區塊大小。"
+位於 D:\AML\SK\EXE\DTLBK\TEST.ps1:15 字元:1
++ $aes.IV  = $ivBytes
++ ~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], SetValueInvocationException
+    + FullyQualifiedErrorId : ExceptionWhenSetting
+ 
+以 "0" 引數呼叫 "CreateDecryptor" 時發生例外狀況: "必須有在此演算法物件上設定的金鑰，才能解密值。"
+位於 D:\AML\SK\EXE\DTLBK\TEST.ps1:20 字元:1
++ $decryptor = $aes.CreateDecryptor()
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+    + FullyQualifiedErrorId : CryptographicException
+ 
+不可在值為 Null 的運算式上呼叫方法。
+位於 D:\AML\SK\EXE\DTLBK\TEST.ps1:21 字元:1
++ $plainBytes = $decryptor.TransformFinalBlock($cipherBytes, 0, $cipher ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) []，RuntimeException
+    + FullyQualifiedErrorId : InvokeMethodOnNull
+ 
+以 "1" 引數呼叫 "GetString" 時發生例外狀況: "陣列不能為 null。
+參數名稱: bytes"
+位於 D:\AML\SK\EXE\DTLBK\TEST.ps1:22 字元:1
++ $plainText  = [System.Text.Encoding]::UTF8.GetString($plainBytes)
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+    + FullyQualifiedErrorId : ArgumentNullException
