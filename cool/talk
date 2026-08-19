@@ -1,3 +1,9 @@
+配合 UATR3 龍潭資轉作業，需申請將相關檔案移轉至龍潭主機 amlws1。
+異動檔案清單請參閱附件
+
+
+
+
 # 取得此 ps1 指令碼所在資料夾內的 Tsbldapdbc.dll
 $dllPath = Join-Path -Path $PSScriptRoot -ChildPath "Tsbldapdbc.dll"
 
