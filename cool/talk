@@ -1,12 +1,13 @@
-恐怕不行，因為現在我們唯一龍潭的UAT環境現在正在做新光資轉合併案 ，目前沒有UAT 環境來使用
+簡短結論（業務可直接理解）
 
-澳洲那邊也有問類似的問題，目前就是無法 很抱歉
+只要符合下列任一情況，系統會把客戶判為 OPEN（活躍）；若都不符合，則為 CLOSE（不活躍）。
+技術判定規則（依程式判斷順序）
 
-
-幫我用A2英文表達
-
-
-
-I’m afraid it may not be possible at the moment. Our only UAT environment in Longtan is currently being used for the Shin Kong data migration and merger project, so we don’t have another UAT environment available for use.
-
-The Australia team also asked a similar question, and unfortunately, we currently cannot provide a UAT environment for this. Sorry for the inconvenience.
+若 CIF.GUARANTOR = 'Y'（擔保人）：
+CUSTOMER_STATUS in ('000','002') → OPEN
+CUSTOMER_STATUS in ('001','003') → CLOSE
+或 STATUS = '1' → OPEN；否則 CLOSE
+若 OPENING_DATE 為空或無效（'00000000'）：
+以子查詢 Record_Stat 的結果為準（若子查無紀錄則預設為 'C'）。
+若 開戶日距今 ? 30 天：
+強制視為 OPEN（開戶 30 天內自動活躍）。
