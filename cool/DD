@@ -1,5 +1,24 @@
-SU6j1K3QlxIXmfXVbW59pmdhbnY4VbgpWJaO2UpgqqRQ0XYNHt7/hNgSkglYt5PdGfWrR7Eu00JGdtJF6gC4QJ2f97K/+fCE9VIowB7Od2JOkSmIpXno2AqlDo3YIeDF7s5gLy6s0pHvvfqL9YMSAjhP7uI6aZFCRMFdzEVQ5F3V93ssJmd4+6fjhCZWyi23wCO4NBsB+ItKnVHX5uJ+QfX2Bv24T/5CFKmqu2Otw/pSmp1SkAVjiiA/AgD0/pcIokzoHmg1XqmAwK/8qYisKoimdZht88kM/Rsd7Y7dI6M=
+$cipherBase64 = "SU6j1K3QlxIXmfXVbW59pmdhbnY4VbgpWJaO2UpgqqRQ0XYNHt7/hNgSkglYt5PdGfWrR7Eu00JGdtJF6gC4QJ2f97K/+fCE9VIowB7Od2JOkSmIpXno2AqlDo3YIeDF7s5gLy6s0pHvvfqL9YMSAjhP7uI6aZFCRMFdzEVQ5F3V93ssJmd4+6fjhCZWyi23wCO4NBsB+ItKnVHX5uJ+QfX2Bv24T/5CFKmqu2Otw/pSmp1SkAVjiiA/AgD0/pcIokzoHmg1XqmAwK/8qYisKoimdZht88kM/Rsd7Y7dI6M="
 
-要怎麼用power shell 解密成下面這個結果
+# 1. 填入該系統使用的 Key 與 IV（通常為 16/24/32 字節）
+$keyString = "請替換為你的金鑰KEY"
+$ivString  = "請替換為你的向量IV"
 
-Data Source=AMLIST;Initial Catalog=GCMAINDB;User ID=aml;Password=aml1234;Application Name="PATRIOT OFFICER"
+# 2. 轉換為 Byte 陣列
+$cipherBytes = [System.Convert]::FromBase64String($cipherBase64)
+$keyBytes    = [System.Text.Encoding]::UTF8.GetBytes($keyString)
+$ivBytes     = [System.Text.Encoding]::UTF8.GetBytes($ivString)
+
+# 3. 初始化 AES 解密器
+$aes = [System.Security.Cryptography.Aes]::Create()
+$aes.Key = $keyBytes
+$aes.IV  = $ivBytes
+$aes.Mode = [System.Security.Cryptography.CipherMode]::CBC
+$aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
+
+# 4. 執行解密
+$decryptor = $aes.CreateDecryptor()
+$plainBytes = $decryptor.TransformFinalBlock($cipherBytes, 0, $cipherBytes.Length)
+$plainText  = [System.Text.Encoding]::UTF8.GetString($plainBytes)
+
+Write-Output $plainText
