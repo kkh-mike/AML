@@ -1,4 +1,9 @@
-Add-Type -Path "D:\TEST\Tsbldapdbc.dll"
+# 取得此 ps1 指令碼所在資料夾內的 Tsbldapdbc.dll
+$dllPath = Join-Path -Path $PSScriptRoot -ChildPath "Tsbldapdbc.dll"
+
+# 載入 DLL
+Add-Type -Path $dllPath
+
 $App = New-Object Tsbldapdbc.RunBat
 $App.SSL = $false
 $App.ldapHost = "10.13.60.66"
@@ -6,7 +11,4 @@ $App.searchBase = "o=tsbank"
 $sApp = "AML"
 $iCStr = 1
 $ret2 = $App.GetRunBat($sApp, $iCStr)
-Write-Host "Result: $ret2" 
-
-
-我這邊要改成執行這支powershell 當下路徑
+Write-Host "Result: $ret2"
