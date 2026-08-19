@@ -62,7 +62,7 @@ try {
     $iCStr = 7
 
     $connStr = $App.GetRunBat($sApp, $iCStr)
-    Write-Log "成功取得 LDAP 連線字串: $connStr" -ForegroundColor Cyan
+    # Write-Log "成功取得 LDAP 連線字串: $connStr" -ForegroundColor Cyan
 }
 catch {
     Write-Log "錯誤：讀取 LDAP 連線資訊時發生例外: $($_.Exception.Message)" -ForegroundColor Red -IsError
@@ -175,3 +175,28 @@ if (-not $HasError) {
     Write-Log "========================================="
     exit 1
 }
+
+
+
+
+
+我要改成指定執行這幾隻.sql
+
+
+BRANCH_SK.sql
+BatchControl.sql
+SAR_Acct_Info.sql
+SAR_Case_Main.sql
+SAR_Case_Trxn_Branch.sql
+SAR_Case_Trxn_Date_Range.sql
+SAR_Conductor_Info.sql;
+SAR_Matched_Scenarios.sql;
+SAR_Suspect_Info.sql;
+SAR_Trxn_Detail_T1200017.sql;
+SAR_Trxn_Detail_T1200162.sql;
+SAR_Trxn_Summary.sql;
+SK_SAR_SuspiciousActivityCharacteristicsDim.Table.sql;
+
+
+
+
