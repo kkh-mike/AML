@@ -1,9 +1,76 @@
-SU6j1K3QlxIXmfXVbW59pmdhbnY4VbgpWJaO2UpgqqRQ0XYNHt7/hNgSkglYt5PdGfWrR7Eu00JGdtJF6gC4QJ2f97K/+fCE9VIowB7Od2JOkSmIpXno2AqlDo3YIeDF7s5gLy6s0pHvvfqL9YMSAjhP7uI6aZFCRMFdzEVQ5F3V93ssJmd4+6fjhCZWyi23wCO4NBsB+ItKnVHX5uJ+QfX2Bv24T/5CFKmqu2Otw/pSmp1SkAVjiiA/AgD0/pcIokzoHmg1XqmAwK/8qYisKoimdZht88kM/Rsd7Y7dI6M=
+# ==========================================
+# 1. 設定連線字串與 SQL 檔案目錄
+# ==========================================
+$connectionString = 'Data Source=AMLIST;Initial Catalog=GCMAINDB;User ID=aml;Password=aml1234;Application Name="PATRIOT OFFICER"'
+$sqlFolder = "D:\SqlScripts"  # 請替換為您放置 .sql 檔案的實際目錄
 
-解密後是這樣
-Data Source=AMLIST;Initial Catalog=GCMAINDB;User ID=aml;Password=aml1234;Application Name="PATRIOT OFFICER"
+# 取得目錄下所有的 .sql 檔案（依檔名排序）
+$sqlFiles = Get-ChildItem -Path $sqlFolder -Filter "*.sql" | Sort-Object Name
 
+if ($sqlFiles.Count -eq 0) {
+    Write-Warning "指定目錄下找不到任何 .sql 檔案: $sqlFolder"
+    exit
+}
 
-我有辦法用power shell 來做這件事?
+# ==========================================
+# 2. 建立資料庫連線並依序執行
+# ==========================================
+$connection = New-Object System.Data.SqlClient.SqlConnection($connectionString)
 
-然後把指定目錄下的sql (insert code檔案 ) 執行寫入db ?
+try {
+    Write-Host "[資訊] 正在連線至資料庫..." -ForegroundColor Cyan
+    $connection.Open()
+    Write-Host "[成功] 資料庫連線成功！`n" -ForegroundColor Green
+
+    foreach ($file in $sqlFiles) {
+        Write-Host "----------------------------------------"
+        Write-Host "正在執行: $($file.Name) ..." -ForegroundColor Yellow
+
+        # 讀取 SQL 內容 (建議指定 UTF8 或 Default 編碼避免中文亂碼)
+        $sqlContent = Get-Content -Path $file.FullName -Raw -Encoding UTF8
+
+        # ADO.NET 不支援直接執行包含 'GO' 的批次指令，需使用正規表達式將其拆分
+        $statements = [System.Text.RegularExpressions.Regex]::Split(
+            $sqlContent, 
+            "^\s*GO\s*$", 
+            [System.Text.RegularExpressions.RegexOptions]::Multiline -bor [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+        )
+
+        foreach ($stmt in $statements) {
+            $trimmedStmt = $stmt.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($trimmedStmt)) {
+                $command = $connection.CreateCommand()
+                $command.CommandText = $trimmedStmt
+                $command.CommandTimeout = 300 # 設定逾時時間 (秒)，若檔案很大可調高
+
+                try {
+                    $rowsAffected = $command.ExecuteNonQuery()
+                    # rowsAffected 為 -1 通常代表 DDL 或 SET 指令，大於等於 0 代表受影響筆數
+                    if ($rowsAffected -ge 0) {
+                        Write-Host "  -> 執行成功，受影響筆數: $rowsAffected" -ForegroundColor Gray
+                    }
+                }
+                catch {
+                    Write-Error "  [錯誤] 執行 SQL 失敗: $($_.Exception.Message)"
+                    # 若希望出錯時立即中斷腳本，可取消下一行註解：
+                    # throw $_
+                }
+                finally {
+                    $command.Dispose()
+                }
+            }
+        }
+        Write-Host "[完成] $($file.Name) 執行完畢。" -ForegroundColor Green
+    }
+}
+catch {
+    Write-Error "[連線/執行錯誤] $($_.Exception.Message)"
+}
+finally {
+    # 確保連線一定會關閉
+    if ($connection.State -eq [System.Data.ConnectionState]::Open) {
+        $connection.Close()
+        Write-Host "`n[資訊] 資料庫連線已安全關閉。" -ForegroundColor Cyan
+    }
+    $connection.Dispose()
+}
