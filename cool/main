@@ -1,72 +1,153 @@
-="INSERT INTO WORKFLOW_MGMT_AutomatedUserSetting_Taishin (BankNo, ModuleCode, IsByBranch, UserRole, PermCode) VALUES ('" & A2 & "', '" & B2 & "', " & C2 & ", " & D2 & ", '" & E2 & "');"
+# ==========================================
+# 自動抓取 LDAP 連線資訊 + 批次執行 Split 資料夾內所有 SQL
+# ==========================================
 
+# 1. 資料夾準備與全域 Log 初始化
+$LogFolder = Join-Path -Path $PSScriptRoot -ChildPath "Log"
+if (-not (Test-Path -Path $LogFolder)) {
+    New-Item -ItemType Directory -Path $LogFolder | Out-Null
+}
 
+$Timestamp   = Get-Date -Format "yyyyMMdd_HHmmss"
+$MainLogFile = Join-Path -Path $LogFolder -ChildPath "Execution_$Timestamp.log"
 
+function Write-Log {
+    param (
+        [string]$Message,
+        [ConsoleColor]$ForegroundColor = [ConsoleColor]::White,
+        [switch]$IsError
+    )
+    $timePrefix   = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $formattedMsg = "[$timePrefix] $Message"
+    
+    Write-Host $Message -ForegroundColor $ForegroundColor
+    Add-Content -Path $MainLogFile -Value $formattedMsg -Encoding UTF8
+}
 
-在 SQL Server 中，可以直接透過 DELETE ... FROM ... JOIN 或 DELETE ... WHERE ... IN 的方式來完成這項跨資料庫的批次刪除作業。
-1. 先確認即將被刪除的資料（建議先 Preview）
-在執行刪除前，建議先執行此查詢確認目標筆數與內容：
-SELECT T.*
-FROM BSADBJP..OFAC_SPEC T
-INNER JOIN (
-    SELECT DISTINCT A.FullName
-    FROM BSADB.dbo.DJ_Entity A
-    INNER JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-    WHERE A.Deceased = 1
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-) S ON T.spec_name = S.FullName
-WHERE T.GROUPID = '5';
+Write-Log "=== 開始執行 Split 資料夾 SQL 批次處理作業 ===" -ForegroundColor Cyan
+Write-Log "主執行紀錄檔: $MainLogFile" -ForegroundColor DarkGray
 
-2. 執行刪除語法（含安全事務機制）
-BEGIN TRANSACTION;
+# ==========================================
+# 2. 載入 LDAP DLL 並取得連線字串
+# ==========================================
+$dllPath = Join-Path -Path $PSScriptRoot -ChildPath "Tsbldapdbc.dll"
 
-DELETE T
-FROM BSADBJP..OFAC_SPEC T
-INNER JOIN (
-    SELECT DISTINCT A.FullName
-    FROM BSADB.dbo.DJ_Entity A
-    INNER JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-    WHERE A.Deceased = 1
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-) S ON T.spec_name = S.FullName
-WHERE T.GROUPID = '5';
+if (-not (Test-Path -Path $dllPath)) {
+    Write-Log "錯誤：找不到 DLL 檔案: $dllPath" -ForegroundColor Red -IsError
+    exit 1
+}
 
--- 檢查受影響的筆數是否正確：
--- 若正確無誤請執行： COMMIT TRANSACTION;
--- 若筆數有異請執行： ROLLBACK TRANSACTION;
+try {
+    if (-not ([System.Management.Automation.PSTypeName]'Tsbldapdbc.RunBat').Type) {
+        Add-Type -Path $dllPath
+    }
 
-替代寫法：使用 WHERE ... IN
-BEGIN TRANSACTION;
+    $App = New-Object Tsbldapdbc.RunBat
+    $App.SSL = $false
+    $App.ldapHost = "10.13.60.66"
+    $App.searchBase = "o=tsbank"
+    $sApp = "AML"
+    $iCStr = 7
 
-DELETE FROM BSADBJP..OFAC_SPEC
-WHERE GROUPID = '5'
-  AND spec_name IN (
-      SELECT A.FullName
-      FROM BSADB.dbo.DJ_Entity A
-      INNER JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-      WHERE A.Deceased = 1
-        AND B.SanctionListReference LIKE '%Japanese Finance%'
-  );
+    $connStr = $App.GetRunBat($sApp, $iCStr)
+}
+catch {
+    Write-Log "錯誤：讀取 LDAP 連線資訊時發生例外: $($_.Exception.Message)" -ForegroundColor Red -IsError
+    exit 1
+}
 
-COMMIT TRANSACTION;
+# ==========================================
+# 3. 自動解析連線字串參數
+# ==========================================
+$Server   = if ($connStr -match '(?:Data Source|Server)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
+$Database = if ($connStr -match '(?:Initial Catalog|Database)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
+$User     = if ($connStr -match '(?:User ID|UID)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
+$Password = if ($connStr -match '(?:Password|PWD)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
 
+$authMode = if ([string]::IsNullOrWhiteSpace($User)) { "Windows 信任驗證 (-E)" } else { "SQL 驗證 (User: $User)" }
+Write-Log "解析連線資訊 -> Server: $Server | DB: $Database | 驗證模式: $authMode" -ForegroundColor DarkCyan
 
+if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($Database)) {
+    Write-Log "錯誤：無法正確解析 Server 或 Database 連線資訊！" -ForegroundColor Red -IsError
+    exit 1
+}
 
+# ==========================================
+# 4. 偵測 Split 資料夾並抓取所有 .sql 檔案
+# ==========================================
+$SplitFolder = Join-Path -Path $PSScriptRoot -ChildPath "Split"
 
-	SELECT 
-		A.EntityId, 
-        A.FullName, 
-        MAX(CONVERT(VARCHAR,A.UpdatedDate_UTC,112)) AS UpdatedDate
-    FROM BSADB.dbo.DJ_Entity A
-    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-    WHERE A.Deceased = 1
-      AND B.SanctionListReference LIKE '%Japanese Finance%' 
-    GROUP BY A.EntityId, A.FullName;
+if (-not (Test-Path -Path $SplitFolder -PathType Container)) {
+    Write-Log "錯誤：找不到 Split 資料夾 -> $SplitFolder" -ForegroundColor Red -IsError
+    exit 1
+}
 
-	我要把這邊得到的fullname 帶進去
-	下面的spec_name 
-	如果有比對到
+# 使用自然排序邏輯（避免 10_xxx.sql 排在 2_xxx.sql 前面）
+$SqlFiles = Get-ChildItem -Path $SplitFolder -Filter "*.sql" -File | 
+    Sort-Object { [regex]::Replace($_.Name, '\d+', { $args[0].Value.PadLeft(8, '0') }) }
 
-	就把BSADBJP..OFAC_SPEC  對應的 spec_name 那筆刪除掉
+if ($SqlFiles.Count -eq 0) {
+    Write-Log "錯誤：在 Split 資料夾內找不到任何 .sql 檔案，結束作業。" -ForegroundColor Red -IsError
+    exit 1
+}
 
-					SELECT * FROM BSADBJP..OFAC_SPEC WHERE GROUPID = '5' AND spec_name = ''
+Write-Log "共在 Split 資料夾中確認 $($SqlFiles.Count) 個 SQL 檔案待處理。" -ForegroundColor Green
+
+# ==========================================
+# 5. 逐一執行各 SQL 檔案
+# ==========================================
+$HasError = $false
+
+foreach ($file in $SqlFiles) {
+    $BaseName = $file.BaseName
+    $FileLog  = Join-Path -Path $LogFolder -ChildPath "detail_$($BaseName)_$Timestamp.log"
+
+    Write-Log ""
+    Write-Log "-----------------------------------------"
+    Write-Log "開始執行檔案: $($file.Name)" -ForegroundColor Yellow
+
+    # 動態組裝 sqlcmd 參數陣列
+    $sqlcmdParams = @(
+        "-b",                    # 遇錯回傳非 0 狀態碼
+        "-r", "1",               # 錯誤訊息重導輸出
+        "-f", "65001",           # 設定字碼頁為 UTF-8，防止中文與特殊符號亂碼
+        "-S", $Server,
+        "-d", $Database,
+        "-i", $file.FullName,
+        "-o", $FileLog
+    )
+
+    # 判斷是 SQL 驗證還是 Windows 驗證
+    if (-not [string]::IsNullOrWhiteSpace($User)) {
+        $sqlcmdParams += @("-U", $User, "-P", $Password)
+    } else {
+        $sqlcmdParams += "-E"
+    }
+
+    # 執行 sqlcmd
+    & sqlcmd.exe @sqlcmdParams
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Log "SUCCESS：$($file.Name) 執行成功" -ForegroundColor Green
+    } else {
+        Write-Log "FAILED：$($file.Name) 執行失敗！(ExitCode: $LASTEXITCODE)" -ForegroundColor Red -IsError
+        Write-Log "請檢查詳細錯誤紀錄：$FileLog" -ForegroundColor Yellow
+        $HasError = $true
+        break
+    }
+}
+
+# ==========================================
+# 6. 最終結果與 Exit Code 回傳
+# ==========================================
+Write-Log ""
+Write-Log "========================================="
+if (-not $HasError) {
+    Write-Log "全部 SQL 檔案皆已成功執行完成！" -ForegroundColor Green
+    Write-Log "========================================="
+    exit 0
+} else {
+    Write-Log "作業未完全執行，發生錯誤中斷！" -ForegroundColor Red
+    Write-Log "========================================="
+    exit 1
+}
