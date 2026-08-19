@@ -1,6 +1,7 @@
 
 Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 
+Unblock-File -Path "D:\1141923\DB connect\GODB.ps1"
 
 
  客戶開戶已滿 764 天（非 30 天內新戶）。
