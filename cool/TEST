@@ -3,3 +3,4 @@ D:\TEST>Start-Process powershell.exe -ArgumentList "-NoProfile -File GODB.ps1
 
 D:\TEST>
 
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File GODB.ps1
