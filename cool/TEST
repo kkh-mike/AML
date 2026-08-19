@@ -1,5 +1,5 @@
 # ==========================================
-# 自動抓取 LDAP 連線資訊 + 指定清單 SQL 批次執行
+# 自動抓取 LDAP 連線資訊 + 批次執行 Split 資料夾內所有 SQL
 # ==========================================
 
 # 1. 資料夾準備與全域 Log 初始化
@@ -24,7 +24,7 @@ function Write-Log {
     Add-Content -Path $MainLogFile -Value $formattedMsg -Encoding UTF8
 }
 
-Write-Log "=== 開始執行指定 SQL 批次處理作業 ===" -ForegroundColor Cyan
+Write-Log "=== 開始執行 Split 資料夾 SQL 批次處理作業 ===" -ForegroundColor Cyan
 Write-Log "主執行紀錄檔: $MainLogFile" -ForegroundColor DarkGray
 
 # ==========================================
@@ -70,43 +70,24 @@ if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($Data
 }
 
 # ==========================================
-# 4. 定義欲指定的 SQL 檔案清單並驗證存在性
+# 4. 偵測 Split 資料夾並抓取所有 .sql 檔案
 # ==========================================
-$TargetFileList = @(
-    "BRANCH_SK.sql",
-    "BatchControl.sql",
-    "SAR_Acct_Info.sql",
-    "SAR_Case_Main.sql",
-    "SAR_Case_Trxn_Branch.sql",
-    "SAR_Case_Trxn_Date_Range.sql",
-    "SAR_Conductor_Info.sql",
-    "SAR_Matched_Scenarios.sql",
-    "SAR_Suspect_Info.sql",
-    "SAR_Trxn_Detail_T1200017.sql",
-    "SAR_Trxn_Detail_T1200162.sql",
-    "SAR_Trxn_Summary.sql",
-    "SK_SAR_SuspiciousActivityCharacteristicsDim.Table.sql"
-)
+$SplitFolder = Join-Path -Path $PSScriptRoot -ChildPath "Split"
 
-$SqlFiles = @()
-
-foreach ($rawName in $TargetFileList) {
-    $cleanName = $rawName.Trim().TrimEnd(';')
-    $fullPath  = Join-Path -Path $PSScriptRoot -ChildPath $cleanName
-
-    if (Test-Path -Path $fullPath) {
-        $SqlFiles += Get-Item -Path $fullPath
-    } else {
-        Write-Log "警告：指定檔案不存在，已略過 -> $cleanName" -ForegroundColor Yellow
-    }
-}
-
-if ($SqlFiles.Count -eq 0) {
-    Write-Log "錯誤：找不到任何有效的指定 SQL 檔案，結束作業。" -ForegroundColor Red -IsError
+if (-not (Test-Path -Path $SplitFolder -PathType Container)) {
+    Write-Log "錯誤：找不到 Split 資料夾 -> $SplitFolder" -ForegroundColor Red -IsError
     exit 1
 }
 
-Write-Log "共確認 $($SqlFiles.Count) 個指定 SQL 檔案待處理。" -ForegroundColor Green
+# 取得 Split 資料夾下所有 .sql 檔案，依檔名順序排序
+$SqlFiles = Get-ChildItem -Path $SplitFolder -Filter "*.sql" -File | Sort-Object Name
+
+if ($SqlFiles.Count -eq 0) {
+    Write-Log "錯誤：在 Split 資料夾內找不到任何 .sql 檔案，結束作業。" -ForegroundColor Red -IsError
+    exit 1
+}
+
+Write-Log "共在 Split 資料夾中確認 $($SqlFiles.Count) 個 SQL 檔案待處理。" -ForegroundColor Green
 
 # ==========================================
 # 5. 逐一執行各 SQL 檔案
@@ -149,7 +130,7 @@ foreach ($file in $SqlFiles) {
 Write-Log ""
 Write-Log "========================================="
 if (-not $HasError) {
-    Write-Log "全部指定 SQL 檔案皆已成功執行完成！" -ForegroundColor Green
+    Write-Log "全部 SQL 檔案皆已成功執行完成！" -ForegroundColor Green
     Write-Log "========================================="
     exit 0
 } else {
@@ -157,7 +138,3 @@ if (-not $HasError) {
     Write-Log "========================================="
     exit 1
 }
-
-
-
-我要改成 找到目錄下 Split 資料夾  把裡面的.sql 全部執行
