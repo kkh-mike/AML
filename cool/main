@@ -1,5 +1,5 @@
 # ==========================================
-# 自動抓取 LDAP 連線資訊 + 批次執行 Split 資料夾內 SQL + 執行 BatchID Update
+# 自動抓取 LDAP 連線資訊 + 批次執行 Split 資料夾內 SQL + 執行各 Table Update
 # ==========================================
 
 # 1. 資料夾準備與全域 Log 初始化
@@ -127,13 +127,12 @@ if ($HasError) {
 }
 
 # ==========================================
-# 6. 解析 BatchControl.sql 取得 BatchID 並執行 UPDATE
+# 6. 解析 BatchControl.sql 取得 BatchID 並逐一 Update 各 Table
 # ==========================================
 Write-Log ""
-Write-Log "-----------------------------------------"
-Write-Log "開始處理 BatchControl.sql 取得 BatchID 並執行關聯更新..." -ForegroundColor Cyan
+Write-Log "========================================="
+Write-Log "開始讀取 BatchControl.sql 擷取 BatchID..." -ForegroundColor Cyan
 
-# 優先在腳本根目錄尋找，找不到則至 Split 目錄尋找
 $BatchControlPath = Join-Path -Path $PSScriptRoot -ChildPath "BatchControl.sql"
 if (-not (Test-Path $BatchControlPath)) {
     $BatchControlPath = Join-Path -Path $SplitFolder -ChildPath "BatchControl.sql"
@@ -144,7 +143,7 @@ if (-not (Test-Path $BatchControlPath)) {
     exit 1
 }
 
-# 讀取檔案內容並以正則表達式擷取 BatchID (支援 VALUES (N'...' 或 VALUES ('...')
+# 擷取 BatchID
 $batchFileContent = Get-Content -Path $BatchControlPath -Raw -Encoding UTF8
 if ($batchFileContent -match "VALUES\s*\(\s*N?'([^']+)'") {
     $ExtractedBatchID = $matches[1].Trim()
@@ -154,83 +153,57 @@ if ($batchFileContent -match "VALUES\s*\(\s*N?'([^']+)'") {
     exit 1
 }
 
-# 動態組裝 7 筆 UPDATE SQL
-$UpdateSqlContent = @"
-USE [SARCaseWarehouse]
-GO
+# 定義欲更新的 7 個 Table 清單
+$targetTables = @(
+    "SAR_Acct_Info",
+    "SAR_Conductor_Info",
+    "SAR_Matched_Scenarios",
+    "SAR_Suspect_Info",
+    "SAR_Trxn_Detail",
+    "SAR_Trxn_Detail_All",
+    "SAR_Trxn_Detail_T1200017"
+)
 
--- 1. SAR_Acct_Info
+Write-Log "開始執行各 Table 的 CustomerNo 更新 (共 $($targetTables.Count) 個 Table)..." -ForegroundColor Cyan
+
+$UpdateHasError = $false
+
+foreach ($tbl in $targetTables) {
+    $UpdateLogFile = Join-Path -Path $LogFolder -ChildPath "Update_${tbl}_$Timestamp.log"
+    
+    # 組裝該 Table 的 Update 語法
+    $sqlCmdText = @"
+USE [SARCaseWarehouse];
 UPDATE s
 SET s.CustomerNo = c.TS_CUST_ID
-FROM SAR_Acct_Info s
+FROM $tbl s
 INNER JOIN BSADBTW..BANCS_SK_CUST_INFO c ON s.CustomerNo = c.SK_CUST_ID
 WHERE s.BatchID = '$ExtractedBatchID';
-
--- 2. SAR_Conductor_Info
-UPDATE s
-SET s.CustomerNo = c.TS_CUST_ID
-FROM SAR_Conductor_Info s
-INNER JOIN BSADBTW..BANCS_SK_CUST_INFO c ON s.CustomerNo = c.SK_CUST_ID
-WHERE s.BatchID = '$ExtractedBatchID';
-
--- 3. SAR_Matched_Scenarios
-UPDATE s
-SET s.CustomerNo = c.TS_CUST_ID
-FROM SAR_Matched_Scenarios s
-INNER JOIN BSADBTW..BANCS_SK_CUST_INFO c ON s.CustomerNo = c.SK_CUST_ID
-WHERE s.BatchID = '$ExtractedBatchID';
-
--- 4. SAR_Suspect_Info
-UPDATE s
-SET s.CustomerNo = c.TS_CUST_ID
-FROM SAR_Suspect_Info s
-INNER JOIN BSADBTW..BANCS_SK_CUST_INFO c ON s.CustomerNo = c.SK_CUST_ID
-WHERE s.BatchID = '$ExtractedBatchID';
-
--- 5. SAR_Trxn_Detail
-UPDATE s
-SET s.CustomerNo = c.TS_CUST_ID
-FROM SAR_Trxn_Detail s
-INNER JOIN BSADBTW..BANCS_SK_CUST_INFO c ON s.CustomerNo = c.SK_CUST_ID
-WHERE s.BatchID = '$ExtractedBatchID';
-
--- 6. SAR_Trxn_Detail_All
-UPDATE s
-SET s.CustomerNo = c.TS_CUST_ID
-FROM SAR_Trxn_Detail_All s
-INNER JOIN BSADBTW..BANCS_SK_CUST_INFO c ON s.CustomerNo = c.SK_CUST_ID
-WHERE s.BatchID = '$ExtractedBatchID';
-
--- 7. SAR_Trxn_Detail_T1200017
-UPDATE s
-SET s.CustomerNo = c.TS_CUST_ID
-FROM SAR_Trxn_Detail_T1200017 s
-INNER JOIN BSADBTW..BANCS_SK_CUST_INFO c ON s.CustomerNo = c.SK_CUST_ID
-WHERE s.BatchID = '$ExtractedBatchID';
-GO
 "@
 
-$UpdateSqlFile = Join-Path -Path $LogFolder -ChildPath "Update_CustomerNo_$Timestamp.sql"
-$UpdateLogFile = Join-Path -Path $LogFolder -ChildPath "Update_CustomerNo_$Timestamp.log"
+    Write-Log "正在更新 Table: $tbl ..." -ForegroundColor Yellow
 
-Set-Content -Path $UpdateSqlFile -Value $UpdateSqlContent -Encoding UTF8
+    sqlcmd `
+        -b `
+        -r 1 `
+        -S $Server `
+        -U $User `
+        -P $Password `
+        -d $Database `
+        -Q $sqlCmdText `
+        -o $UpdateLogFile
 
-Write-Log "正在執行 BatchID ($ExtractedBatchID) CustomerNo 更新作業..." -ForegroundColor Yellow
+    if ($LASTEXITCODE -eq 0) {
+        Write-Log "SUCCESS：Table [$tbl] update成功" -ForegroundColor Green
+    } else {
+        Write-Log "FAILED：Table [$tbl] update失敗！請檢查 $UpdateLogFile" -ForegroundColor Red -IsError
+        $UpdateHasError = $true
+        break
+    }
+}
 
-sqlcmd `
-    -b `
-    -r 1 `
-    -S $Server `
-    -U $User `
-    -P $Password `
-    -d $Database `
-    -i $UpdateSqlFile `
-    -o $UpdateLogFile
-
-if ($LASTEXITCODE -eq 0) {
-    Write-Log "SUCCESS：CustomerNo 更新指令執行成功" -ForegroundColor Green
-} else {
-    Write-Log "FAILED：CustomerNo 更新失敗！請檢查 $UpdateLogFile" -ForegroundColor Red -IsError
+if ($UpdateHasError) {
+    Write-Log "更新 Table 時發生錯誤，中斷作業！" -ForegroundColor Red -IsError
     exit 1
 }
 
@@ -239,6 +212,6 @@ if ($LASTEXITCODE -eq 0) {
 # ==========================================
 Write-Log ""
 Write-Log "========================================="
-Write-Log "全部 SQL 檔案與 BatchID 更新作業皆已成功執行完成！" -ForegroundColor Green
+Write-Log "全部 SQL 檔案與所有 Table 更新皆已成功執行完成！" -ForegroundColor Green
 Write-Log "========================================="
 exit 0
