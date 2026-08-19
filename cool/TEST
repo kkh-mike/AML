@@ -20,21 +20,17 @@ if ($ret2 -like "Error:*" -or [string]::IsNullOrWhiteSpace($ret2)) {
     exit 1
 }
 
-# 2. 解析連線字串並抽換 Database
-$builder = New-Object System.Data.SqlClient.SqlConnectionStringBuilder($ret2)
-
-# 指定目標資料庫名稱
-$builder.InitialCatalog = "SARCaseWarehouse"  # 對應 Database
-
-$server   = $builder.DataSource               # Server / Data Source
-$user     = $builder.UserID                   # User ID
-$password = $builder.Password                 # Password
-$targetDb = $builder.InitialCatalog
+# 2. 將 Database 替換為 SARCaseWarehouse
+$targetDb = "SARCaseWarehouse"
+if ($ret2 -match "(?i)database=[^;]+") {
+    $finalConnStr = $ret2 -replace "(?i)database=[^;]+", "database=$targetDb"
+} else {
+    $finalConnStr = "$ret2;database=$targetDb"
+}
 
 Write-Host "=========================================="
-Write-Host "Target Server   : $server"
-Write-Host "Target Database : $targetDb"
-Write-Host "User            : $user"
+Write-Host "Final Connection String : $finalConnStr"
+Write-Host "Target Database         : $targetDb"
 Write-Host "=========================================="
 
 # 3. 搜尋當下目錄下所有的 .sql 檔案
@@ -46,7 +42,7 @@ if ($sqlFiles.Count -eq 0) {
 }
 
 # 4. 連線資料庫並逐一執行 .sql
-$conn = New-Object System.Data.SqlClient.SqlConnection($builder.ConnectionString)
+$conn = New-Object System.Data.SqlClient.SqlConnection($finalConnStr)
 
 try {
     Write-Host "正在連線至資料庫..."
@@ -56,7 +52,7 @@ try {
     foreach ($file in $sqlFiles) {
         Write-Host "正在執行: $($file.Name) ..."
         
-        # 讀取 SQL 內容 (依編碼需求可調整 -Encoding UTF8 或 Default)
+        # 讀取 SQL 檔案內容
         $sqlContent = Get-Content -Path $file.FullName -Raw -Encoding UTF8
 
         if ([string]::IsNullOrWhiteSpace($sqlContent)) {
@@ -64,14 +60,14 @@ try {
             continue
         }
 
-        # 處理 T-SQL 中常見的 GO 分隔符號（如果有的話）
+        # 處理 T-SQL 中常見的 GO 分隔符號
         $statements = $sqlContent -split "(?im)^\s*GO\s*$"
 
         foreach ($stmt in $statements) {
             if (-not [string]::IsNullOrWhiteSpace($stmt)) {
                 $cmd = $conn.CreateCommand()
                 $cmd.CommandText = $stmt
-                $cmd.CommandTimeout = 300  # 設定逾時秒數 (可依需求調整)
+                $cmd.CommandTimeout = 300  # 設定逾時秒數
                 [void]$cmd.ExecuteNonQuery()
             }
         }
