@@ -161,6 +161,11 @@ INSERT [dbo].[BatchControl] ([BatchID], [Created_DTE], [Inserted_DTE], [SAR_Case
 填入下面去做update  
 
 
+
+USE [SARCaseWarehouse]
+GO
+
+
 -- 1. SAR_Acct_Info
 UPDATE s
 SET s.CustomerNo = c.TS_CUST_ID
