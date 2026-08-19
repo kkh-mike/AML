@@ -96,7 +96,8 @@ $HasError = $false
 
 foreach ($file in $SqlFiles) {
     $BaseName = $file.BaseName
-    $FileLog  = Join-Path $LogFolder "$($BaseName)_$Timestamp.log"
+    # 個別 SQL 的輸出記錄檔加上 detail_ 開頭
+    $FileLog  = Join-Path $LogFolder "detail_$($BaseName)_$Timestamp.log"
 
     Write-Log ""
     Write-Log "-----------------------------------------"
@@ -138,7 +139,3 @@ if (-not $HasError) {
     Write-Log "========================================="
     exit 1
 }
-
-
-
-這個存的log 名稱 開頭可以加上detail_
