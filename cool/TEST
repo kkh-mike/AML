@@ -1,8 +1,18 @@
-# 取得此 ps1 指令碼所在資料夾內的 Tsbldapdbc.dll
+# ==========================================
+# 自動抓取 LDAP 連線資訊 + 目錄下所有 SQL 分割執行
+# ==========================================
+
+# 1. 載入 LDAP DLL 並取得連線字串
 $dllPath = Join-Path -Path $PSScriptRoot -ChildPath "Tsbldapdbc.dll"
 
-# 載入 DLL
-Add-Type -Path $dllPath
+if (-not (Test-Path -Path $dllPath)) {
+    Write-Error "找不到 DLL 檔案: $dllPath"
+    exit 1
+}
+
+if (-not ([System.Management.Automation.PSTypeName]'Tsbldapdbc.RunBat').Type) {
+    Add-Type -Path $dllPath
+}
 
 $App = New-Object Tsbldapdbc.RunBat
 $App.SSL = $false
@@ -10,156 +20,129 @@ $App.ldapHost = "10.13.60.66"
 $App.searchBase = "o=tsbank"
 $sApp = "AML"
 $iCStr = 7
-$ret2 = $App.GetRunBat($sApp, $iCStr)
-Write-Host "Result: $ret2"
 
+$connStr = $App.GetRunBat($sApp, $iCStr)
+Write-Host "取得連線字串: $connStr" -ForegroundColor Cyan
 
+# 2. 自動解析連線字串參數 (Data Source, Initial Catalog, User ID, Password)
+$builder = New-Object System.Data.Common.DbConnectionStringBuilder
+$builder.ConnectionString = $connStr
 
-他會得到
-Result: Data Source=amlist;Initial Catalog=RPADB;Persist Security Info=True;User ID=AML;Password=aml1234
+$Server   = if ($builder.ContainsKey("Data Source")) { $builder["Data Source"] } else { $builder["Server"] }
+$Database = if ($builder.ContainsKey("Initial Catalog")) { $builder["Initial Catalog"] } else { $builder["Database"] }
+$User     = if ($builder.ContainsKey("User ID")) { $builder["User ID"] } else { $builder["UID"] }
+$Password = if ($builder.ContainsKey("Password")) { $builder["Password"] } else { $builder["PWD"] }
 
-我要用得到的資訊改下面的，但我要改成執行目錄下所有的.sql
+Write-Host "解析連線資訊 -> Server: $Server | DB: $Database | User: $User" -ForegroundColor DarkCyan
 
 # ==========================================
-# SAR_Trxn_Detail_All.sql
-# 自動分割 + 依序執行 SQL
+# 3. 資料夾準備
 # ==========================================
-$SourceFile = ".\SAR_Trxn_Detail_All.sql"
-$OutputFolder = ".\Split"
-$LogFolder    = ".\Log"
-$Server   = "amlist"
-$User     = "aml"
-$Password = "aml1234"
-$Database = "SARCaseWarehouse"
-# ==========================================
-# 1. 檢查來源 SQL
-# ==========================================
-if (!(Test-Path $SourceFile)) {
-    Write-Host "找不到 $SourceFile" -ForegroundColor Red
-    exit 1
-}
-# ==========================================
-# 2. 建立資料夾
-# ==========================================
+$OutputFolder = Join-Path -Path $PSScriptRoot -ChildPath "Split"
+$LogFolder    = Join-Path -Path $PSScriptRoot -ChildPath "Log"
+
 if (!(Test-Path $OutputFolder)) {
     New-Item -ItemType Directory -Path $OutputFolder | Out-Null
 }
 if (!(Test-Path $LogFolder)) {
     New-Item -ItemType Directory -Path $LogFolder | Out-Null
 }
+
+# 清除舊的分割 SQL 與 Log
+Write-Host "清除舊的 Split 與 Log 檔案..."
+Remove-Item "$OutputFolder\*.sql" -Force -ErrorAction SilentlyContinue
+Remove-Item "$LogFolder\*.log" -Force -ErrorAction SilentlyContinue
+
 # ==========================================
-# 3. 清除舊的分割 SQL / Log
+# 4. 搜尋當前目錄下所有的 .sql 檔案（排除 Split 目錄）
 # ==========================================
-Write-Host "清除舊檔案..."
-Remove-Item "$OutputFolder\SAR_Trxn_Detail_All_*.sql" -Force -ErrorAction SilentlyContinue
-Remove-Item "$LogFolder\SAR_Trxn_Detail_All_*.log" -Force -ErrorAction SilentlyContinue
-# ==========================================
-# 4. 讀取原始 SQL
-# ==========================================
-Write-Host "讀取 $SourceFile ..."
-$Content = Get-Content $SourceFile -Raw
-# ==========================================
-# 5. 依 GO 分割
-# ==========================================
-# GO 必須獨立一行
-$Batches = [regex]::Split(
-    $Content,
-    '(?im)^\s*GO\s*;?\s*$'
-)
-# ==========================================
-# 6. 移除空白 Batch
-# ==========================================
-$Batches = $Batches |
-    Where-Object {
-        ![string]::IsNullOrWhiteSpace($_)
-    }
-Write-Host ""
-Write-Host "共找到 $($Batches.Count) 個 SQL Batch"
-Write-Host ""
-# ==========================================
-# 7. 產生分割 SQL
-# ==========================================
-$Index = 1
-foreach ($Batch in $Batches) {
-    $OutputFile = Join-Path `
-        $OutputFolder `
-        "SAR_Trxn_Detail_All_$Index.sql"
-    # 補回 GO，讓每個檔案可以獨立執行
-    $SqlContent = $Batch.Trim() + "`r`nGO`r`n"
-    Set-Content `
-        -Path $OutputFile `
-        -Value $SqlContent `
-        -Encoding UTF8
-    Write-Host "產生：$OutputFile"
-    $Index++
+$SqlFiles = Get-ChildItem -Path $PSScriptRoot -Filter "*.sql" -File | 
+            Where-Object { $_.DirectoryName -ne $OutputFolder }
+
+if ($SqlFiles.Count -eq 0) {
+    Write-Host "目前目錄找不到任何 .sql 檔案！" -ForegroundColor Yellow
+    Read-Host "按 Enter 結束"
+    exit 0
 }
+
+Write-Host "找到 $($SqlFiles.Count) 個 SQL 主檔案待處理。" -ForegroundColor Green
+
 # ==========================================
-# 8. 開始執行 SQL
+# 5. 逐一處理每個 SQL 檔案
 # ==========================================
-Write-Host ""
-Write-Host "========================================="
-Write-Host "開始執行 SQL"
-Write-Host "========================================="
-Write-Host ""
-$Total  = $Batches.Count
-$Success = 0
-$Failed  = 0
-for ($i = 1; $i -le $Total; $i++) {
-    $SqlFile = Join-Path `
-        $OutputFolder `
-        "SAR_Trxn_Detail_All_$i.sql"
-    $LogFile = Join-Path `
-        $LogFolder `
-        "SAR_Trxn_Detail_All_$i.log"
-    Write-Host "-----------------------------------------"
-    Write-Host "執行 [$i / $Total]"
-    Write-Host "$SqlFile"
-    Write-Host "-----------------------------------------"
-    sqlcmd `
-        -S $Server `
-        -U $User `
-        -P $Password `
-        -d $Database `
-        -i $SqlFile `
-        -o $LogFile
-    $ExitCode = $LASTEXITCODE
-    if ($ExitCode -eq 0) {
-        Write-Host "SUCCESS：第 $i 份執行成功" `
-            -ForegroundColor Green
-        $Success++
+$HasError = $false
+
+foreach ($file in $SqlFiles) {
+    $BaseName = $file.BaseName
+    Write-Host ""
+    Write-Host "=========================================" -ForegroundColor Yellow
+    Write-Host "開始處理檔案: $($file.Name)" -ForegroundColor Yellow
+    Write-Host "=========================================" -ForegroundColor Yellow
+
+    # 讀取並依 GO 分割
+    $Content = Get-Content $file.FullName -Raw
+    $Batches = [regex]::Split($Content, '(?im)^\s*GO\s*;?\s*$') | 
+               Where-Object { ![string]::IsNullOrWhiteSpace($_) }
+
+    Write-Host "共切割為 $($Batches.Count) 個 Batch"
+
+    # 產出分割檔
+    $BatchFiles = @()
+    $Index = 1
+    foreach ($Batch in $Batches) {
+        $OutputFile = Join-Path $OutputFolder "$($BaseName)_$Index.sql"
+        $SqlContent = $Batch.Trim() + "`r`nGO`r`n"
+        Set-Content -Path $OutputFile -Value $SqlContent -Encoding UTF8
+        $BatchFiles += $OutputFile
+        $Index++
     }
-    else {
-        Write-Host "FAILED：第 $i 份執行失敗" `
-            -ForegroundColor Red
-        Write-Host "請檢查：$LogFile" `
-            -ForegroundColor Yellow
-        $Failed++
-        # 遇到錯誤就停止
+
+    # 依序執行分割後的 SQL
+    $CurrentIndex = 1
+    foreach ($SqlFile in $BatchFiles) {
+        $LogFile = Join-Path $LogFolder "$($BaseName)_$CurrentIndex.log"
+
+        Write-Host "-----------------------------------------"
+        Write-Host "執行 [$CurrentIndex / $($Batches.Count)] -> $(Split-Path $SqlFile -Leaf)"
+        
+        # 呼叫 sqlcmd 執行
+        sqlcmd `
+            -S $Server `
+            -U $User `
+            -P $Password `
+            -d $Database `
+            -i $SqlFile `
+            -o $LogFile
+
+        $ExitCode = $LASTEXITCODE
+        if ($ExitCode -eq 0) {
+            Write-Host "SUCCESS：第 $CurrentIndex 份執行成功" -ForegroundColor Green
+        } else {
+            Write-Host "FAILED：第 $CurrentIndex 份執行失敗！" -ForegroundColor Red
+            Write-Host "請檢查 Log：$LogFile" -ForegroundColor Yellow
+            $HasError = $true
+            break
+        }
+        $CurrentIndex++
+    }
+
+    if ($HasError) {
         Write-Host ""
-        Write-Host "SQL 執行失敗，停止後續執行。" `
-            -ForegroundColor Red
+        Write-Host "檔案 [$($file.Name)] 執行發生錯誤，中斷後續所有作業。" -ForegroundColor Red
         break
     }
 }
+
 # ==========================================
-# 9. 執行結果
+# 6. 最終結果
 # ==========================================
 Write-Host ""
 Write-Host "========================================="
-Write-Host "執行完成"
+if (-not $HasError) {
+    Write-Host "全部 SQL 檔案與 Batch 皆已成功執行完成！" -ForegroundColor Green
+} else {
+    Write-Host "作業未完全執行，請檢查 Log。" -ForegroundColor Red
+}
 Write-Host "========================================="
-Write-Host "總 Batch：$Total"
-Write-Host "成功：$Success"
-Write-Host "失敗：$Failed"
-if ($Failed -eq 0) {
-    Write-Host ""
-    Write-Host "全部 SQL 執行成功！" `
-        -ForegroundColor Green
-}
-else {
-    Write-Host ""
-    Write-Host "有 SQL 執行失敗，請檢查 Log。" `
-        -ForegroundColor Red
-}
 Write-Host ""
 Read-Host "按 Enter 結束"
