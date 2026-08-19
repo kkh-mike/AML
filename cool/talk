@@ -12,3 +12,22 @@ $sApp = "AML"
 $iCStr = 1
 $ret2 = $App.GetRunBat($sApp, $iCStr)
 Write-Host "Result: $ret2"
+
+
+Result: server=AMLIST;database=QS;User ID=amlqs;Password=amlqs123;Max Pool Size=10
+
+會得到這些
+
+
+然後我想要用他得到的 
+
+Server   
+$User     
+$Password
+
+去
+$Database = "SARCaseWarehouse"
+
+執行當下目錄有的.sql
+
+
