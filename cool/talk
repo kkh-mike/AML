@@ -1,38 +1,59 @@
-如果要讓業務（User）能一目了然，建議將原本的程式語法轉換為**「由淺入深、分類清晰的業務邏輯」**。
-你可以直接使用以下整理好的說帖回覆 User：
-📢 建議對業務的回覆範本
-> 客戶狀態（OPEN / CLOSE）判定邏輯說明
-> 系統會依序依照以下原則進行評估，只要符合 OPEN 條件即判定為活躍客戶，其餘則為 CLOSE（不活躍）：
-> 1. 新開戶客戶（新戶寬限期）
->  * 開戶未滿 30 天內：系統一律強制視為 OPEN（保障新客戶權益與作業緩衝）。
-> 2. 擔保人身分客戶（GUARANTOR = 'Y'）
->  * 依照客戶基本狀態判定：
->    * 客戶狀態為 正常/有效（如代碼 000、002 或狀態註記為 1）👉 OPEN
->    * 客戶狀態為 無效/終止（如代碼 001、003 等）👉 CLOSE
-> 3. 一般既有客戶（開戶超過 30 天或無開戶日）
->  * 系統會進一步檢核名下是否有實質有效業務往來，只要符合下列任一項即為 OPEN，否則為 CLOSE：
->    * 擁有正常、非靜止且無管制的存款帳戶。
->    * 擁有正常且非靜止的帳戶餘額記錄。
->    * 擁有正常的授信/額度往來。
-> 💡 簡短結論：
-> 「新戶 30 天內一律有效；擔保人看基本狀態；一般舊戶則看名下是否有正常存款、餘額或授信額度，有任一項即為 OPEN。」
+要單獨把這名客戶（ID: 680477，CIF_CUST_INFO_SEQ = 3589985）名下的存款帳戶、餘額與授信額度明細拆開來看，確認具體是哪筆資料不符合條件，可以用以下幾種方式下 SQL：
+方法一：查看「關聯後的每筆明細與命中結果」（最推薦）
+把子查詢的 MAX() 與 GROUP BY 拿掉，直接看每一筆明細對應的欄位值與 CASE 判斷結果：
+SELECT 
+    ISNULL(acc.CIF_CUST_INFO_SEQ, fac.CIF_CUST_INFO_SEQ) AS CIF_CUST_INFO_SEQ,
+    -- 存款帳戶相關欄位
+    acc.DEP_ACC_SEQ,
+    acc.CASE_STATUS AS ACC_CASE_STATUS,
+    acc.ACC_TYPE,
+    acc.IS_DORMANT,
+    acc.SPECIAL_STATUS_CODE,
+    -- 餘額相關欄位
+    bal.CASE_STATUS AS BAL_CASE_STATUS,
+    -- 授信額度相關欄位
+    fac.FAC_STATUS,
+    -- 單筆判定結果 (只要全部是 'C' 就代表全部未命中)
+    CASE 
+        WHEN acc.CASE_STATUS = '01' 
+             AND acc.ACC_TYPE <> '02' 
+             AND acc.IS_DORMANT <> 'Y' 
+             AND ISNULL(acc.SPECIAL_STATUS_CODE, '01') NOT LIKE '%01%' THEN 'O'
+        WHEN bal.CASE_STATUS = '01' 
+             AND acc.IS_DORMANT <> 'Y' THEN 'O'
+        WHEN fac.FAC_STATUS = '05' THEN 'O'
+        ELSE 'C'
+    END AS Row_Record_Stat
+FROM WBS_DEP_ACC acc
+LEFT JOIN WBS_DEP_ACC_CCY_BAL bal 
+    ON bal.DEP_ACC_SEQ = acc.DEP_ACC_SEQ 
+    AND bal.CASE_STATUS = '01'
+FULL JOIN WBS_FAC_INFO fac 
+    ON fac.CIF_CUST_INFO_SEQ = acc.CIF_CUST_INFO_SEQ 
+    AND fac.FAC_STATUS = '05'
+WHERE ISNULL(acc.CIF_CUST_INFO_SEQ, fac.CIF_CUST_INFO_SEQ) = 3589985;
+
+方法二：分三張表「個別單獨查」
+如果你想分別檢查該客戶在個別原始表中的狀態，可以分開執行：
+1. 查存款帳戶表（WBS_DEP_ACC）
+SELECT DEP_ACC_SEQ, CASE_STATUS, ACC_TYPE, IS_DORMANT, SPECIAL_STATUS_CODE
+FROM WBS_DEP_ACC
+WHERE CIF_CUST_INFO_SEQ = 3589985;
+
+> 觀察點：看 CASE_STATUS 是否不等於 '01'、IS_DORMANT 是否為 'Y'、或 SPECIAL_STATUS_CODE 是否含 '01'。
 > 
-💡 溝通小撇步
- * 將 ? 30 天 明確化：業務只關心「新開戶算不算」，直接講「30 天內強制 OPEN」最直覺。
- * 抽象化子查詢（Subquery）：業務不需要知道 SQL 子查詢在查什麼表，只要告訴他是查「名下存款、餘額、授信是否有正常往來」即可。
+2. 查餘額表（WBS_DEP_ACC_CCY_BAL）
+SELECT b.*
+FROM WBS_DEP_ACC_CCY_BAL b
+JOIN WBS_DEP_ACC a ON a.DEP_ACC_SEQ = b.DEP_ACC_SEQ
+WHERE a.CIF_CUST_INFO_SEQ = 3589985;
 
-針對這名客戶（ID: 680485），他被判定為 OPEN 的原因可以濃縮為以下兩大關鍵：
-1. 脫離新戶寬限期，改看「實質帳戶狀態」
- * 客戶開戶日為 20241203，開戶天數為 624 天（已超過 30 天）。
- * 客戶非保證人（GUARANTOR = 'N'）。
- * 依照規則，開戶超過 30 天的一般客戶，系統會直接檢核名下的存款與授信狀態（即採用子查詢的 Sub_Record_Stat）。
-2. 名下具有「正常/有效的業務往來」（Sub_Record_Stat = 'O'）
-在子查詢中，該客戶名下的關聯資料至少符合了以下 3 個條件之一，因此被判定為 'O'：
- * 存款帳戶正常：名下有狀態為 01、非排除類型、非靜止戶且無管制的存款帳戶。
- * 帳戶餘額正常：名下有狀態為 01 且非靜止的帳戶餘額。
- * 授信額度正常：名下有狀態為 05 的有效授信額度。
-一句話結論
-> 「該客戶開戶已滿 30 天，且名下仍有『正常存款帳戶、正常餘額或有效授信額度』其中一項有效業務，因此系統維持 OPEN（活躍）。」
+> 觀察點：看 CASE_STATUS 是否為 '01'。
 > 
+3. 查授信額度表（WBS_FAC_INFO）
+SELECT CIF_CUST_INFO_SEQ, FAC_STATUS
+FROM WBS_FAC_INFO
+WHERE CIF_CUST_INFO_SEQ = 3589985;
 
-
+> 觀察點：看是否有資料，且 FAC_STATUS 是否為 '05'。
+> 
