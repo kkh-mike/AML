@@ -1,9 +1,12 @@
+Add-Type -Path "D:\TEST\Tsbldapdbc.dll"
+$App = New-Object Tsbldapdbc.RunBat
+$App.SSL = $false
+$App.ldapHost = "10.13.60.66"
+$App.searchBase = "o=tsbank"
+$sApp = "AML"
+$iCStr = 1
+$ret2 = $App.GetRunBat($sApp, $iCStr)
+Write-Host "Result: $ret2" 
 
-Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 
-Unblock-File -Path "D:\1141923\DB connect\GODB.ps1"
-
-
- 客戶開戶已滿 764 天（非 30 天內新戶）。
- 客戶名下無存款帳戶、無存款餘額，唯一一筆授信額度狀態為 ⁠40⁠（非有效正常狀態 ⁠05⁠）。
- 名下完全沒有任何有效運作的業務，因此子查詢聚合出 ⁠Record_Stat = 'C'⁠，最終被判定為 CLOSE（結清/非活躍戶）。
+我這邊要改成執行這支powershell 當下路徑
