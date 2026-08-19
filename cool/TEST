@@ -1,14 +1,11 @@
-# ==========================================
-# 0. 透過安控 DLL 動態取得帳密與伺服器資訊
-# ==========================================
+為什麼我這樣
+
+# 取得此 ps1 指令碼所在資料夾內的 Tsbldapdbc.dll
 $dllPath = Join-Path -Path $PSScriptRoot -ChildPath "Tsbldapdbc.dll"
 
-if (!(Test-Path $dllPath)) {
-    Write-Host "找不到安控組件：$dllPath" -ForegroundColor Red
-    exit 1
-}
-
+# 載入 DLL
 Add-Type -Path $dllPath
+
 $App = New-Object Tsbldapdbc.RunBat
 $App.SSL = $false
 $App.ldapHost = "10.13.60.66"
@@ -16,32 +13,24 @@ $App.searchBase = "o=tsbank"
 $sApp = "AML"
 $iCStr = 1
 $ret2 = $App.GetRunBat($sApp, $iCStr)
+Write-Host "Result: $ret2"
 
-if ($ret2 -like "Error:*" -or [string]::IsNullOrWhiteSpace($ret2)) {
-    Write-Error "取得連線字串失敗: $ret2"
-    exit 1
-}
+跟
 
-# 解析連線字串各欄位 (忽略大小寫)
-$Server   = if ($ret2 -match "(?i)server=([^;]+)") { $matches[1].Trim() } else { "" }
-$User     = if ($ret2 -match "(?i)user\s*id=([^;]+)") { $matches[1].Trim() } else { "" }
-$Password = if ($ret2 -match "(?i)password=([^;]+)") { $matches[1].Trim() } else { "" }
-$Database = "SARCaseWarehouse"  # 指定目標 Database
 
-# ==========================================
-# 顯示除錯連線資訊
-# ==========================================
-Write-Host "=========================================" -ForegroundColor Cyan
-Write-Host "【安控原始回傳字串】" -ForegroundColor Yellow
-Write-Host "$ret2"
-Write-Host "-----------------------------------------" -ForegroundColor Cyan
-Write-Host "【Regex 解析結果】" -ForegroundColor Yellow
-Write-Host "Server          : [$Server]"
-Write-Host "User            : [$User]"
-Write-Host "Password        : [$Password]"
-Write-Host "Password 長度   : $($Password.Length) 個字元"
-Write-Host "Target Database : [$Database]"
-Write-Host "=========================================" -ForegroundColor Cyan
+# 載入 DLL
+Add-Type -Path $dllPath
 
-# 暫停讓您確認資訊，確認無誤再繼續
-Read-Host "請確認上方連線資訊是否正確，按 Enter 繼續執行..."
+$App = New-Object Tsbldapdbc.RunBat
+$App.SSL = $false
+$App.ldapHost = "10.13.60.66"
+$App.searchBase = "o=tsbank"
+$sApp = "AML"
+$iCStr = 1
+$ret2 = $App.GetRunBat($sApp, $iCStr)
+Write-Host "Result: $ret2"
+
+
+得到結果一樣
+
+他根本沒用dll吧
