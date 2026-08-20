@@ -1,16 +1,16 @@
-1.	Acct_Migrate_buffer,
+1.	Acct_Migrate_buffer
 2.	LoadTrxn_Migrate_buffer
-3.	Cust_NP_Migrate_buffer,
-4.	RP_NP_Migrate_buffer,
-5.	lowrisklistgroups_Migrate_buffer, 
-6.	OFAC_SPEC_Migrate_buffer,
+3.	Cust_NP_Migrate_buffer
+4.	RP_NP_Migrate_buffer
+5.	lowrisklistgroups_Migrate_buffer
+6.	OFAC_SPEC_Migrate_buffer
 7.	Migrator_LOG
 8.	XREF
 9.	SK_SAR_SuspiciousActivityCharacteristicsDim_TW 
-10.	CIF_Migrate_Mapping_TEMP, 
-11.	lowrisklistgroups_Migrate_Mapping_TEMP, 
+10.	CIF_Migrate_Mapping_TEMP
+11.	lowrisklistgroups_Migrate_Mapping_TEMP
 12.	Customer_Migrate_Exception_Table
-13.	Customer_Migrate_buffer,
+13.	Customer_Migrate_buffer
 14.	BANCS_SK_CUST_INFO
 
 
