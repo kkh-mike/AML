@@ -1,97 +1,17 @@
-# ==========================================
-# 自動抓取 LDAP 連線資訊 + 執行 [BSADBTW]..[HOUSEKEEP_Customer_Migration_Data]
-# ==========================================
+1.	Acct_Migrate_buffer,
+2.	LoadTrxn_Migrate_buffer
+3.	Cust_NP_Migrate_buffer,
+4.	RP_NP_Migrate_buffer,
+5.	lowrisklistgroups_Migrate_buffer, 
+6.	OFAC_SPEC_Migrate_buffer,
+7.	Migrator_LOG
+8.	XREF
+9.	SK_SAR_SuspiciousActivityCharacteristicsDim_TW 
+10.	CIF_Migrate_Mapping_TEMP, 
+11.	lowrisklistgroups_Migrate_Mapping_TEMP, 
+12.	Customer_Migrate_Exception_Table
+13.	Customer_Migrate_buffer,
+14.	BANCS_SK_CUST_INFO
 
-# 1. 初始化 Log 資料夾與紀錄檔
-$LogFolder = Join-Path -Path $PSScriptRoot -ChildPath "Log"
-if (!(Test-Path $LogFolder)) {
-    New-Item -ItemType Directory -Path $LogFolder | Out-Null
-}
 
-$Timestamp   = Get-Date -Format "yyyyMMdd_HHmmss"
-$MainLogFile = Join-Path -Path $LogFolder -ChildPath "Execution_SP_Housekeep_$Timestamp.log"
-
-function Write-Log {
-    param (
-        [string]$Message,
-        [ConsoleColor]$ForegroundColor = [ConsoleColor]::White
-    )
-    $timePrefix = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $formattedMsg = "[$timePrefix] $Message"
-    
-    Write-Host $Message -ForegroundColor $ForegroundColor
-    Add-Content -Path $MainLogFile -Value $formattedMsg -Encoding UTF8
-}
-
-Write-Log "=== 開始執行 SP [HOUSEKEEP_Customer_Migration_Data] 作業 ===" -ForegroundColor Cyan
-Write-Log "Log 檔案路徑: $MainLogFile" -ForegroundColor DarkGray
-
-# ==========================================
-# 2. 載入 LDAP DLL 並取得連線字串
-# ==========================================
-$dllPath = Join-Path -Path $PSScriptRoot -ChildPath "Tsbldapdbc.dll"
-
-if (-not (Test-Path -Path $dllPath)) {
-    Write-Log "錯誤：找不到 DLL 檔案: $dllPath" -ForegroundColor Red
-    exit 1
-}
-
-try {
-    if (-not ([System.Management.Automation.PSTypeName]'Tsbldapdbc.RunBat').Type) {
-        Add-Type -Path $dllPath
-    }
-
-    $App = New-Object Tsbldapdbc.RunBat
-    $App.SSL = $false
-    $App.ldapHost = "10.13.60.66"
-    $App.searchBase = "o=tsbank"
-    $sApp = "AML"
-    $iCStr = 7
-
-    $connStr = $App.GetRunBat($sApp, $iCStr)
-}
-catch {
-    Write-Log "錯誤：讀取 LDAP 連線資訊時發生例外: $($_.Exception.Message)" -ForegroundColor Red
-    exit 1
-}
-
-# 3. 解析連線字串參數
-$Server   = if ($connStr -match '(?:Data Source|Server)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
-$Database = if ($connStr -match '(?:Initial Catalog|Database)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
-$User     = if ($connStr -match '(?:User ID|UID)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
-$Password = if ($connStr -match '(?:Password|PWD)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
-
-Write-Log "解析連線資訊 -> Server: $Server | DB: $Database | User: $User" -ForegroundColor DarkCyan
-
-if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($Database)) {
-    Write-Log "錯誤：無法正確解析 Server 或 Database 連線資訊！" -ForegroundColor Red
-    exit 1
-}
-
-# ==========================================
-# 4. 切換至 BSADBTW 執行預存程序並輸出 Log
-# ==========================================
-$SpLogFile = Join-Path -Path $LogFolder -ChildPath "SP_Output_$Timestamp.log"
-$spSqlCmd  = "USE [BSADBTW]; EXEC [HOUSEKEEP_Customer_Migration_Data];"
-
-Write-Log "正在執行 SP [BSADBTW]..[HOUSEKEEP_Customer_Migration_Data]..." -ForegroundColor Yellow
-
-sqlcmd `
-    -b `
-    -r 1 `
-    -S $Server `
-    -U $User `
-    -P $Password `
-    -d $Database `
-    -Q $spSqlCmd `
-    -o $SpLogFile
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Log "FAILED：執行 SP 失敗！請檢查 SQL 輸出 Log: $SpLogFile" -ForegroundColor Red
-    exit 1
-}
-
-Write-Log "SUCCESS：SP [HOUSEKEEP_Customer_Migration_Data] 執行成功！" -ForegroundColor Green
-Write-Log "SQL 執行輸出已記錄至: $SpLogFile" -ForegroundColor DarkGray
-Write-Log "=== 作業順利結束 ===" -ForegroundColor Green
-exit 0
+我要在[BSADBTW]  這邊 建立這幾個table
