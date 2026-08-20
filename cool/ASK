@@ -1,17 +1,227 @@
-1.	Acct_Migrate_buffer
-2.	LoadTrxn_Migrate_buffer
-3.	Cust_NP_Migrate_buffer
-4.	RP_NP_Migrate_buffer
-5.	lowrisklistgroups_Migrate_buffer
-6.	OFAC_SPEC_Migrate_buffer
-7.	Migrator_LOG
-8.	XREF
-9.	SK_SAR_SuspiciousActivityCharacteristicsDim_TW 
-10.	CIF_Migrate_Mapping_TEMP
-11.	lowrisklistgroups_Migrate_Mapping_TEMP
-12.	Customer_Migrate_Exception_Table
-13.	Customer_Migrate_buffer
-14.	BANCS_SK_CUST_INFO
+USE [BSADBTW];
+GO
 
+-- 1. Acct_Migrate_buffer
+IF OBJECT_ID(N'[dbo].[Acct_Migrate_buffer]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[Acct_Migrate_buffer] (
+        [BatchID]          VARCHAR(50)   NULL,
+        [AccountNo]        VARCHAR(50)   NULL,
+        [CustomerNo]       VARCHAR(50)   NULL,
+        [BranchNo]         VARCHAR(20)   NULL,
+        [CurrencyCode]     VARCHAR(10)   NULL,
+        [Status]           VARCHAR(20)   NULL,
+        [OpenDate]         VARCHAR(8)    NULL,
+        [CloseDate]        VARCHAR(8)    NULL,
+        [CreatedTime]      DATETIME      DEFAULT GETDATE()
+    );
+END
+GO
 
-我要在[BSADBTW]  這邊 建立這幾個table
+-- 2. LoadTrxn_Migrate_buffer
+IF OBJECT_ID(N'[dbo].[LoadTrxn_Migrate_buffer]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[LoadTrxn_Migrate_buffer] (
+        [BatchID]          VARCHAR(50)   NULL,
+        [TrxnID]           VARCHAR(100)  NULL,
+        [AccountNo]        VARCHAR(50)   NULL,
+        [CustomerNo]       VARCHAR(50)   NULL,
+        [TrxnDate]         VARCHAR(8)    NULL,
+        [TrxnTime]         VARCHAR(6)    NULL,
+        [TrxnAmount]       NUMERIC(18,2) NULL,
+        [CurrencyCode]     VARCHAR(10)   NULL,
+        [TrxnType]         VARCHAR(50)   NULL,
+        [CreatedTime]      DATETIME      DEFAULT GETDATE()
+    );
+END
+GO
+
+-- 3. Cust_NP_Migrate_buffer
+IF OBJECT_ID(N'[dbo].[Cust_NP_Migrate_buffer]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[Cust_NP_Migrate_buffer] (
+        [BatchID]          VARCHAR(50)   NULL,
+        [CustomerNo]       VARCHAR(50)   NULL,
+        [CustomerName]     NVARCHAR(200) NULL,
+        [ID_NO]            VARCHAR(50)   NULL,
+        [NP_Type]          VARCHAR(50)   NULL,
+        [RiskLevel]        VARCHAR(20)   NULL,
+        [CreatedTime]      DATETIME      DEFAULT GETDATE()
+    );
+END
+GO
+
+-- 4. RP_NP_Migrate_buffer
+IF OBJECT_ID(N'[dbo].[RP_NP_Migrate_buffer]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[RP_NP_Migrate_buffer] (
+        [BatchID]          VARCHAR(50)   NULL,
+        [CustomerNo]       VARCHAR(50)   NULL,
+        [RP_ID]            VARCHAR(50)   NULL,
+        [RP_Name]          NVARCHAR(200) NULL,
+        [RelationType]     VARCHAR(50)   NULL,
+        [CreatedTime]      DATETIME      DEFAULT GETDATE()
+    );
+END
+GO
+
+-- 5. lowrisklistgroups_Migrate_buffer
+IF OBJECT_ID(N'[dbo].[lowrisklistgroups_Migrate_buffer]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[lowrisklistgroups_Migrate_buffer] (
+        [BatchID]          VARCHAR(50)   NULL,
+        [GroupID]          VARCHAR(50)   NULL,
+        [CustomerNo]       VARCHAR(50)   NULL,
+        [RiskCategory]     VARCHAR(50)   NULL,
+        [EffectiveDate]    VARCHAR(8)    NULL,
+        [ExpiryDate]       VARCHAR(8)    NULL,
+        [CreatedTime]      DATETIME      DEFAULT GETDATE()
+    );
+END
+GO
+
+-- 6. OFAC_SPEC_Migrate_buffer
+IF OBJECT_ID(N'[dbo].[OFAC_SPEC_Migrate_buffer]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[OFAC_SPEC_Migrate_buffer] (
+        [BatchID]          VARCHAR(50)   NULL,
+        [ListID]           VARCHAR(50)   NULL,
+        [CustomerNo]       VARCHAR(50)   NULL,
+        [TargetName]       NVARCHAR(200) NULL,
+        [MatchScore]       NUMERIC(5,2)  NULL,
+        [WatchlistType]    VARCHAR(50)   NULL,
+        [CreatedTime]      DATETIME      DEFAULT GETDATE()
+    );
+END
+GO
+
+-- 7. Migrator_LOG
+IF OBJECT_ID(N'[dbo].[Migrator_LOG]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[Migrator_LOG] (
+        [LogID]            BIGINT IDENTITY(1,1) PRIMARY KEY,
+        [BatchID]          VARCHAR(50)   NULL,
+        [SourceTable]      VARCHAR(100)  NULL,
+        [TargetTable]      VARCHAR(100)  NULL,
+        [StepName]         VARCHAR(100)  NULL,
+        [ProcessStatus]    VARCHAR(20)   NULL, -- 'SUCCESS', 'FAILED', 'RUNNING'
+        [TotalCount]       INT           NULL,
+        [SuccessCount]     INT           NULL,
+        [ErrorCount]       INT           NULL,
+        [ErrorMessage]     NVARCHAR(MAX) NULL,
+        [StartTime]        DATETIME      NULL,
+        [EndTime]          DATETIME      NULL,
+        [ExecutionTimeSec] INT           NULL,
+        [CreatedTime]      DATETIME      DEFAULT GETDATE()
+    );
+END
+GO
+
+-- 8. XREF
+IF OBJECT_ID(N'[dbo].[XREF]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[XREF] (
+        [EntityType]       VARCHAR(50)   NOT NULL,
+        [SourceSystem]     VARCHAR(20)   NOT NULL,
+        [SourceKey]        VARCHAR(100)  NOT NULL,
+        [TargetSystem]     VARCHAR(20)   NOT NULL,
+        [TargetKey]        VARCHAR(100)  NOT NULL,
+        [MappingDesc]      NVARCHAR(200) NULL,
+        [CreatedTime]      DATETIME      DEFAULT GETDATE(),
+        CONSTRAINT [PK_XREF] PRIMARY KEY CLUSTERED ([EntityType], [SourceSystem], [SourceKey])
+    );
+END
+GO
+
+-- 9. SK_SAR_SuspiciousActivityCharacteristicsDim_TW
+IF OBJECT_ID(N'[dbo].[SK_SAR_SuspiciousActivityCharacteristicsDim_TW]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[SK_SAR_SuspiciousActivityCharacteristicsDim_TW] (
+        [BatchID]          VARCHAR(50)   NULL,
+        [ScenarioID]       VARCHAR(50)   NULL,
+        [ScenarioName]     NVARCHAR(200) NULL,
+        [CustomerNo]       VARCHAR(50)   NULL,
+        [AlertID]          VARCHAR(50)   NULL,
+        [RiskScore]        NUMERIC(5,2)  NULL,
+        [TriggerDate]      VARCHAR(8)    NULL,
+        [CreatedTime]      DATETIME      DEFAULT GETDATE()
+    );
+END
+GO
+
+-- 10. CIF_Migrate_Mapping_TEMP
+IF OBJECT_ID(N'[dbo].[CIF_Migrate_Mapping_TEMP]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[CIF_Migrate_Mapping_TEMP] (
+        [SK_CUST_ID]       VARCHAR(50)   NOT NULL,
+        [TS_CUST_ID]       VARCHAR(50)   NOT NULL,
+        [ID_NO]            VARCHAR(50)   NULL,
+        [Status]           VARCHAR(20)   NULL,
+        [CreatedTime]      DATETIME      DEFAULT GETDATE()
+    );
+    CREATE NONCLUSTERED INDEX [IX_CIF_Migrate_Mapping_TEMP_SK] ON [dbo].[CIF_Migrate_Mapping_TEMP]([SK_CUST_ID]);
+    CREATE NONCLUSTERED INDEX [IX_CIF_Migrate_Mapping_TEMP_TS] ON [dbo].[CIF_Migrate_Mapping_TEMP]([TS_CUST_ID]);
+END
+GO
+
+-- 11. lowrisklistgroups_Migrate_Mapping_TEMP
+IF OBJECT_ID(N'[dbo].[lowrisklistgroups_Migrate_Mapping_TEMP]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[lowrisklistgroups_Migrate_Mapping_TEMP] (
+        [GroupID]          VARCHAR(50)   NULL,
+        [SK_CUST_ID]       VARCHAR(50)   NULL,
+        [TS_CUST_ID]       VARCHAR(50)   NULL,
+        [RiskLevel]        VARCHAR(20)   NULL,
+        [CreatedTime]      DATETIME      DEFAULT GETDATE()
+    );
+END
+GO
+
+-- 12. Customer_Migrate_Exception_Table
+IF OBJECT_ID(N'[dbo].[Customer_Migrate_Exception_Table]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[Customer_Migrate_Exception_Table] (
+        [ExceptionID]      BIGINT IDENTITY(1,1) PRIMARY KEY,
+        [BatchID]          VARCHAR(50)   NULL,
+        [CustomerNo]       VARCHAR(50)   NULL,
+        [SourceTable]      VARCHAR(100)  NULL,
+        [ErrorCode]        VARCHAR(50)   NULL,
+        [ErrorMessage]     NVARCHAR(MAX) NULL,
+        [RawData]          NVARCHAR(MAX) NULL,
+        [LoggedTime]       DATETIME      DEFAULT GETDATE()
+    );
+END
+GO
+
+-- 13. Customer_Migrate_buffer
+IF OBJECT_ID(N'[dbo].[Customer_Migrate_buffer]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[Customer_Migrate_buffer] (
+        [BatchID]          VARCHAR(50)   NULL,
+        [CustomerNo]       VARCHAR(50)   NULL,
+        [CustomerName]     NVARCHAR(200) NULL,
+        [ID_NO]            VARCHAR(50)   NULL,
+        [CustomerType]     VARCHAR(20)   NULL,
+        [BranchNo]         VARCHAR(20)   NULL,
+        [RiskScore]        NUMERIC(5,2)  NULL,
+        [CreatedTime]      DATETIME      DEFAULT GETDATE()
+    );
+END
+GO
+
+-- 14. BANCS_SK_CUST_INFO
+IF OBJECT_ID(N'[dbo].[BANCS_SK_CUST_INFO]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [dbo].[BANCS_SK_CUST_INFO] (
+        [SK_CUST_ID]       VARCHAR(50)   NOT NULL,
+        [TS_CUST_ID]       VARCHAR(50)   NOT NULL,
+        [CUST_NAME]        NVARCHAR(200) NULL,
+        [ID_NO]            VARCHAR(50)   NULL,
+        [ID_TYPE]          VARCHAR(10)   NULL,
+        [STATUS]           VARCHAR(20)   NULL,
+        [UPDATE_TIME]      DATETIME      DEFAULT GETDATE()
+    );
+    CREATE NONCLUSTERED INDEX [IX_BANCS_SK_CUST_INFO_SK] ON [dbo].[BANCS_SK_CUST_INFO]([SK_CUST_ID]);
+    CREATE NONCLUSTERED INDEX [IX_BANCS_SK_CUST_INFO_TS] ON [dbo].[BANCS_SK_CUST_INFO]([TS_CUST_ID]);
+END
+GO
