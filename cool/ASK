@@ -1,236 +1,222 @@
-USE [BSADBTW]
-GO
+# ==========================================
+# 自動抓取 LDAP 連線資訊 + 批次執行 Split 資料夾內 SQL + 執行各 Table Update
+# ==========================================
 
-SET ANSI_NULLS ON
-GO
+# 1. 資料夾準備與全域 Log 初始化
+$LogFolder = Join-Path -Path $PSScriptRoot -ChildPath "Log"
+if (!(Test-Path $LogFolder)) {
+    New-Item -ItemType Directory -Path $LogFolder | Out-Null
+}
 
-SET QUOTED_IDENTIFIER ON
-GO
+$Timestamp   = Get-Date -Format "yyyyMMdd_HHmmss"
+$MainLogFile = Join-Path -Path $LogFolder -ChildPath "Execution_$Timestamp.log"
 
-CREATE OR ALTER PROCEDURE dbo.usp_Cleanup_Customer_Migration_Data
-AS
-BEGIN
-    SET NOCOUNT ON;
-    SET XACT_ABORT ON;
+function Write-Log {
+    param (
+        [string]$Message,
+        [ConsoleColor]$ForegroundColor = [ConsoleColor]::White,
+        [switch]$IsError
+    )
+    $timePrefix = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $formattedMsg = "[$timePrefix] $Message"
+    
+    Write-Host $Message -ForegroundColor $ForegroundColor
+    Add-Content -Path $MainLogFile -Value $formattedMsg -Encoding UTF8
+}
 
-    BEGIN TRY
-        BEGIN TRANSACTION;
+Write-Log "=== 開始執行 SQL 批次處理與更新作業 ===" -ForegroundColor Cyan
+Write-Log "主執行紀錄檔: $MainLogFile" -ForegroundColor DarkGray
 
-        -- 1. Truncate Exception & Reference Tables
-        TRUNCATE TABLE Customer_Migrate_Exception_Table;
-        TRUNCATE TABLE dbo.lowrisklistgroups;
-        TRUNCATE TABLE dbo.OFAC_SPEC;
-        TRUNCATE TABLE dbo.OFAC_SPEC_RestrictedCountry;
+# ==========================================
+# 2. 載入 LDAP DLL 並取得連線字串
+# ==========================================
+$dllPath = Join-Path -Path $PSScriptRoot -ChildPath "Tsbldapdbc.dll"
 
-        -- 2. Delete Customer Migration & Fact Records (Joined on CIF_KEY)
-        DELETE A FROM sourcedbtw..CIF_CVT_Source A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+if (-not (Test-Path -Path $dllPath)) {
+    Write-Log "錯誤：找不到 DLL 檔案: $dllPath" -ForegroundColor Red -IsError
+    exit 1
+}
 
-        DELETE A FROM BSA_SUB_CUST_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+try {
+    if (-not ([System.Management.Automation.PSTypeName]'Tsbldapdbc.RunBat').Type) {
+        Add-Type -Path $dllPath
+    }
 
-        DELETE A FROM PB_CUSTOMER_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+    $App = New-Object Tsbldapdbc.RunBat
+    $App.SSL = $false
+    $App.ldapHost = "10.13.60.66"
+    $App.searchBase = "o=tsbank"
+    $sApp = "AML"
+    $iCStr = 7
 
-        DELETE A FROM ACCT_XREF_DIM A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+    $connStr = $App.GetRunBat($sApp, $iCStr)
+}
+catch {
+    Write-Log "錯誤：讀取 LDAP 連線資訊時發生例外: $($_.Exception.Message)" -ForegroundColor Red -IsError
+    exit 1
+}
 
-        DELETE A FROM ACCT_XREF_EXT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+# 3. 自動解析連線字串參數
+$Server   = if ($connStr -match '(?:Data Source|Server)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
+$Database = if ($connStr -match '(?:Initial Catalog|Database)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
+$User     = if ($connStr -match '(?:User ID|UID)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
+$Password = if ($connStr -match '(?:Password|PWD)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
 
-        DELETE A FROM WIRE_MTHLY_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+Write-Log "解析連線資訊 -> Server: $Server | DB: $Database | User: $User" -ForegroundColor DarkCyan
 
-        DELETE A FROM TTL_MTHLY_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($Database)) {
+    Write-Log "錯誤：無法正確解析 Server 或 Database 連線資訊！" -ForegroundColor Red -IsError
+    exit 1
+}
 
-        DELETE A FROM CTS_MTHLY_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+# ==========================================
+# 4. 偵測 Split 資料夾並抓取所有 .sql 檔案
+# ==========================================
+$SplitFolder = Join-Path -Path $PSScriptRoot -ChildPath "Split"
 
-        DELETE A FROM ACH_MTHLY_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+if (-not (Test-Path -Path $SplitFolder -PathType Container)) {
+    Write-Log "錯誤：找不到 Split 資料夾 -> $SplitFolder" -ForegroundColor Red -IsError
+    exit 1
+}
 
-        DELETE A FROM MOI_MTHLY_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+$SqlFiles = Get-ChildItem -Path $SplitFolder -Filter "*.sql" -File | Sort-Object Name
 
-        DELETE A FROM CHK_MTHLY_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+if ($SqlFiles.Count -eq 0) {
+    Write-Log "錯誤：在 Split 資料夾內找不到任何 .sql 檔案，結束作業。" -ForegroundColor Red -IsError
+    exit 1
+}
 
-        DELETE A FROM ATM_CSH_MTHLY_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+Write-Log "共在 Split 資料夾中確認 $($SqlFiles.Count) 個 SQL 檔案待處理。" -ForegroundColor Green
 
-        DELETE A FROM ATM_NCSH_MTHLY_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+# ==========================================
+# 5. 逐一執行 Split 內的各 SQL 檔案
+# ==========================================
+$HasError = $false
 
-        DELETE A FROM OTHER_MTHLY_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+foreach ($file in $SqlFiles) {
+    $BaseName = $file.BaseName
+    $FileLog  = Join-Path $LogFolder "$($BaseName)_$Timestamp.log"
 
-        DELETE A FROM TRSF_MTHLY_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+    Write-Log ""
+    Write-Log "-----------------------------------------"
+    Write-Log "開始執行檔案: $($file.Name)" -ForegroundColor Yellow
 
-        DELETE A FROM CCD_MTHLY_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+    sqlcmd `
+        -b `
+        -r 1 `
+        -S $Server `
+        -U $User `
+        -P $Password `
+        -d $Database `
+        -i $file.FullName `
+        -o $FileLog
 
-        DELETE A FROM DCD_MTHLY_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+    if ($LASTEXITCODE -eq 0) {
+        Write-Log "SUCCESS：$($file.Name) 執行成功" -ForegroundColor Green
+    } else {
+        Write-Log "FAILED：$($file.Name) 執行失敗！" -ForegroundColor Red
+        Write-Log "請檢查錯誤紀錄：$FileLog" -ForegroundColor Yellow
+        $HasError = $true
+        break
+    }
+}
 
-        DELETE A FROM WIRE_MTHLY_ACCT_SMRY A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+if ($HasError) {
+    Write-Log "Split SQL 執行過程發生錯誤，終止後續 Update 作業！" -ForegroundColor Red -IsError
+    exit 1
+}
 
-        DELETE A FROM TTL_MTHLY_ACCT_SMRY A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+# ==========================================
+# 6. 解析 BatchControl.sql 取得 BatchID 並逐一 Update 各 Table
+# ==========================================
+Write-Log ""
+Write-Log "========================================="
+Write-Log "開始讀取 BatchControl.sql 擷取 BatchID..." -ForegroundColor Cyan
 
-        DELETE A FROM CTS_MTHLY_ACCT_SMRY A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+$BatchControlPath = Join-Path -Path $PSScriptRoot -ChildPath "BatchControl.sql"
+if (-not (Test-Path $BatchControlPath)) {
+    $BatchControlPath = Join-Path -Path $SplitFolder -ChildPath "BatchControl.sql"
+}
 
-        DELETE A FROM ACH_MTHLY_ACCT_SMRY A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+if (-not (Test-Path $BatchControlPath)) {
+    Write-Log "錯誤：找不到 BatchControl.sql 檔案！" -ForegroundColor Red -IsError
+    exit 1
+}
 
-        DELETE A FROM MOI_MTHLY_ACCT_SMRY A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+# 擷取 BatchID
+$batchFileContent = Get-Content -Path $BatchControlPath -Raw -Encoding UTF8
+if ($batchFileContent -match "VALUES\s*\(\s*N?'([^']+)'") {
+    $ExtractedBatchID = $matches[1].Trim()
+    Write-Log "成功取得 BatchID: $ExtractedBatchID" -ForegroundColor Green
+} else {
+    Write-Log "錯誤：無法從 BatchControl.sql 中解析出 BatchID！" -ForegroundColor Red -IsError
+    exit 1
+}
 
-        DELETE A FROM CHK_MTHLY_ACCT_SMRY A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+# 定義欲更新的 7 個 Table 清單
+$targetTables = @(
+    "SAR_Acct_Info",
+    "SAR_Conductor_Info",
+    "SAR_Matched_Scenarios",
+    "SAR_Suspect_Info",
+    "SAR_Trxn_Detail",
+    "SAR_Trxn_Detail_All",
+    "SAR_Trxn_Detail_T1200017"
+)
 
-        DELETE A FROM ATM_CSH_MTHLY_ACCT_SMRY A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+Write-Log "開始執行各 Table 的 CustomerNo 更新 (共 $($targetTables.Count) 個 Table)..." -ForegroundColor Cyan
 
-        DELETE A FROM ATM_NCSH_MTHLY_ACCT_SMRY A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+$UpdateHasError = $false
 
-        DELETE A FROM OTHER_MTHLY_ACCT_SMRY A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+foreach ($tbl in $targetTables) {
+    $UpdateLogFile = Join-Path -Path $LogFolder -ChildPath "Update_${tbl}_$Timestamp.log"
+    
+    # 組裝該 Table 的 Update 語法
+    $sqlCmdText = @"
+USE [SARCaseWarehouse];
+UPDATE s
+SET s.CustomerNo = c.TS_CUST_ID
+FROM $tbl s
+INNER JOIN BSADBTW..BANCS_SK_CUST_INFO c ON s.CustomerNo = c.SK_CUST_ID
+WHERE s.BatchID = '$ExtractedBatchID';
+"@
 
-        DELETE A FROM TRSF_MTHLY_ACCT_SMRY A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+    Write-Log "正在更新 Table: $tbl ..." -ForegroundColor Yellow
 
-        DELETE A FROM CCD_MTHLY_ACCT_SMRY A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+    sqlcmd `
+        -b `
+        -r 1 `
+        -S $Server `
+        -U $User `
+        -P $Password `
+        -d $Database `
+        -Q $sqlCmdText `
+        -o $UpdateLogFile
 
-        DELETE A FROM DCD_MTHLY_ACCT_SMRY A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+    if ($LASTEXITCODE -eq 0) {
+        Write-Log "SUCCESS：Table [$tbl] update成功" -ForegroundColor Green
+    } else {
+        Write-Log "FAILED：Table [$tbl] update失敗！請檢查 $UpdateLogFile" -ForegroundColor Red -IsError
+        $UpdateHasError = $true
+        break
+    }
+}
 
-        DELETE A FROM WIRE_TXN_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+if ($UpdateHasError) {
+    Write-Log "更新 Table 時發生錯誤，中斷作業！" -ForegroundColor Red -IsError
+    exit 1
+}
 
-        DELETE A FROM CTS_TXN_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
+# ==========================================
+# 7. 最終結果與 Exit Code 回傳
+# ==========================================
+Write-Log ""
+Write-Log "========================================="
+Write-Log "全部 SQL 檔案與所有 Table 更新皆已成功執行完成！" -ForegroundColor Green
+Write-Log "========================================="
+exit 0
 
-        DELETE A FROM ACH_TXN_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
 
-        DELETE A FROM CASHIERCHK_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY;
 
-        DELETE A FROM CHK_TXN_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY;
 
-        DELETE A FROM OTHER_TXN_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
-
-        DELETE A FROM TRSF_TXN_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
-
-        DELETE A FROM CCARD_TXN_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
-
-        DELETE A FROM DCARD_TXN_FACT A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
-
-        DELETE A FROM BSA_SUB_CUST_FACT_Extension A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
-
-        -- 3. Delete Customer Related Records (Joined on CIFKEY)
-        DELETE A FROM PB_CustomerOptionalAnswers A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
-
-        DELETE A FROM EDD_ReviewSchedule A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
-
-        DELETE A FROM PB_Appointer_Fact A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
-
-        DELETE A FROM PB_BoardOfDirector_Fact A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
-
-        DELETE A FROM PB_LegalAgent_Fact A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
-
-        DELETE A FROM PB_MainClient_Fact A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
-
-        DELETE A FROM PB_MainShareHolder_Fact A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
-
-        DELETE A FROM PB_OtherRelatedParty_Fact A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
-
-        DELETE A FROM PB_OtherRelatedParty_SubTypeCodes A 
-        JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-        WHERE B.ACTION = 'INSERT';
-
-        -- 4. Delete BlackList Settings
-        DELETE FROM dbo.BlackList_Setting_Pending WHERE list = 'SPEC';
-        DELETE FROM dbo.BlackList_Setting WHERE list = 'SPEC';
-        DELETE FROM dbo.DWire_BlackListSetting WHERE list = 'SPEC';
-        DELETE FROM dbo.DWire_BlackListSetting_Pending WHERE list = 'SPEC';
-        DELETE FROM TradeFin_BlackListSetting_Pending WHERE list = 'SPEC';
-        DELETE FROM TradeFin_BlackListSetting WHERE list = 'SPEC';
-        DELETE FROM dbo.SWIFTMX_BlackList_Setting_Pending WHERE list = 'SPEC';
-        DELETE FROM dbo.SWIFTMX_BlackList_Setting WHERE list = 'SPEC';
-
-        COMMIT TRANSACTION;
-    END TRY
-    BEGIN CATCH
-        IF @@TRANCOUNT > 0
-            ROLLBACK TRANSACTION;
-
-        THROW;
-    END CATCH
-END;
-GO
+用這個幫我改成 執行這支sp [HOUSEKEEP_Customer_Migration_Data]
