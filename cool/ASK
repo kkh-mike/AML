@@ -1,16 +1,9 @@
-Dear 國章
-想再請教一下，關於上傳、下傳
-
-SKBANKFTP  需要把資料搬到 龍潭的AMLWS1
-根據我用資源密碼權限
-
-我是直接填寫 類別=上傳 就好?
-還是說有需要先下傳再上傳?
-
-
-另外 批次作業代碼  這邊如果我填寫 AMLSK01_DTLBK_F
-最後controlM 的command是這樣寫沒錯?
+Dear 國章：
+想向您請教與確認以下兩點設定及流程：
+1. 傳檔類別確認（SKBANKFTP \rightarrow 龍潭 AMLWS1）
+目前需將資料自 SKBANKFTP 拋轉至龍潭的 AMLWS1（使用資源密碼權限）。
+想請教在申請／設定表單中，類別是直接填寫 「上傳」 即可，還是實務上需拆分為 「先下傳至批次主機，再上傳至 AMLWS1」 兩階段來填寫？
+2. Control-M 執行指令格式
+若批次作業代碼填寫為 AMLSK01_DTLBK_F，想確認後續在 Control-M 上的 Command 是否如下配置無誤：
 D:\TaiShinIntra\BatchPC2016x64\DIBSAP2016.exe -j AMLSK01_DTLBK_F
-
-
-幫我表達好一點
+再麻煩您協助撥冗確認與指點，非常感謝！
