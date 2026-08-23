@@ -1,0 +1,9 @@
+
+我需要建立兩個table
+一個名稱 CDC_OPEN_CASE
+一個名稱 RM_OPEN_CASE
+規格用下面
+
+他只需要一欄  CustomerNo
+Column_name	Type	Computed	Length	Prec	Scale	Nullable	TrimTrailingBlanks	FixedLenNullInSource	Collation
+CustomerNo	varchar	no	50	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
