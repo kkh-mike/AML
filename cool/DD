@@ -1,28 +1,9 @@
-Dear coco
-需要協助群問SK
-AML_CHECK_SUM_1.csv 
-裡面的 AML_SPEC_OFAC_SPEC.csv  與實際收到的不一致
-Check_sum 寫數量1933 實際收到3415 
-Md5 也不同
-請協助詢問
+Dear Coco,
 
+需要協助詢問 SK，確認 AML_SPEC_OFAC_SPEC.csv 的檔案內容是否正確。
 
+目前發現 AML_CHECK_SUM_1.csv 中記錄的資訊，與實際收到的 AML_SPEC_OFAC_SPEC.csv 不一致：
 
-[2026-08-24 12:20:20] [INFO] JOB START: Checksum & RowCount Verification
-[2026-08-24 12:20:20] [INFO] Input Path   : D:\UATR3\AMLDataMigrator
-[2026-08-24 12:20:20] [INFO] Baseline File: D:\UATR3\AMLDataMigrator\AML_CHECK_SUM_1.csv
-[2026-08-24 12:20:20] [INFO] Log File     : D:\UATR3\AMLDataMigrator\Log\SKcheck_CHECK_SUM_CIF_20260824_122020.log
-[2026-08-24 12:20:20] [INFO] ============================================
-[2026-08-24 12:20:34] [INFO] PASSED -> File: AML_CUST.csv (Count: 6189138, MD5: OK)
-[2026-08-24 12:20:34] [ERROR] COUNT MISMATCH -> File: AML_SPEC_OFAC_SPEC.csv (Expected: 1933, Actual: 3415)
-[2026-08-24 12:20:36] [INFO] PASSED -> File: AML_NameProperty_RP.csv (Count: 752526, MD5: OK)
-[2026-08-24 12:27:41] [INFO] PASSED -> File: AML_LoadTrxn.csv (Count: 182807036, MD5: OK)
-[2026-08-24 12:27:53] [INFO] PASSED -> File: AML_NameProperty_Cust.csv (Count: 6189138, MD5: OK)
-[2026-08-24 12:27:58] [INFO] PASSED -> File: AML_Acct.csv (Count: 1557546, MD5: OK)
-[2026-08-24 12:27:58] [INFO] PASSED -> File: AML_SPEC_lowrisklistgroups.csv (Count: 25, MD5: OK)
-[2026-08-24 12:27:58] [INFO] ============================================
-[2026-08-24 12:27:58] [ERROR] JOB STATUS : FAILED (Exit Code: 1)
-[2026-08-24 12:27:58] [INFO] ============================================
-
-
-幫我表達得好一點
+• Checksum 預期筆數：1,933
+• 實際收到筆數：3,415
+• MD5：與 Checksum 檔案中的 MD5 不一致
