@@ -1,6 +1,10 @@
-
+為符合你的需求，主要修改重點如下：
+ * CSV 讀取方式：改用 Import-Csv 解析表頭（包含 EXTN_REF_NO 與 INTN_REF_NO）。
+ * 資料表對應與結構：目標資料表改為 XREF，移除動態 CREATE TABLE，保留 TRUNCATE TABLE 清空舊資料。
+ * 欄位對應（Column Mappings）：精準將 DataTable 的兩個欄位對應至資料庫的 EXTN_REF_NO 與 INTN_REF_NO，其餘允許為 NULL 的欄位（INST_NO, TYPE, STATUS, LST_MTN_DT）會自動填入 NULL。
+完整的 PowerShell 腳本如下：
 # ==========================================
-# 自動抓取 LDAP 連線資訊 + 切換至 BSADBTW + 建立資料表 + 透過 SqlBulkCopy 匯入 CSV
+# 自動抓取 LDAP 連線資訊 + 切換至 BSADBTW + 透過 SqlBulkCopy 匯入 XREF.csv
 # ==========================================
 
 $hasError = $false
@@ -78,21 +82,17 @@ if ([string]::IsNullOrWhiteSpace($Server)) {
 }
 
 # ==========================================
-# 4. 定義 CSV 檔案路徑與對應 Table（讀取與 ps1 同層目錄）
+# 4. 定義 CSV 檔案路徑與對應 Table
 # ==========================================
 $tasks = @(
     @{
-        TableName = "CDC_OPEN_CASE"
-        FilePath  = Join-Path -Path $PSScriptRoot -ChildPath "CDC_OPEN_CASE.csv"
-    },
-    @{
-        TableName = "RM_OPEN_CASE"
-        FilePath  = Join-Path -Path $PSScriptRoot -ChildPath "RM_OPEN_CASE.csv"
+        TableName = "XREF"
+        FilePath  = Join-Path -Path $PSScriptRoot -ChildPath "XREF.csv"
     }
 )
 
 # ==========================================
-# 5. 連線資料庫、切換至 BSADBTW 並執行 寫入
+# 5. 連線資料庫、切換至 BSADBTW 並執行寫入
 # ==========================================
 $sqlConn = New-Object System.Data.SqlClient.SqlConnection($connStr)
 
@@ -115,32 +115,32 @@ try {
             continue
         }
 
-        # 確保 Table 存在並清空舊資料
+        # 清空舊資料
         $initTableSql = @"
 USE [$TargetDB];
-IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '$table')
-BEGIN
-    CREATE TABLE [dbo].[$table] (
-        CustomerNo VARCHAR(50) COLLATE Chinese_Taiwan_Stroke_CI_AS NULL
-    );
-END
 TRUNCATE TABLE [dbo].[$table];
 "@
         $initCmd = $sqlConn.CreateCommand()
         $initCmd.CommandText = $initTableSql
         $initCmd.ExecuteNonQuery() | Out-Null
 
-        # 讀取 CSV 內容
+        # 建立存放待寫入資料的 DataTable
         $dt = New-Object System.Data.DataTable
-        $null = $dt.Columns.Add("CustomerNo", [string])
+        $null = $dt.Columns.Add("EXTN_REF_NO", [string])
+        $null = $dt.Columns.Add("INTN_REF_NO", [string])
 
-        $lines = [System.IO.File]::ReadAllLines($csvPath, [System.Text.Encoding]::Default)
-        foreach ($line in $lines) {
-            $val = $line.Trim()
-            if (-not [string]::IsNullOrEmpty($val)) {
-                $row = $dt.NewRow()
-                $row["CustomerNo"] = $val
-                $dt.Rows.Add($row)
+        # 讀取 CSV（自動解析表頭，編碼若為 UTF-8 可將 Default 改為 UTF8）
+        $csvData = Import-Csv -Path $csvPath -Encoding Default
+        foreach ($row in $csvData) {
+            $extn = if ($row.EXTN_REF_NO) { $row.EXTN_REF_NO.Trim() } else { $null }
+            $intn = if ($row.INTN_REF_NO) { $row.INTN_REF_NO.Trim() } else { $null }
+
+            # 只要有任一欄位不為空值即加入寫入清單
+            if (-not [string]::IsNullOrEmpty($extn) -or -not [string]::IsNullOrEmpty($intn)) {
+                $newRow = $dt.NewRow()
+                $newRow["EXTN_REF_NO"] = if ([string]::IsNullOrEmpty($extn)) { [DBNull]::Value } else { $extn }
+                $newRow["INTN_REF_NO"] = if ([string]::IsNullOrEmpty($intn)) { [DBNull]::Value } else { $intn }
+                $dt.Rows.Add($newRow)
             }
         }
 
@@ -149,7 +149,11 @@ TRUNCATE TABLE [dbo].[$table];
         $bulkCopy.DestinationTableName = "[$TargetDB].[dbo].[$table]"
         $bulkCopy.BulkCopyTimeout = 300
         $bulkCopy.BatchSize = 10000
-        $bulkCopy.ColumnMappings.Add("CustomerNo", "CustomerNo") | Out-Null
+
+        # 明確設定欄位映射
+        $bulkCopy.ColumnMappings.Add("EXTN_REF_NO", "EXTN_REF_NO") | Out-Null
+        $bulkCopy.ColumnMappings.Add("INTN_REF_NO", "INTN_REF_NO") | Out-Null
+
         $bulkCopy.WriteToServer($dt)
         $bulkCopy.Close()
 
@@ -177,28 +181,3 @@ if ($hasError) {
     exit 0
 }
 
-
-幫我修改一下
-我現在是要讀取csv  名稱改 XREF
-
-然後他有兩個欄位
-EXTN_REF_NO 跟 INTN_REF_NO
-
-讀取的csv 有表頭的
-
-
-
-我的table 是create 好了
-Column_name	Type	Computed	Length	Prec	Scale	Nullable	TrimTrailingBlanks	FixedLenNullInSource	Collation
-INST_NO	varchar	no	3	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-EXTN_REF_NO	varchar	no	25	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-INTN_REF_NO	varchar	no	25	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-TYPE	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-STATUS	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-LST_MTN_DT	varchar	no	8	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-
-
-但我只要寫入
-EXTN_REF_NO 跟 INTN_REF_NO
-
-因為csv 只有那兩個欄位
