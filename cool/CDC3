@@ -1,21 +1,13 @@
-
 PS D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾> D:\AML_Source\20251114_新光資轉\CDC\CDC_RUN.ps1
-目前的腳本在遇到錯誤時只記錄 : 無法辨識 '目前的腳本在遇到錯誤時只記錄' 詞彙是否為 Cmdlet、函數、指令檔或可執行程式的名稱。請檢查名稱拼字是否正確，如果包含路徑的話，請確認路徑是否正確，然後再試一次。
-位於 D:\AML_Source\20251114_新光資轉\CDC\CDC_RUN.ps1:1 字元:1
-+ 目前的腳本在遇到錯誤時只記錄 Log，並未在執行結束時回傳 $LASTEXITCODE = 1（或 exit 1）。
-+ ~~~~~~~~~~~~~~
-    + CategoryInfo          : ObjectNotFound: (目前的腳本在遇到錯誤時只記錄:String) [], CommandNotFoundException
-    + FullyQualifiedErrorId : CommandNotFoundException
- 
-若需要完全符合批次排程標準（成功回傳 : 無法辨識 '若需要完全符合批次排程標準（成功回傳' 詞彙是否為 Cmdlet、函數、指令檔或可執行程式的名稱。請檢查名稱拼字是否正確，如果包含路徑的話，請確認路徑是否正確，然後再試一次。
-位於 D:\AML_Source\20251114_新光資轉\CDC\CDC_RUN.ps1:2 字元:1
-+ 若需要完全符合批次排程標準（成功回傳 0，失敗回傳 1），可在腳本中加入 $hasError 旗標控制，修改後的寫法如下：
-+ ~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : ObjectNotFound: (若需要完全符合批次排程標準（成功回傳:String) [], CommandNotFoundException
-    + FullyQualifiedErrorId : CommandNotFoundException
- 
 === 開始執行 CSV 讀取與 SQL 匯入作業 ===
-主執行紀錄檔: D:\AML_Source\20251114_新光資轉\CDC\Log\Execution_20260824_080715.log
+主執行紀錄檔: D:\AML_Source\20251114_新光資轉\CDC\Log\Execution_20260824_080834.log
 解析連線資訊 -> Server: amlist | DB: RPADB | User: AML
+成功連線至資料庫: RPADB
+--- 開始處理: CDC_OPEN_CASE ---
+執行 SQL 時發生錯誤: 以 "0" 引數呼叫 "ExecuteNonQuery" 時發生例外狀況: "無法大量載入，因為檔案 "D:\AML_Source\20251114_新光資轉\CDC\CDC_OPEN_CASE.csv" 無法開啟。作業系統錯誤碼 3(系統找不
+到指定的路徑。)。"
+已關閉資料庫連線。
+=== 作業失敗，退出代碼: 1 ===
 
-PS D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾> 
+
+這又怎麼了
