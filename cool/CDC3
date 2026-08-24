@@ -1,13 +1,173 @@
-PS D:\AML_Source\20251114_新光資轉\SKBStagingData\新增資料夾> D:\AML_Source\20251114_新光資轉\CDC\CDC_RUN.ps1
-=== 開始執行 CSV 讀取與 SQL 匯入作業 ===
-主執行紀錄檔: D:\AML_Source\20251114_新光資轉\CDC\Log\Execution_20260824_080834.log
-解析連線資訊 -> Server: amlist | DB: RPADB | User: AML
-成功連線至資料庫: RPADB
---- 開始處理: CDC_OPEN_CASE ---
-執行 SQL 時發生錯誤: 以 "0" 引數呼叫 "ExecuteNonQuery" 時發生例外狀況: "無法大量載入，因為檔案 "D:\AML_Source\20251114_新光資轉\CDC\CDC_OPEN_CASE.csv" 無法開啟。作業系統錯誤碼 3(系統找不
-到指定的路徑。)。"
-已關閉資料庫連線。
-=== 作業失敗，退出代碼: 1 ===
+已將路徑改為與 DLL 相同，使用 $PSScriptRoot 自動抓取腳本當下所在目錄的 CSV 檔案，並搭配 SqlBulkCopy 確保遠端或本地資料庫都能直接寫入：
+# ==========================================
+# 自動抓取 LDAP 連線資訊 + 建立資料表 + 透過 SqlBulkCopy 匯入當下目錄 CSV
+# ==========================================
 
+$hasError = $false
 
-這又怎麼了
+# 1. 資料夾準備與全域 Log 初始化
+$LogFolder = Join-Path -Path $PSScriptRoot -ChildPath "Log"
+if (!(Test-Path $LogFolder)) {
+    New-Item -ItemType Directory -Path $LogFolder | Out-Null
+}
+
+$Timestamp   = Get-Date -Format "yyyyMMdd_HHmmss"
+$MainLogFile = Join-Path -Path $LogFolder -ChildPath "Execution_$Timestamp.log"
+
+function Write-Log {
+    param (
+        [string]$Message,
+        [ConsoleColor]$ForegroundColor = [ConsoleColor]::White,
+        [switch]$IsError
+    )
+    $timePrefix = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $formattedMsg = "[$timePrefix] $Message"
+    
+    Write-Host $Message -ForegroundColor $ForegroundColor
+    Add-Content -Path $MainLogFile -Value $formattedMsg -Encoding UTF8
+    
+    if ($IsError) {
+        $global:hasError = $true
+    }
+}
+
+Write-Log "=== 開始執行 CSV 讀取與 SQL 匯入作業 ===" -ForegroundColor Cyan
+Write-Log "主執行紀錄檔: $MainLogFile" -ForegroundColor DarkGray
+
+# ==========================================
+# 2. 載入 LDAP DLL 並取得連線字串
+# ==========================================
+$dllPath = Join-Path -Path $PSScriptRoot -ChildPath "Tsbldapdbc.dll"
+
+if (-not (Test-Path -Path $dllPath)) {
+    Write-Log "錯誤：找不到 DLL 檔案: $dllPath" -ForegroundColor Red -IsError
+    exit 1
+}
+
+try {
+    if (-not ([System.Management.Automation.PSTypeName]'Tsbldapdbc.RunBat').Type) {
+        Add-Type -Path $dllPath
+    }
+
+    $App = New-Object Tsbldapdbc.RunBat
+    $App.SSL = $false
+    $App.ldapHost = "10.6.95.91"
+    $App.searchBase = "o=tsbank"
+    $sApp = "AML"
+    $iCStr = 7
+
+    $connStr = $App.GetRunBat($sApp, $iCStr)
+}
+catch {
+    Write-Log "錯誤：讀取 LDAP 連線資訊時發生例外: $($_.Exception.Message)" -ForegroundColor Red -IsError
+    exit 1
+}
+
+# 3. 自動解析連線字串參數
+$Server   = if ($connStr -match '(?:Data Source|Server)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
+$Database = if ($connStr -match '(?:Initial Catalog|Database)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
+$User     = if ($connStr -match '(?:User ID|UID)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
+$Password = if ($connStr -match '(?:Password|PWD)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
+
+Write-Log "解析連線資訊 -> Server: $Server | DB: $Database | User: $User" -ForegroundColor DarkCyan
+
+if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($Database)) {
+    Write-Log "錯誤：無法正確解析 Server 或 Database 連線資訊！" -ForegroundColor Red -IsError
+    exit 1
+}
+
+# ==========================================
+# 4. 定義 CSV 檔案路徑與對應 Table（讀取與 ps1 同層目錄）
+# ==========================================
+$tasks = @(
+    @{
+        TableName = "CDC_OPEN_CASE"
+        FilePath  = Join-Path -Path $PSScriptRoot -ChildPath "CDC_OPEN_CASE.csv"
+    },
+    @{
+        TableName = "RM_OPEN_CASE"
+        FilePath  = Join-Path -Path $PSScriptRoot -ChildPath "RM_OPEN_CASE.csv"
+    }
+)
+
+# ==========================================
+# 5. 連線資料庫並執行 建表 與 寫入
+# ==========================================
+$sqlConn = New-Object System.Data.SqlClient.SqlConnection($connStr)
+
+try {
+    $sqlConn.Open()
+    Write-Log "成功連線至資料庫: $Database" -ForegroundColor Green
+
+    foreach ($task in $tasks) {
+        $table   = $task.TableName
+        $csvPath = $task.FilePath
+
+        Write-Log "--- 開始處理: $table ---" -ForegroundColor Yellow
+
+        if (-not (Test-Path -Path $csvPath)) {
+            Write-Log "錯誤：找不到檔案 $csvPath" -ForegroundColor Red -IsError
+            continue
+        }
+
+        # 確保 Table 存在並清空舊資料
+        $initTableSql = @"
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '$table')
+BEGIN
+    CREATE TABLE [$table] (
+        CustomerNo VARCHAR(50) COLLATE Chinese_Taiwan_Stroke_CI_AS NULL
+    );
+END
+TRUNCATE TABLE [$table];
+"@
+        $initCmd = $sqlConn.CreateCommand()
+        $initCmd.CommandText = $initTableSql
+        $initCmd.ExecuteNonQuery() | Out-Null
+
+        # 讀取 CSV 內容
+        $dt = New-Object System.Data.DataTable
+        $null = $dt.Columns.Add("CustomerNo", [string])
+
+        $lines = [System.IO.File]::ReadAllLines($csvPath, [System.Text.Encoding]::Default)
+        foreach ($line in $lines) {
+            $val = $line.Trim()
+            if (-not [string]::IsNullOrEmpty($val)) {
+                $row = $dt.NewRow()
+                $row["CustomerNo"] = $val
+                $dt.Rows.Add($row)
+            }
+        }
+
+        # 寫入資料庫
+        $bulkCopy = New-Object System.Data.SqlClient.SqlBulkCopy($sqlConn)
+        $bulkCopy.DestinationTableName = $table
+        $bulkCopy.BulkCopyTimeout = 300
+        $bulkCopy.BatchSize = 10000
+        $bulkCopy.ColumnMappings.Add("CustomerNo", "CustomerNo") | Out-Null
+        $bulkCopy.WriteToServer($dt)
+        $bulkCopy.Close()
+
+        Write-Log "[$table] 匯入成功！共寫入 $($dt.Rows.Count) 筆資料。" -ForegroundColor Green
+    }
+}
+catch {
+    Write-Log "執行作業時發生錯誤: $($_.Exception.Message)" -ForegroundColor Red -IsError
+}
+finally {
+    if ($sqlConn.State -eq [System.Data.ConnectionState]::Open) {
+        $sqlConn.Close()
+        Write-Log "已關閉資料庫連線。" -ForegroundColor DarkGray
+    }
+}
+
+# ==========================================
+# 6. 狀態判定與 Exit Code 回傳
+# ==========================================
+if ($hasError) {
+    Write-Log "=== 作業失敗，退出代碼: 1 ===" -ForegroundColor Red
+    exit 1
+} else {
+    Write-Log "=== 作業成功完成，退出代碼: 0 ===" -ForegroundColor Green
+    exit 0
+}
+
