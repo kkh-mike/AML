@@ -1,8 +1,3 @@
-為符合你的需求，主要修改重點如下：
- * CSV 讀取方式：改用 Import-Csv 解析表頭（包含 EXTN_REF_NO 與 INTN_REF_NO）。
- * 資料表對應與結構：目標資料表改為 XREF，移除動態 CREATE TABLE，保留 TRUNCATE TABLE 清空舊資料。
- * 欄位對應（Column Mappings）：精準將 DataTable 的兩個欄位對應至資料庫的 EXTN_REF_NO 與 INTN_REF_NO，其餘允許為 NULL 的欄位（INST_NO, TYPE, STATUS, LST_MTN_DT）會自動填入 NULL。
-完整的 PowerShell 腳本如下：
 # ==========================================
 # 自動抓取 LDAP 連線資訊 + 切換至 BSADBTW + 透過 SqlBulkCopy 匯入 XREF.csv
 # ==========================================
@@ -180,4 +175,17 @@ if ($hasError) {
     Write-Log "=== 作業成功完成，退出代碼: 0 ===" -ForegroundColor Green
     exit 0
 }
+
+
+原本止血這兩個欄位EXTN_REF_NO 跟 INTN_REF_NO
+
+現在改全部
+
+Column_name	Type	Computed	Length	Prec	Scale	Nullable	TrimTrailingBlanks	FixedLenNullInSource	Collation
+INST_NO	varchar	no	3	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+EXTN_REF_NO	varchar	no	25	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+INTN_REF_NO	varchar	no	25	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+TYPE	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+STATUS	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+LST_MTN_DT	varchar	no	8	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
 
