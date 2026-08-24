@@ -1,9 +1,12 @@
-已將路徑改為與 DLL 相同，使用 $PSScriptRoot 自動抓取腳本當下所在目錄的 CSV 檔案，並搭配 SqlBulkCopy 確保遠端或本地資料庫都能直接寫入：
+因為先前 LDAP 連線字串解析出 DB: RPADB，所以資料表直接被建立並寫入到了 RPADB 資料庫中。
+若要明確切換至 BSADBTW 資料庫，可以在 SQL 連線建立後使用 $sqlConn.ChangeDatabase("BSADBTW")，並在 SQL 語法與 DestinationTableName 指定資料庫結構（[BSADBTW].[dbo].[TableName]）。
+以下是加入 BSADBTW 切換後的完整腳本：
 # ==========================================
-# 自動抓取 LDAP 連線資訊 + 建立資料表 + 透過 SqlBulkCopy 匯入當下目錄 CSV
+# 自動抓取 LDAP 連線資訊 + 切換至 BSADBTW + 建立資料表 + 透過 SqlBulkCopy 匯入 CSV
 # ==========================================
 
 $hasError = $false
+$TargetDB = "BSADBTW"  # 指定目標資料庫
 
 # 1. 資料夾準備與全域 Log 初始化
 $LogFolder = Join-Path -Path $PSScriptRoot -ChildPath "Log"
@@ -69,10 +72,10 @@ $Database = if ($connStr -match '(?:Initial Catalog|Database)\s*=\s*([^;]+)') { 
 $User     = if ($connStr -match '(?:User ID|UID)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
 $Password = if ($connStr -match '(?:Password|PWD)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
 
-Write-Log "解析連線資訊 -> Server: $Server | DB: $Database | User: $User" -ForegroundColor DarkCyan
+Write-Log "解析連線資訊 -> Server: $Server | 預設 DB: $Database | User: $User" -ForegroundColor DarkCyan
 
-if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($Database)) {
-    Write-Log "錯誤：無法正確解析 Server 或 Database 連線資訊！" -ForegroundColor Red -IsError
+if ([string]::IsNullOrWhiteSpace($Server)) {
+    Write-Log "錯誤：無法正確解析 Server 連線資訊！" -ForegroundColor Red -IsError
     exit 1
 }
 
@@ -91,19 +94,23 @@ $tasks = @(
 )
 
 # ==========================================
-# 5. 連線資料庫並執行 建表 與 寫入
+# 5. 連線資料庫、切換至 BSADBTW 並執行 寫入
 # ==========================================
 $sqlConn = New-Object System.Data.SqlClient.SqlConnection($connStr)
 
 try {
     $sqlConn.Open()
-    Write-Log "成功連線至資料庫: $Database" -ForegroundColor Green
+    Write-Log "成功連線至伺服器: $Server" -ForegroundColor Green
+
+    # 切換至 BSADBTW 資料庫
+    $sqlConn.ChangeDatabase($TargetDB)
+    Write-Log "已切換資料庫至: $TargetDB" -ForegroundColor Cyan
 
     foreach ($task in $tasks) {
         $table   = $task.TableName
         $csvPath = $task.FilePath
 
-        Write-Log "--- 開始處理: $table ---" -ForegroundColor Yellow
+        Write-Log "--- 開始處理: $TargetDB.dbo.$table ---" -ForegroundColor Yellow
 
         if (-not (Test-Path -Path $csvPath)) {
             Write-Log "錯誤：找不到檔案 $csvPath" -ForegroundColor Red -IsError
@@ -112,13 +119,14 @@ try {
 
         # 確保 Table 存在並清空舊資料
         $initTableSql = @"
+USE [$TargetDB];
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '$table')
 BEGIN
-    CREATE TABLE [$table] (
+    CREATE TABLE [dbo].[$table] (
         CustomerNo VARCHAR(50) COLLATE Chinese_Taiwan_Stroke_CI_AS NULL
     );
 END
-TRUNCATE TABLE [$table];
+TRUNCATE TABLE [dbo].[$table];
 "@
         $initCmd = $sqlConn.CreateCommand()
         $initCmd.CommandText = $initTableSql
@@ -138,16 +146,16 @@ TRUNCATE TABLE [$table];
             }
         }
 
-        # 寫入資料庫
+        # 寫入 BSADBTW 資料庫
         $bulkCopy = New-Object System.Data.SqlClient.SqlBulkCopy($sqlConn)
-        $bulkCopy.DestinationTableName = $table
+        $bulkCopy.DestinationTableName = "[$TargetDB].[dbo].[$table]"
         $bulkCopy.BulkCopyTimeout = 300
         $bulkCopy.BatchSize = 10000
         $bulkCopy.ColumnMappings.Add("CustomerNo", "CustomerNo") | Out-Null
         $bulkCopy.WriteToServer($dt)
         $bulkCopy.Close()
 
-        Write-Log "[$table] 匯入成功！共寫入 $($dt.Rows.Count) 筆資料。" -ForegroundColor Green
+        Write-Log "[$table] 匯入成功！共寫入 $($dt.Rows.Count) 筆資料至 $TargetDB。" -ForegroundColor Green
     }
 }
 catch {
