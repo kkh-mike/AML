@@ -1,19 +1,28 @@
-可以，這個狀況其實可以很簡單地描述成「FTP 帳號可以連線，但無法存取指定目錄或檔案」。
+Dear coco
+需要協助群問SK
+AML_CHECK_SUM_1.csv 
+裡面的 AML_SPEC_OFAC_SPEC.csv  與實際收到的不一致
+Check_sum 寫數量1933 實際收到3415 
+Md5 也不同
+請協助詢問
 
-如果你要跟國均或相關人員說，我會建議這樣講：
 
-國均有幫我設定批次作業，來源連線帳號是 SKBANKFTP_FTP_0032。
-目前下載 AML_Acct.csv 時發生 FTP 550 錯誤，系統顯示「檔案無法使用，例如檔案不存在或沒有存取權限」。
 
-想請協助確認一下，SKBANKFTP_FTP_0032 是否有權限存取以下目錄及檔案？
+[2026-08-24 12:20:20] [INFO] JOB START: Checksum & RowCount Verification
+[2026-08-24 12:20:20] [INFO] Input Path   : D:\UATR3\AMLDataMigrator
+[2026-08-24 12:20:20] [INFO] Baseline File: D:\UATR3\AMLDataMigrator\AML_CHECK_SUM_1.csv
+[2026-08-24 12:20:20] [INFO] Log File     : D:\UATR3\AMLDataMigrator\Log\SKcheck_CHECK_SUM_CIF_20260824_122020.log
+[2026-08-24 12:20:20] [INFO] ============================================
+[2026-08-24 12:20:34] [INFO] PASSED -> File: AML_CUST.csv (Count: 6189138, MD5: OK)
+[2026-08-24 12:20:34] [ERROR] COUNT MISMATCH -> File: AML_SPEC_OFAC_SPEC.csv (Expected: 1933, Actual: 3415)
+[2026-08-24 12:20:36] [INFO] PASSED -> File: AML_NameProperty_RP.csv (Count: 752526, MD5: OK)
+[2026-08-24 12:27:41] [INFO] PASSED -> File: AML_LoadTrxn.csv (Count: 182807036, MD5: OK)
+[2026-08-24 12:27:53] [INFO] PASSED -> File: AML_NameProperty_Cust.csv (Count: 6189138, MD5: OK)
+[2026-08-24 12:27:58] [INFO] PASSED -> File: AML_Acct.csv (Count: 1557546, MD5: OK)
+[2026-08-24 12:27:58] [INFO] PASSED -> File: AML_SPEC_lowrisklistgroups.csv (Count: 25, MD5: OK)
+[2026-08-24 12:27:58] [INFO] ============================================
+[2026-08-24 12:27:58] [ERROR] JOB STATUS : FAILED (Exit Code: 1)
+[2026-08-24 12:27:58] [INFO] ============================================
 
-D:\DATA\AML\DATA\AML_Acct.csv
 
-目前看起來可能是目錄或檔案的存取權限問題，也想確認一下該檔案是否確實存在。
-
-如果你想講得更口語、簡短一點：
-
-國均有幫我設定批次，但目前下載 AML_Acct.csv 時出現 FTP 550 錯誤。
-想請幫忙確認 SKBANKFTP_FTP_0032 這個帳號是否有 D:\DATA\AML\DATA 目錄的存取權限，以及 AML_Acct.csv 是否存在。
-
-我比較推薦第二種，資訊夠完整，而且不會直接認定「一定是沒權限」，避免其實是檔案不存在或 FTP 路徑設定問題。
+幫我表達得好一點
