@@ -185,3 +185,20 @@ if ($hasError) {
 EXTN_REF_NO 跟 INTN_REF_NO
 
 讀取的csv 有表頭的
+
+
+
+我的table 是create 好了
+Column_name	Type	Computed	Length	Prec	Scale	Nullable	TrimTrailingBlanks	FixedLenNullInSource	Collation
+INST_NO	varchar	no	3	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+EXTN_REF_NO	varchar	no	25	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+INTN_REF_NO	varchar	no	25	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+TYPE	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+STATUS	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+LST_MTN_DT	varchar	no	8	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+
+
+但我只要寫入
+EXTN_REF_NO 跟 INTN_REF_NO
+
+因為csv 只有那兩個欄位
