@@ -1,6 +1,10 @@
+目前的腳本在遇到錯誤時只記錄 Log，並未在執行結束時回傳 $LASTEXITCODE = 1（或 exit 1）。
+若需要完全符合批次排程標準（成功回傳 0，失敗回傳 1），可在腳本中加入 $hasError 旗標控制，修改後的寫法如下：
 # ==========================================
-# 自動抓取 LDAP 連線資訊 + 批次執行 Split 資料夾內 SQL + 執行各 Table Update
+# 自動抓取 LDAP 連線資訊 + 建立資料表 + 匯入 CSV
 # ==========================================
+
+$hasError = $false
 
 # 1. 資料夾準備與全域 Log 初始化
 $LogFolder = Join-Path -Path $PSScriptRoot -ChildPath "Log"
@@ -22,9 +26,13 @@ function Write-Log {
     
     Write-Host $Message -ForegroundColor $ForegroundColor
     Add-Content -Path $MainLogFile -Value $formattedMsg -Encoding UTF8
+    
+    if ($IsError) {
+        $global:hasError = $true
+    }
 }
 
-Write-Log "=== 開始執行 SQL 批次處理與更新作業 ===" -ForegroundColor Cyan
+Write-Log "=== 開始執行 CSV 讀取與 SQL 匯入作業 ===" -ForegroundColor Cyan
 Write-Log "主執行紀錄檔: $MainLogFile" -ForegroundColor DarkGray
 
 # ==========================================
@@ -69,5 +77,92 @@ if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($Data
     exit 1
 }
 
+# ==========================================
+# 4. 定義 CSV 檔案路徑與對應 Table
+# ==========================================
+$csvBaseFolder = "D:\AML_Source\Source\1141923\123\新增資料夾 (3)"
 
-幫我用這個然後把剛剛讀取csv 寫入 sql 包成ps1  
+$tasks = @(
+    @{
+        TableName = "CDC_OPEN_CASE"
+        FilePath  = Join-Path -Path $csvBaseFolder -ChildPath "CDC_OPEN_CASE.csv"
+    },
+    @{
+        TableName = "RM_OPEN_CASE"
+        FilePath  = Join-Path -Path $csvBaseFolder -ChildPath "RM_OPEN_CASE.csv"
+    }
+)
+
+# ==========================================
+# 5. 連線資料庫並執行 建表 與 BULK INSERT
+# ==========================================
+$sqlConn = New-Object System.Data.SqlClient.SqlConnection($connStr)
+
+try {
+    $sqlConn.Open()
+    Write-Log "成功連線至資料庫: $Database" -ForegroundColor Green
+
+    foreach ($task in $tasks) {
+        $table   = $task.TableName
+        $csvPath = $task.FilePath
+
+        Write-Log "--- 開始處理: $table ---" -ForegroundColor Yellow
+
+        if (-not (Test-Path -Path $csvPath)) {
+            Write-Log "錯誤：找不到檔案 $csvPath" -ForegroundColor Red -IsError
+            continue
+        }
+
+        $query = @"
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '$table')
+BEGIN
+    CREATE TABLE [$table] (
+        CustomerNo VARCHAR(50) COLLATE Chinese_Taiwan_Stroke_CI_AS NULL
+    );
+END
+
+TRUNCATE TABLE [$table];
+
+BULK INSERT [$table]
+FROM '$csvPath'
+WITH (
+    FIELDTERMINATOR = ',',
+    ROWTERMINATOR = '0x0a',
+    FIRSTROW = 1
+);
+"@
+
+        $cmd = $sqlConn.CreateCommand()
+        $cmd.CommandText = $query
+        $cmd.CommandTimeout = 300
+
+        $cmd.ExecuteNonQuery() | Out-Null
+        Write-Log "[$table] 匯入成功！檔案來源: $csvPath" -ForegroundColor Green
+
+        $countCmd = $sqlConn.CreateCommand()
+        $countCmd.CommandText = "SELECT COUNT(*) FROM [$table]"
+        $rowCount = $countCmd.ExecuteScalar()
+        Write-Log "[$table] 目前總筆數: $rowCount" -ForegroundColor Cyan
+    }
+}
+catch {
+    Write-Log "執行 SQL 時發生錯誤: $($_.Exception.Message)" -ForegroundColor Red -IsError
+}
+finally {
+    if ($sqlConn.State -eq [System.Data.ConnectionState]::Open) {
+        $sqlConn.Close()
+        Write-Log "已關閉資料庫連線。" -ForegroundColor DarkGray
+    }
+}
+
+# ==========================================
+# 6. 狀態判定與 Exit Code 回傳
+# ==========================================
+if ($hasError) {
+    Write-Log "=== 作業失敗，退出代碼: 1 ===" -ForegroundColor Red
+    exit 1
+} else {
+    Write-Log "=== 作業成功完成，退出代碼: 0 ===" -ForegroundColor Green
+    exit 0
+}
+
