@@ -1,5 +1,7 @@
+已為你將 6 個欄位（INST_NO, EXTN_REF_NO, INTN_REF_NO, TYPE, STATUS, LST_MTN_DT） 全數納入讀取與寫入，並加入資料筆數檢查與前幾筆資料預覽功能。
+完整修改後的腳本如下：
 # ==========================================
-# 自動抓取 LDAP 連線資訊 + 切換至 BSADBTW + 透過 SqlBulkCopy 匯入 XREF.csv
+# 自動抓取 LDAP 連線資訊 + 切換至 BSADBTW + 透過 SqlBulkCopy 匯入 XREF.csv 全欄位
 # ==========================================
 
 $hasError = $false
@@ -119,25 +121,53 @@ TRUNCATE TABLE [dbo].[$table];
         $initCmd.CommandText = $initTableSql
         $initCmd.ExecuteNonQuery() | Out-Null
 
-        # 建立存放待寫入資料的 DataTable
-        $dt = New-Object System.Data.DataTable
-        $null = $dt.Columns.Add("EXTN_REF_NO", [string])
-        $null = $dt.Columns.Add("INTN_REF_NO", [string])
-
-        # 讀取 CSV（自動解析表頭，編碼若為 UTF-8 可將 Default 改為 UTF8）
+        # 讀取 CSV 資料（若 CSV 編碼為 UTF-8，可將 Default 改為 UTF8）
         $csvData = Import-Csv -Path $csvPath -Encoding Default
-        foreach ($row in $csvData) {
-            $extn = if ($row.EXTN_REF_NO) { $row.EXTN_REF_NO.Trim() } else { $null }
-            $intn = if ($row.INTN_REF_NO) { $row.INTN_REF_NO.Trim() } else { $null }
+        $csvCount = @($csvData).Count
+        Write-Log "已讀取 CSV 檔案，總筆數: $csvCount 筆" -ForegroundColor Cyan
 
-            # 只要有任一欄位不為空值即加入寫入清單
-            if (-not [string]::IsNullOrEmpty($extn) -or -not [string]::IsNullOrEmpty($intn)) {
-                $newRow = $dt.NewRow()
-                $newRow["EXTN_REF_NO"] = if ([string]::IsNullOrEmpty($extn)) { [DBNull]::Value } else { $extn }
-                $newRow["INTN_REF_NO"] = if ([string]::IsNullOrEmpty($intn)) { [DBNull]::Value } else { $intn }
+        if ($csvCount -eq 0) {
+            Write-Log "警告：CSV 檔案內無任何資料列（或僅有表頭），跳過匯入。" -ForegroundColor Yellow
+            continue
+        }
+
+        # 預覽前 3 筆讀取結果確認欄位解析正確
+        $sampleCount = [Math]::Min(3, $csvCount)
+        Write-Log "預覽前 $sampleCount 筆資料：" -ForegroundColor DarkYellow
+        for ($i = 0; $i -lt $sampleCount; $i++) {
+            $r = @($csvData)[$i]
+            Write-Log "  [#$($i+1)] INST_NO: '$($r.INST_NO)' | EXTN: '$($r.EXTN_REF_NO)' | INTN: '$($r.INTN_REF_NO)' | TYPE: '$($r.TYPE)' | STATUS: '$($r.STATUS)' | LST_MTN_DT: '$($r.LST_MTN_DT)'" -ForegroundColor DarkYellow
+        }
+
+        # 建立 6 個欄位的 DataTable
+        $dt = New-Object System.Data.DataTable
+        $columns = @("INST_NO", "EXTN_REF_NO", "INTN_REF_NO", "TYPE", "STATUS", "LST_MTN_DT")
+        foreach ($col in $columns) {
+            $null = $dt.Columns.Add($col, [string])
+        }
+
+        # 裝填資料至 DataTable
+        foreach ($row in $csvData) {
+            $newRow = $dt.NewRow()
+            $hasValue = $false
+
+            foreach ($col in $columns) {
+                $val = if ($row.$col) { $row.$col.Trim() } else { $null }
+                if (-not [string]::IsNullOrEmpty($val)) {
+                    $newRow[$col] = $val
+                    $hasValue = $true
+                } else {
+                    $newRow[$col] = [DBNull]::Value
+                }
+            }
+
+            # 排除整列全空的無效資料
+            if ($hasValue) {
                 $dt.Rows.Add($newRow)
             }
         }
+
+        Write-Log "過濾空列後，準備寫入 $($dt.Rows.Count) 筆資料..." -ForegroundColor Cyan
 
         # 寫入 BSADBTW 資料庫
         $bulkCopy = New-Object System.Data.SqlClient.SqlBulkCopy($sqlConn)
@@ -145,9 +175,10 @@ TRUNCATE TABLE [dbo].[$table];
         $bulkCopy.BulkCopyTimeout = 300
         $bulkCopy.BatchSize = 10000
 
-        # 明確設定欄位映射
-        $bulkCopy.ColumnMappings.Add("EXTN_REF_NO", "EXTN_REF_NO") | Out-Null
-        $bulkCopy.ColumnMappings.Add("INTN_REF_NO", "INTN_REF_NO") | Out-Null
+        # 設定全部 6 個欄位的 Column Mapping
+        foreach ($col in $columns) {
+            $bulkCopy.ColumnMappings.Add($col, $col) | Out-Null
+        }
 
         $bulkCopy.WriteToServer($dt)
         $bulkCopy.Close()
@@ -175,17 +206,4 @@ if ($hasError) {
     Write-Log "=== 作業成功完成，退出代碼: 0 ===" -ForegroundColor Green
     exit 0
 }
-
-
-原本止血這兩個欄位EXTN_REF_NO 跟 INTN_REF_NO
-
-現在改全部
-
-Column_name	Type	Computed	Length	Prec	Scale	Nullable	TrimTrailingBlanks	FixedLenNullInSource	Collation
-INST_NO	varchar	no	3	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-EXTN_REF_NO	varchar	no	25	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-INTN_REF_NO	varchar	no	25	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-TYPE	varchar	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-STATUS	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
-LST_MTN_DT	varchar	no	8	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
 
