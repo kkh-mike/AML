@@ -1,32 +1,12 @@
-$cipherBase64 = "SU6j1K3QlxIXmfXVbW59pmdhbnY4VbgpWJaO2UpgqqRQ0XYNHt7/hNgSkglYt5PdGfWrR7Eu00JGdtJF6gC4QJ2f97K/+fCE9VIowB7Od2JOkSmIpXno2AqlDo3YIeDF7s5gLy6s0pHvvfqL9YMSAjhP7uI6aZFCRMFdzEVQ5F3V93ssJmd4+6fjhCZWyi23wCO4NBsB+ItKnVHX5uJ+QfX2Bv24T/5CFKmqu2Otw/pSmp1SkAVjiiA/AgD0/pcIokzoHmg1XqmAwK/8qYisKoimdZht88kM/Rsd7Y7dI6M="
+想請你可以幫我查一下
+因為國均有幫我設定批次作業
+來源連線帳號   :  SKBANKFTP_FTP_0032 
 
-# 請在此輸入系統設定的密碼/字串
-$password = "your_secret_password"
+下載檔案(1)ftp://skbankftp/D$/DATA/AML/DATA/AML_Acct.csv失敗:取得來源檔案發生例外(ftp://skbankftp/D$/DATA/AML/DATA/AML_Acct.csv):遠端伺服器傳回一個錯誤: (550) 無法使用檔案 (例如，找不到檔案、沒有存取權限)。 
 
-# 1. 透過 SHA256 產生 32-byte Key，取前 16-byte 做為 IV
-$sha256 = [System.Security.Cryptography.SHA256]::Create()
-$hashBytes = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($password))
 
-$keyBytes = $hashBytes              # 32 bytes (AES-256)
-$ivBytes  = $hashBytes[0..15]       # 16 bytes (AES Block Size)
+不知道為什麼她說目錄沒權限
 
-# 2. 轉換密文
-$cipherBytes = [System.Convert]::FromBase64String($cipherBase64)
 
-# 3. 初始化 AES
-$aes = [System.Security.Cryptography.Aes]::Create()
-$aes.Key = $keyBytes
-$aes.IV  = $ivBytes
-$aes.Mode = [System.Security.Cryptography.CipherMode]::CBC
-$aes.Padding = [System.Security.Cryptography.PaddingMode]::PKCS7
 
-# 4. 解密
-try {
-    $decryptor = $aes.CreateDecryptor()
-    $plainBytes = $decryptor.TransformFinalBlock($cipherBytes, 0, $cipherBytes.Length)
-    $plainText  = [System.Text.Encoding]::UTF8.GetString($plainBytes)
-    Write-Host "解密成功：" -ForegroundColor Green
-    Write-Output $plainText
-} catch {
-    Write-Host "解密失敗，可能 Key/IV 不正確或演算法不同：$($_.Exception.Message)" -ForegroundColor Red
-}
+怎麼簡單表達比較清楚
