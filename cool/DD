@@ -178,10 +178,10 @@ if ($hasError) {
 }
 
 
-因為我沒辦法用直接讀取路徑的方式寫入
-我的csv 再amlws1 這主機
-但db 主機又是另一台
+幫我修改一下
+我現在是要讀取csv  名稱改 XREF
 
+然後他有兩個欄位
+EXTN_REF_NO 跟 INTN_REF_NO
 
-我想改成用powershell 讀取csv 後
-編寫成insert 語法再寫入
+讀取的csv 有表頭的
