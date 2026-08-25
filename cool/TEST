@@ -1,19 +1,8 @@
-自強您好，想請協助幫忙確認一下 FTP_AML_DTLBK 這個批次的錯誤原因。
+SELECT CustomerNo,* FROM Customer_Migrate_buffer a
+	JOIN BANCS_SK_CUST_INFO b on a.CustomerNo = b.SK_CUST_ID
+	WHERE CUST_RE_NO_FLG = '1' 
 
-今天 08:34 執行下載：
-ftp://skbankftp/AML/DATA/SAR_Case_Trxn_Branch.sql
+BANCS_SK_CUST_INFO 裡面還有一個欄位是 TS_CUST_ID
+我想要找到相同的的TS_CUST_ID  同時有 CUST_RE_NO_FLG = '1'   跟 CUST_RE_NO_FLG = '2' 
 
-執行到 08:36 失敗，錯誤訊息只有：
-「取得來源檔案發生例外：在 WebClient 要求期間發生例外狀況。」
-
-目前我這邊一直找不到實際失敗原因，想請問是否可以協助看一下當時的 FTP / 網路封包紀錄，或更底層的錯誤訊息？
-
-想確認是否可以從封包看出是：
-
-1. FTP Server 連線問題
-2. Connection Timeout
-3. FTP Server 中斷連線
-4. 權限或檔案存取問題
-5. 其他網路層面的錯誤
-
-如果可以的話，再麻煩協助確認一下 08:34～08:37 左右的封包紀錄，謝謝。
+怎麼寫
