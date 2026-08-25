@@ -1,5 +1,5 @@
 # ==========================================
-# 自動抓取 LDAP 連線資訊 + 批次執行 Split 資料夾內 SQL + 執行各 Table Update
+# 自動抓取 LDAP 連線資訊 + 批次執行 Split 資料夾內 SQL + 執行各 Table Update (含分行代號轉換)
 # ==========================================
 
 # 1. 資料夾準備與全域 Log 初始化
@@ -208,353 +208,99 @@ if ($UpdateHasError) {
 }
 
 # ==========================================
-# 7. 最終結果與 Exit Code 回傳
+# 7. 批次更新分行代號 (SAR_Case_Main, SAR_Case_Trxn_Branch, SAR_Acct_Info)
 # ==========================================
 Write-Log ""
 Write-Log "========================================="
-Write-Log "全部 SQL 檔案與所有 Table 更新皆已成功執行完成！" -ForegroundColor Green
+Write-Log "開始執行分行代號轉換 (BranchNo / BranchOfTransaction)..." -ForegroundColor Cyan
+
+$BranchUpdateLogFile = Join-Path -Path $LogFolder -ChildPath "Update_BranchCodes_$Timestamp.log"
+
+$branchUpdateSql = @"
+USE [SARCaseWarehouse];
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+BEGIN TRANSACTION;
+
+-- 1. 建立分行代號對照暫存表
+CREATE TABLE #BranchMap (
+    OldBranch VARCHAR(10) PRIMARY KEY,
+    NewBranch VARCHAR(10)
+);
+
+INSERT INTO #BranchMap (OldBranch, NewBranch) VALUES
+('0055', '2050'), ('0073', '2072'), ('0082', '2083'), ('0152', '3002'), ('0189', '2142'),
+('0198', '3046'), ('0204', '2153'), ('0213', '2164'), ('0222', '2175'), ('0231', '2186'),
+('0259', '2201'), ('0277', '2991'), ('0295', '2234'), ('0347', '2289'), ('0392', '2337'),
+('0408', '2348'), ('0426', '2360'), ('0444', '2382'), ('0462', '2407'), ('0471', '2418'),
+('0499', '2430'), ('0569', '2500'), ('0596', '2533'), ('0620', '2555'), ('0648', '2566'),
+('0657', '2577'), ('0684', '2603'), ('0693', '2614'), ('0745', '2669'), ('0754', '2670'),
+('0790', '2706'), ('0806', '2717'), ('0851', '2751'), ('0930', '2832'), ('0985', '2887'),
+('1003', '2898'), ('1049', '2935'), ('1067', '2957'), ('1100', '2980'), ('0019', '2016'),
+('0028', '2027'), ('0037', '2038'), ('0046', '2049'), ('0064', '2061'), ('0091', '2094'),
+('0107', '2108'), ('0116', '2119'), ('0134', '2120'), ('0143', '3013'), ('0161', '2131'),
+('0170', '3024'), ('0240', '2197'), ('0268', '2212'), ('0286', '2223'), ('0301', '2245'),
+('0310', '2256'), ('0329', '2267'), ('0338', '2278'), ('0356', '2290'), ('0365', '2304'),
+('0374', '2315'), ('0383', '2326'), ('0417', '2359'), ('0435', '2371'), ('0453', '2393'),
+('0480', '2429'), ('0505', '2452'), ('0514', '2463'), ('0523', '2474'), ('0541', '2485'),
+('0550', '2496'), ('0578', '2511'), ('0587', '2522'), ('0611', '2544'), ('0666', '2588'),
+('0675', '2599'), ('0709', '2625'), ('0718', '2636'), ('0727', '2647'), ('0736', '2658'),
+('0763', '3035'), ('0772', '2681'), ('0781', '2692'), ('0824', '2728'), ('0833', '2739'),
+('0842', '2740'), ('0860', '2762'), ('0879', '2773'), ('0888', '2784'), ('0897', '2795'),
+('0903', '2809'), ('0912', '2810'), ('0921', '2821'), ('0949', '2843'), ('0958', '2854'),
+('0967', '2865'), ('0976', '2876'), ('1012', '2902'), ('1021', '2913'), ('1030', '2924'),
+('1058', '2946'), ('1076', '2968'), ('1094', '2979');
+
+-- 2. 更新 SAR_Case_Main
+UPDATE m
+SET m.BranchNo = b.NewBranch
+FROM SAR_Case_Main m
+INNER JOIN #BranchMap b ON m.BranchNo = b.OldBranch
+WHERE m.GroupID LIKE 'SK_%';
+
+-- 3. 更新 SAR_Case_Trxn_Branch
+UPDATE t
+SET t.BranchOfTransaction = b.NewBranch
+FROM SAR_Case_Trxn_Branch t
+INNER JOIN #BranchMap b ON t.BranchOfTransaction = b.OldBranch
+WHERE t.GroupID LIKE 'SK_%';
+
+-- 4. 更新 SAR_Acct_Info
+UPDATE a
+SET a.BranchNo = b.NewBranch
+FROM SAR_Acct_Info a
+INNER JOIN #BranchMap b ON a.BranchNo = b.OldBranch
+WHERE a.GroupID LIKE 'SK_%';
+
+COMMIT TRANSACTION;
+DROP TABLE #BranchMap;
+"@
+
+Write-Log "正在更新 SAR_Case_Main, SAR_Case_Trxn_Branch, SAR_Acct_Info 的分行代號..." -ForegroundColor Yellow
+
+sqlcmd `
+    -b `
+    -r 1 `
+    -S $Server `
+    -U $User `
+    -P $Password `
+    -d $Database `
+    -Q $branchUpdateSql `
+    -o $BranchUpdateLogFile
+
+if ($LASTEXITCODE -eq 0) {
+    Write-Log "SUCCESS：分行代號更新作業完成" -ForegroundColor Green
+} else {
+    Write-Log "FAILED：分行代號更新失敗！請檢查 $BranchUpdateLogFile" -ForegroundColor Red -IsError
+    exit 1
+}
+
+# ==========================================
+# 8. 最終結果與 Exit Code 回傳
+# ==========================================
+Write-Log ""
+Write-Log "========================================="
+Write-Log "全部 SQL 檔案、CustomerNo 更新與分行代號更新皆已成功執行完成！" -ForegroundColor Green
 Write-Log "========================================="
 exit 0
-
-
-
-
-
-
-我可以把下面的這些包再一起執行?
-USE SARCaseWarehouse
-
-SELECT * FROM SAR_Case_Main WHERE GroupID LIKE 'SK_%'
-
-UPDATE SAR_Case_Main
-SET BranchNo = CASE 
-				WHEN BranchNo = '0055' THEN '2050'
-                WHEN BranchNo = '0073' THEN '2072'
-                WHEN BranchNo = '0082' THEN '2083'
-                WHEN BranchNo = '0152' THEN '3002'
-                WHEN BranchNo = '0189' THEN '2142'
-                WHEN BranchNo = '0198' THEN '3046'
-                WHEN BranchNo = '0204' THEN '2153'
-                WHEN BranchNo = '0213' THEN '2164'
-                WHEN BranchNo = '0222' THEN '2175'
-                WHEN BranchNo = '0231' THEN '2186'
-                WHEN BranchNo = '0259' THEN '2201'
-                WHEN BranchNo = '0277' THEN '2991'
-                WHEN BranchNo = '0295' THEN '2234'
-                WHEN BranchNo = '0347' THEN '2289'
-                WHEN BranchNo = '0392' THEN '2337'
-                WHEN BranchNo = '0408' THEN '2348'
-                WHEN BranchNo = '0426' THEN '2360'
-                WHEN BranchNo = '0444' THEN '2382'
-                WHEN BranchNo = '0462' THEN '2407'
-                WHEN BranchNo = '0471' THEN '2418'
-                WHEN BranchNo = '0499' THEN '2430'
-                WHEN BranchNo = '0569' THEN '2500'
-                WHEN BranchNo = '0596' THEN '2533'
-                WHEN BranchNo = '0620' THEN '2555'
-                WHEN BranchNo = '0648' THEN '2566'
-                WHEN BranchNo = '0657' THEN '2577'
-                WHEN BranchNo = '0684' THEN '2603'
-                WHEN BranchNo = '0693' THEN '2614'
-                WHEN BranchNo = '0745' THEN '2669'
-                WHEN BranchNo = '0754' THEN '2670'
-                WHEN BranchNo = '0790' THEN '2706'
-                WHEN BranchNo = '0806' THEN '2717'
-                WHEN BranchNo = '0851' THEN '2751'
-                WHEN BranchNo = '0930' THEN '2832'
-                WHEN BranchNo = '0985' THEN '2887'
-                WHEN BranchNo = '1003' THEN '2898'
-                WHEN BranchNo = '1049' THEN '2935'
-                WHEN BranchNo = '1067' THEN '2957'
-                WHEN BranchNo = '1100' THEN '2980'
-                WHEN BranchNo = '0019' THEN '2016'
-                WHEN BranchNo = '0028' THEN '2027'
-                WHEN BranchNo = '0037' THEN '2038'
-                WHEN BranchNo = '0046' THEN '2049'
-                WHEN BranchNo = '0064' THEN '2061'
-                WHEN BranchNo = '0091' THEN '2094'
-                WHEN BranchNo = '0107' THEN '2108'
-                WHEN BranchNo = '0116' THEN '2119'
-                WHEN BranchNo = '0134' THEN '2120'
-                WHEN BranchNo = '0143' THEN '3013'
-                WHEN BranchNo = '0161' THEN '2131'
-                WHEN BranchNo = '0170' THEN '3024'
-                WHEN BranchNo = '0240' THEN '2197'
-                WHEN BranchNo = '0268' THEN '2212'
-                WHEN BranchNo = '0286' THEN '2223'
-                WHEN BranchNo = '0301' THEN '2245'
-                WHEN BranchNo = '0310' THEN '2256'
-                WHEN BranchNo = '0329' THEN '2267'
-                WHEN BranchNo = '0338' THEN '2278'
-                WHEN BranchNo = '0356' THEN '2290'
-                WHEN BranchNo = '0365' THEN '2304'
-                WHEN BranchNo = '0374' THEN '2315'
-                WHEN BranchNo = '0383' THEN '2326'
-                WHEN BranchNo = '0417' THEN '2359'
-                WHEN BranchNo = '0435' THEN '2371'
-                WHEN BranchNo = '0453' THEN '2393'
-                WHEN BranchNo = '0480' THEN '2429'
-                WHEN BranchNo = '0505' THEN '2452'
-                WHEN BranchNo = '0514' THEN '2463'
-                WHEN BranchNo = '0523' THEN '2474'
-                WHEN BranchNo = '0541' THEN '2485'
-                WHEN BranchNo = '0550' THEN '2496'
-                WHEN BranchNo = '0578' THEN '2511'
-                WHEN BranchNo = '0587' THEN '2522'
-                WHEN BranchNo = '0611' THEN '2544'
-                WHEN BranchNo = '0666' THEN '2588'
-                WHEN BranchNo = '0675' THEN '2599'
-                WHEN BranchNo = '0709' THEN '2625'
-                WHEN BranchNo = '0718' THEN '2636'
-                WHEN BranchNo = '0727' THEN '2647'
-                WHEN BranchNo = '0736' THEN '2658'
-                WHEN BranchNo = '0763' THEN '3035'
-                WHEN BranchNo = '0772' THEN '2681'
-                WHEN BranchNo = '0781' THEN '2692'
-                WHEN BranchNo = '0824' THEN '2728'
-                WHEN BranchNo = '0833' THEN '2739'
-                WHEN BranchNo = '0842' THEN '2740'
-                WHEN BranchNo = '0860' THEN '2762'
-                WHEN BranchNo = '0879' THEN '2773'
-                WHEN BranchNo = '0888' THEN '2784'
-                WHEN BranchNo = '0897' THEN '2795'
-                WHEN BranchNo = '0903' THEN '2809'
-                WHEN BranchNo = '0912' THEN '2810'
-                WHEN BranchNo = '0921' THEN '2821'
-                WHEN BranchNo = '0949' THEN '2843'
-                WHEN BranchNo = '0958' THEN '2854'
-                WHEN BranchNo = '0967' THEN '2865'
-                WHEN BranchNo = '0976' THEN '2876'
-                WHEN BranchNo = '1012' THEN '2902'
-                WHEN BranchNo = '1021' THEN '2913'
-                WHEN BranchNo = '1030' THEN '2924'
-                WHEN BranchNo = '1058' THEN '2946'
-                WHEN BranchNo = '1076' THEN '2968'
-                WHEN BranchNo = '1094' THEN '2979'
-                ELSE BranchNo
-				END
-WHERE GroupID LIKE 'SK_%'
-
-
-SELECT * FROM SAR_Case_Trxn_Branch WHERE GroupID LIKE 'SK_%'
-
-UPDATE SAR_Case_Trxn_Branch
-SET BranchOfTransaction = CASE 
-				WHEN BranchOfTransaction = '0055' THEN '2050'		
-				WHEN BranchOfTransaction = '0073' THEN '2072'		
-				WHEN BranchOfTransaction = '0082' THEN '2083'		
-				WHEN BranchOfTransaction = '0152' THEN '3002'		
-				WHEN BranchOfTransaction = '0189' THEN '2142'		
-				WHEN BranchOfTransaction = '0198' THEN '3046'		
-				WHEN BranchOfTransaction = '0204' THEN '2153'		
-				WHEN BranchOfTransaction = '0213' THEN '2164'		
-				WHEN BranchOfTransaction = '0222' THEN '2175'		
-				WHEN BranchOfTransaction = '0231' THEN '2186'		
-				WHEN BranchOfTransaction = '0259' THEN '2201'		
-				WHEN BranchOfTransaction = '0277' THEN '2991'		
-				WHEN BranchOfTransaction = '0295' THEN '2234'		
-				WHEN BranchOfTransaction = '0347' THEN '2289'		
-				WHEN BranchOfTransaction = '0392' THEN '2337'		
-				WHEN BranchOfTransaction = '0408' THEN '2348'		
-				WHEN BranchOfTransaction = '0426' THEN '2360'		
-				WHEN BranchOfTransaction = '0444' THEN '2382'		
-				WHEN BranchOfTransaction = '0462' THEN '2407'		
-				WHEN BranchOfTransaction = '0471' THEN '2418'		
-				WHEN BranchOfTransaction = '0499' THEN '2430'		
-				WHEN BranchOfTransaction = '0569' THEN '2500'		
-				WHEN BranchOfTransaction = '0596' THEN '2533'		
-				WHEN BranchOfTransaction = '0620' THEN '2555'		
-				WHEN BranchOfTransaction = '0648' THEN '2566'		
-				WHEN BranchOfTransaction = '0657' THEN '2577'		
-				WHEN BranchOfTransaction = '0684' THEN '2603'		
-				WHEN BranchOfTransaction = '0693' THEN '2614'		
-				WHEN BranchOfTransaction = '0745' THEN '2669'		
-				WHEN BranchOfTransaction = '0754' THEN '2670'		
-				WHEN BranchOfTransaction = '0790' THEN '2706'		
-				WHEN BranchOfTransaction = '0806' THEN '2717'		
-				WHEN BranchOfTransaction = '0851' THEN '2751'		
-				WHEN BranchOfTransaction = '0930' THEN '2832'		
-				WHEN BranchOfTransaction = '0985' THEN '2887'		
-				WHEN BranchOfTransaction = '1003' THEN '2898'		
-				WHEN BranchOfTransaction = '1049' THEN '2935'		
-				WHEN BranchOfTransaction = '1067' THEN '2957'		
-				WHEN BranchOfTransaction = '1100' THEN '2980'		
-				WHEN BranchOfTransaction = '0019' THEN '2016'		
-				WHEN BranchOfTransaction = '0028' THEN '2027'		
-				WHEN BranchOfTransaction = '0037' THEN '2038'		
-				WHEN BranchOfTransaction = '0046' THEN '2049'		
-				WHEN BranchOfTransaction = '0064' THEN '2061'		
-				WHEN BranchOfTransaction = '0091' THEN '2094'		
-				WHEN BranchOfTransaction = '0107' THEN '2108'		
-				WHEN BranchOfTransaction = '0116' THEN '2119'		
-				WHEN BranchOfTransaction = '0134' THEN '2120'		
-				WHEN BranchOfTransaction = '0143' THEN '3013'		
-				WHEN BranchOfTransaction = '0161' THEN '2131'		
-				WHEN BranchOfTransaction = '0170' THEN '3024'		
-				WHEN BranchOfTransaction = '0240' THEN '2197'		
-				WHEN BranchOfTransaction = '0268' THEN '2212'		
-				WHEN BranchOfTransaction = '0286' THEN '2223'		
-				WHEN BranchOfTransaction = '0301' THEN '2245'		
-				WHEN BranchOfTransaction = '0310' THEN '2256'		
-				WHEN BranchOfTransaction = '0329' THEN '2267'		
-				WHEN BranchOfTransaction = '0338' THEN '2278'		
-				WHEN BranchOfTransaction = '0356' THEN '2290'		
-				WHEN BranchOfTransaction = '0365' THEN '2304'		
-				WHEN BranchOfTransaction = '0374' THEN '2315'		
-				WHEN BranchOfTransaction = '0383' THEN '2326'		
-				WHEN BranchOfTransaction = '0417' THEN '2359'		
-				WHEN BranchOfTransaction = '0435' THEN '2371'		
-				WHEN BranchOfTransaction = '0453' THEN '2393'		
-				WHEN BranchOfTransaction = '0480' THEN '2429'		
-				WHEN BranchOfTransaction = '0505' THEN '2452'		
-				WHEN BranchOfTransaction = '0514' THEN '2463'		
-				WHEN BranchOfTransaction = '0523' THEN '2474'		
-				WHEN BranchOfTransaction = '0541' THEN '2485'		
-				WHEN BranchOfTransaction = '0550' THEN '2496'		
-				WHEN BranchOfTransaction = '0578' THEN '2511'		
-				WHEN BranchOfTransaction = '0587' THEN '2522'		
-				WHEN BranchOfTransaction = '0611' THEN '2544'		
-				WHEN BranchOfTransaction = '0666' THEN '2588'		
-				WHEN BranchOfTransaction = '0675' THEN '2599'		
-				WHEN BranchOfTransaction = '0709' THEN '2625'		
-				WHEN BranchOfTransaction = '0718' THEN '2636'		
-				WHEN BranchOfTransaction = '0727' THEN '2647'		
-				WHEN BranchOfTransaction = '0736' THEN '2658'		
-				WHEN BranchOfTransaction = '0763' THEN '3035'		
-				WHEN BranchOfTransaction = '0772' THEN '2681'		
-				WHEN BranchOfTransaction = '0781' THEN '2692'		
-				WHEN BranchOfTransaction = '0824' THEN '2728'		
-				WHEN BranchOfTransaction = '0833' THEN '2739'		
-				WHEN BranchOfTransaction = '0842' THEN '2740'		
-				WHEN BranchOfTransaction = '0860' THEN '2762'		
-				WHEN BranchOfTransaction = '0879' THEN '2773'		
-				WHEN BranchOfTransaction = '0888' THEN '2784'		
-				WHEN BranchOfTransaction = '0897' THEN '2795'		
-				WHEN BranchOfTransaction = '0903' THEN '2809'		
-				WHEN BranchOfTransaction = '0912' THEN '2810'		
-				WHEN BranchOfTransaction = '0921' THEN '2821'		
-				WHEN BranchOfTransaction = '0949' THEN '2843'		
-				WHEN BranchOfTransaction = '0958' THEN '2854'		
-				WHEN BranchOfTransaction = '0967' THEN '2865'		
-				WHEN BranchOfTransaction = '0976' THEN '2876'		
-				WHEN BranchOfTransaction = '1012' THEN '2902'		
-				WHEN BranchOfTransaction = '1021' THEN '2913'		
-				WHEN BranchOfTransaction = '1030' THEN '2924'		
-				WHEN BranchOfTransaction = '1058' THEN '2946'		
-				WHEN BranchOfTransaction = '1076' THEN '2968'		
-				WHEN BranchOfTransaction = '1094' THEN '2979'	
-				ELSE BranchOfTransaction
-				END
-WHERE GroupID LIKE 'SK_%'
-
-
-SELECT * FROM SAR_Acct_Info WHERE GroupID LIKE 'SK_%'
-
-UPDATE SAR_Acct_Info
-SET BranchNo = CASE 
-				WHEN BranchNo = '0055' THEN '2050'		
-				WHEN BranchNo = '0073' THEN '2072'		
-				WHEN BranchNo = '0082' THEN '2083'		
-				WHEN BranchNo = '0152' THEN '3002'		
-				WHEN BranchNo = '0189' THEN '2142'		
-				WHEN BranchNo = '0198' THEN '3046'		
-				WHEN BranchNo = '0204' THEN '2153'		
-				WHEN BranchNo = '0213' THEN '2164'		
-				WHEN BranchNo = '0222' THEN '2175'		
-				WHEN BranchNo = '0231' THEN '2186'		
-				WHEN BranchNo = '0259' THEN '2201'		
-				WHEN BranchNo = '0277' THEN '2991'		
-				WHEN BranchNo = '0295' THEN '2234'		
-				WHEN BranchNo = '0347' THEN '2289'		
-				WHEN BranchNo = '0392' THEN '2337'		
-				WHEN BranchNo = '0408' THEN '2348'		
-				WHEN BranchNo = '0426' THEN '2360'		
-				WHEN BranchNo = '0444' THEN '2382'		
-				WHEN BranchNo = '0462' THEN '2407'		
-				WHEN BranchNo = '0471' THEN '2418'		
-				WHEN BranchNo = '0499' THEN '2430'		
-				WHEN BranchNo = '0569' THEN '2500'		
-				WHEN BranchNo = '0596' THEN '2533'		
-				WHEN BranchNo = '0620' THEN '2555'		
-				WHEN BranchNo = '0648' THEN '2566'		
-				WHEN BranchNo = '0657' THEN '2577'		
-				WHEN BranchNo = '0684' THEN '2603'		
-				WHEN BranchNo = '0693' THEN '2614'		
-				WHEN BranchNo = '0745' THEN '2669'		
-				WHEN BranchNo = '0754' THEN '2670'		
-				WHEN BranchNo = '0790' THEN '2706'		
-				WHEN BranchNo = '0806' THEN '2717'		
-				WHEN BranchNo = '0851' THEN '2751'		
-				WHEN BranchNo = '0930' THEN '2832'		
-				WHEN BranchNo = '0985' THEN '2887'		
-				WHEN BranchNo = '1003' THEN '2898'		
-				WHEN BranchNo = '1049' THEN '2935'		
-				WHEN BranchNo = '1067' THEN '2957'		
-				WHEN BranchNo = '1100' THEN '2980'		
-				WHEN BranchNo = '0019' THEN '2016'		
-				WHEN BranchNo = '0028' THEN '2027'		
-				WHEN BranchNo = '0037' THEN '2038'		
-				WHEN BranchNo = '0046' THEN '2049'		
-				WHEN BranchNo = '0064' THEN '2061'		
-				WHEN BranchNo = '0091' THEN '2094'		
-				WHEN BranchNo = '0107' THEN '2108'		
-				WHEN BranchNo = '0116' THEN '2119'		
-				WHEN BranchNo = '0134' THEN '2120'		
-				WHEN BranchNo = '0143' THEN '3013'		
-				WHEN BranchNo = '0161' THEN '2131'		
-				WHEN BranchNo = '0170' THEN '3024'		
-				WHEN BranchNo = '0240' THEN '2197'		
-				WHEN BranchNo = '0268' THEN '2212'		
-				WHEN BranchNo = '0286' THEN '2223'		
-				WHEN BranchNo = '0301' THEN '2245'		
-				WHEN BranchNo = '0310' THEN '2256'		
-				WHEN BranchNo = '0329' THEN '2267'		
-				WHEN BranchNo = '0338' THEN '2278'		
-				WHEN BranchNo = '0356' THEN '2290'		
-				WHEN BranchNo = '0365' THEN '2304'		
-				WHEN BranchNo = '0374' THEN '2315'		
-				WHEN BranchNo = '0383' THEN '2326'		
-				WHEN BranchNo = '0417' THEN '2359'		
-				WHEN BranchNo = '0435' THEN '2371'		
-				WHEN BranchNo = '0453' THEN '2393'		
-				WHEN BranchNo = '0480' THEN '2429'		
-				WHEN BranchNo = '0505' THEN '2452'		
-				WHEN BranchNo = '0514' THEN '2463'		
-				WHEN BranchNo = '0523' THEN '2474'		
-				WHEN BranchNo = '0541' THEN '2485'		
-				WHEN BranchNo = '0550' THEN '2496'		
-				WHEN BranchNo = '0578' THEN '2511'		
-				WHEN BranchNo = '0587' THEN '2522'		
-				WHEN BranchNo = '0611' THEN '2544'		
-				WHEN BranchNo = '0666' THEN '2588'		
-				WHEN BranchNo = '0675' THEN '2599'		
-				WHEN BranchNo = '0709' THEN '2625'		
-				WHEN BranchNo = '0718' THEN '2636'		
-				WHEN BranchNo = '0727' THEN '2647'		
-				WHEN BranchNo = '0736' THEN '2658'		
-				WHEN BranchNo = '0763' THEN '3035'		
-				WHEN BranchNo = '0772' THEN '2681'		
-				WHEN BranchNo = '0781' THEN '2692'		
-				WHEN BranchNo = '0824' THEN '2728'		
-				WHEN BranchNo = '0833' THEN '2739'		
-				WHEN BranchNo = '0842' THEN '2740'		
-				WHEN BranchNo = '0860' THEN '2762'		
-				WHEN BranchNo = '0879' THEN '2773'		
-				WHEN BranchNo = '0888' THEN '2784'		
-				WHEN BranchNo = '0897' THEN '2795'		
-				WHEN BranchNo = '0903' THEN '2809'		
-				WHEN BranchNo = '0912' THEN '2810'		
-				WHEN BranchNo = '0921' THEN '2821'		
-				WHEN BranchNo = '0949' THEN '2843'		
-				WHEN BranchNo = '0958' THEN '2854'		
-				WHEN BranchNo = '0967' THEN '2865'		
-				WHEN BranchNo = '0976' THEN '2876'		
-				WHEN BranchNo = '1012' THEN '2902'		
-				WHEN BranchNo = '1021' THEN '2913'		
-				WHEN BranchNo = '1030' THEN '2924'		
-				WHEN BranchNo = '1058' THEN '2946'		
-				WHEN BranchNo = '1076' THEN '2968'		
-				WHEN BranchNo = '1094' THEN '2979'	
-				ELSE BranchNo
-				END
-WHERE GroupID LIKE 'SK_%'
