@@ -1,8 +1,8 @@
-SELECT CustomerNo,* FROM Customer_Migrate_buffer a
-	JOIN BANCS_SK_CUST_INFO b on a.CustomerNo = b.SK_CUST_ID
-	WHERE CUST_RE_NO_FLG = '1' 
+SELECT TOP 50 * FROM Customer_Migrate_buffer b
+JOIN Customer_Migrate_Exception_Table c ON  b.CIF_KEY = c.CIF_KEY
+JOIN BANCS_SK_CUST_INFO s ON  b.CustomerNo = s.SK_CUST_ID
+WHERE s.CUST_RE_NO_FLG IN ('2','3')
 
-BANCS_SK_CUST_INFO 裡面還有一個欄位是 TS_CUST_ID
-我想要找到相同的的TS_CUST_ID  同時有 CUST_RE_NO_FLG = '1'   跟 CUST_RE_NO_FLG = '2' 
+BANCS_SK_CUST_INFO 裡面還有一個欄位是TS_CUST_ID 他是對應 BSA_SUB_CUST_FACT 的CustomerNo
 
-怎麼寫
+我想要新增一個 找出來然後但沒有再BSA_SUB_CUST_FACT 裡面的   要怎麼寫 
