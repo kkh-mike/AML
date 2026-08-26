@@ -1,76 +1,287 @@
-# ==========================================
-# 1. 設定連線字串與 SQL 檔案目錄
-# ==========================================
-$connectionString = 'Data Source=AMLIST;Initial Catalog=GCMAINDB;User ID=aml;Password=aml1234;Application Name="PATRIOT OFFICER"'
-$sqlFolder = "D:\SqlScripts"  # 請替換為您放置 .sql 檔案的實際目錄
+USE [BSADB]
+GO
 
-# 取得目錄下所有的 .sql 檔案（依檔名排序）
-$sqlFiles = Get-ChildItem -Path $sqlFolder -Filter "*.sql" | Sort-Object Name
+/****** Object:  StoredProcedure [dbo].[GLSPEC_SyncDJToInternalList]    Script Date: 2026/8/12 銝���� 03:53:06 ******/
+SET ANSI_NULLS ON
+GO
 
-if ($sqlFiles.Count -eq 0) {
-    Write-Warning "指定目錄下找不到任何 .sql 檔案: $sqlFolder"
-    exit
-}
+SET QUOTED_IDENTIFIER ON
+GO
 
-# ==========================================
-# 2. 建立資料庫連線並依序執行
-# ==========================================
-$connection = New-Object System.Data.SqlClient.SqlConnection($connectionString)
 
-try {
-    Write-Host "[資訊] 正在連線至資料庫..." -ForegroundColor Cyan
-    $connection.Open()
-    Write-Host "[成功] 資料庫連線成功！`n" -ForegroundColor Green
 
-    foreach ($file in $sqlFiles) {
-        Write-Host "----------------------------------------"
-        Write-Host "正在執行: $($file.Name) ..." -ForegroundColor Yellow
+ALTER PROCEDURE [dbo].[GLSPEC_SyncDJToInternalList]
+@GroupId BIGINT
+AS
+BEGIN
+ DECLARE @OtherIdentMthCode VARCHAR(2)
+ SELECT @OtherIdentMthCode = IDENTCODE FROM dbo.IDENTMTHD_DIM WHERE OTHIND = 'Y' 
 
-        # 讀取 SQL 內容 (建議指定 UTF8 或 Default 編碼避免中文亂碼)
-        $sqlContent = Get-Content -Path $file.FullName -Raw -Encoding UTF8
+ IF OBJECT_ID('tempdb..#tempDJBlacklist') IS NOT NULL
+     DROP TABLE #tempDJBlacklist
+ IF OBJECT_ID('tempdb..#tempDJBlacklistDetails') IS NOT NULL
+     DROP TABLE #tempDJBlacklistDetails
 
-        # ADO.NET 不支援直接執行包含 'GO' 的批次指令，需使用正規表達式將其拆分
-        $statements = [System.Text.RegularExpressions.Regex]::Split(
-            $sqlContent, 
-            "^\s*GO\s*$", 
-            [System.Text.RegularExpressions.RegexOptions]::Multiline -bor [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
-        )
+ CREATE TABLE #tempDJBlacklist (EntNum INT NOT NULL, SdnName NVARCHAR(350) NOT NULL, UpdatedDate VARCHAR(8) NOT NULL)
 
-        foreach ($stmt in $statements) {
-            $trimmedStmt = $stmt.Trim()
-            if (-not [string]::IsNullOrWhiteSpace($trimmedStmt)) {
-                $command = $connection.CreateCommand()
-                $command.CommandText = $trimmedStmt
-                $command.CommandTimeout = 300 # 設定逾時時間 (秒)，若檔案很大可調高
+ CREATE TABLE #tempDJBlacklistDetails(EntNum INT NOT NULL, SdnName NVARCHAR(350) NOT NULL, UpdatedDate VARCHAR(8) NOT NULL, 
+  Address NVARCHAR(400), City NVARCHAR(200), Country NVARCHAR(100), IdentType VARCHAR(2), IdentNumber NVARCHAR(44), DOB VARCHAR(8))
 
-                try {
-                    $rowsAffected = $command.ExecuteNonQuery()
-                    # rowsAffected 為 -1 通常代表 DDL 或 SET 指令，大於等於 0 代表受影響筆數
-                    if ($rowsAffected -ge 0) {
-                        Write-Host "  -> 執行成功，受影響筆數: $rowsAffected" -ForegroundColor Gray
-                    }
-                }
-                catch {
-                    Write-Error "  [錯誤] 執行 SQL 失敗: $($_.Exception.Message)"
-                    # 若希望出錯時立即中斷腳本，可取消下一行註解：
-                    # throw $_
-                }
-                finally {
-                    $command.Dispose()
-                }
-            }
-        }
-        Write-Host "[完成] $($file.Name) 執行完畢。" -ForegroundColor Green
-    }
-}
-catch {
-    Write-Error "[連線/執行錯誤] $($_.Exception.Message)"
-}
-finally {
-    # 確保連線一定會關閉
-    if ($connection.State -eq [System.Data.ConnectionState]::Open) {
-        $connection.Close()
-        Write-Host "`n[資訊] 資料庫連線已安全關閉。" -ForegroundColor Cyan
-    }
-    $connection.Dispose()
-}
+ 
+ INSERT INTO #tempDJBlacklist ( EntNum, SdnName, UpdatedDate )
+ SELECT  A.EntNum, A.SdnName, MAX(A.UpdatedDate) AS UpdatedDate 
+ FROM BSADB.dbo.DJ_List_Data_A A 
+ WHERE A.NamePropertyBitCode & 1 > 0 
+ GROUP BY A.EntNum, A.SdnName 
+
+ ;WITH TempAddress AS (
+  SELECT A.EntityId, A.Address, A.City, A.AddressCountry, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId'
+  FROM BSADB.dbo.DJ_Address A WITH(NOLOCK) 
+  WHERE A.Deleted = 0  AND EXISTS(SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
+ ), TempIdent AS(
+  SELECT EntityId, CASE WHEN ISNULL(IdentificationType,'') = '' THEN NULL ELSE @OtherIdentMthCode END 'IdentificationType', IdentificationNumber, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId' 
+  FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH(NOLOCK) WHERE A.Deleted = 0 AND EXISTS(SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
+ ), TempDOB AS (
+  SELECT EntityId, InfoDay, InfoMonth, InfoYear, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId' 
+  FROM BSADB.dbo.DJ_DateTypeInfo A WITH(NOLOCK) WHERE A.DateType = 'Date of Birth' AND A.Deleted = 0 AND EXISTS(SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
+ )
+ INSERT INTO #tempDJBlacklistDetails ( EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB )
+ SELECT A.EntNum, A.SdnName, A.UpdatedDate, B.Address, LEFT(B.City,100), LEFT(B.AddressCountry,100),
+  C.IdentificationType, LEFT(C.IdentificationNumber,44) , 
+  CASE WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL THEN D.InfoYear ELSE CONVERT(VARCHAR(8),dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) END
+ FROM #tempDJBlacklist A 
+  LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1 
+  LEFT JOIN TempIdent C ON A.EntNum = C.EntityId AND C.RowId = 1 
+  LEFT JOIN TempDOB D ON A.EntNum = D.EntityId AND D.RowId = 1 
+
+
+ ;WITH TargetTable AS (
+  SELECT A.spec_name, A.updated_date, A.remark, A.TaxID, A.IDENT, A.IDENTO, A.TaxIDCD, A.IDNUM, A.DInd, A.creUserID, A.STATE, A.ADDRESS, A.COUNTRY,
+               A.GROUPID, A.SOURCE, A.EnterFlag, A.ApprovedBy, A.ApprovedDate, A.DelUserID, A.DelDate, A.ApproveDelUserID, A.ApproveDelDate, A.creDate,
+               A.updated_date_UTC, A.ApprovedDate_UTC, A.DelDate_UTC, A.ApproveDelDate_UTC, A.creDate_UTC, A.ent_num, A.DOB
+  /*A.spec_name, A.updated_date, A.remark, A.DInd, A.creUserID, A.STATE, A.ADDRESS, A.COUNTRY,
+      A.GROUPID, A.SOURCE, A.EnterFlag, A.ApprovedBy, A.ApprovedDate, A.DelUserID, A.DelDate, A.ApproveDelUserID, A.ApproveDelDate, A.creDate,
+      A.updated_date_UTC, A.ApprovedDate_UTC, A.DelDate_UTC, A.ApproveDelDate_UTC, A.creDate_UTC, A.ent_num*/
+  FROM BSADB.dbo.OFAC_GLSpec A WHERE A.GROUPID = @GroupId --AND A.DInd = 'N'
+ )
+ MERGE TargetTable T 
+ USING (SELECT EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB FROM #tempDJBlacklistDetails) S
+ ON T.spec_name = S.SdnName AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+ WHEN NOT MATCHED BY TARGET THEN
+  INSERT ( spec_name, updated_date, remark, DInd, creUserID, STATE, ADDRESS, COUNTRY, GROUPID, IDENT, IDNUM, DOB,
+                SOURCE, EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, creDate, updated_date_UTC,
+                ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, creDate_UTC)
+  VALUES(S.SdnName, S.UpdatedDate, S.EntNum, 'N', 'System Admin', ISNULL(S.City,''), S.Address, S.Country, @GroupId, S.IdentType, S.IdentNumber, S.DOB,
+    NULL, 'D', 'System Admin', GETDATE(), 'System Admin', GETDATE(), 'System Admin', GETDATE(), GETDATE(), GETDATE(), 
+    GETUTCDATE(), NULL, NULL, GETUTCDATE())
+ WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN 
+  UPDATE SET T.DInd = 'Y', T.DelUserID = 'System Admin', T.DelDate = GETDATE(), T.ApproveDelUserID = 'System Admin', T.ApproveDelDate = GETDATE(),
+    T.DelDate_UTC = GETUTCDATE()
+ WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN 
+  UPDATE SET T.DInd = 'N', T.updated_date = S.UpdatedDate, T.DelUserID = NULL, T.DelDate = NULL, T.ApproveDelUserID = NULL, T.ApproveDelDate = NULL,
+    T.DelDate_UTC = NULL, T.EnterFlag = 'D', T.updated_date_UTC = GETUTCDATE(),
+    T.ADDRESS = S.ADDRESS, T.STATE = ISNULL(S.City,''), T.COUNTRY = S.Country, T.IDENT = S.IdentType, T.IDNUM = S.IdentNumber, T.DOB = S.DOB
+ OUTPUT CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ent_num ELSE Deleted.ent_num END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.spec_name ELSE Deleted.spec_name END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date ELSE Deleted.updated_date END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.remark ELSE Deleted.remark END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DInd ELSE Deleted.DInd END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creUserID ELSE Deleted.creUserID END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENTO ELSE Deleted.IDENTO END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.STATE ELSE Deleted.STATE END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ADDRESS ELSE Deleted.ADDRESS END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.COUNTRY ELSE Deleted.COUNTRY END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.GROUPID ELSE Deleted.GROUPID END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENT ELSE Deleted.IDENT END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDNUM ELSE Deleted.IDNUM END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DOB ELSE Deleted.DOB END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.EnterFlag ELSE Deleted.EnterFlag END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedBy ELSE Deleted.ApprovedBy END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate ELSE Deleted.ApprovedDate END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelUserID ELSE Deleted.DelUserID END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate ELSE Deleted.DelDate END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelUserID ELSE Deleted.ApproveDelUserID END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate ELSE Deleted.ApproveDelDate END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creDate ELSE Deleted.creDate END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date_UTC ELSE Deleted.updated_date_UTC END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate_UTC ELSE Deleted.ApprovedDate_UTC END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate_UTC ELSE Deleted.DelDate_UTC END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate_UTC ELSE Deleted.ApproveDelDate_UTC END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creDate_UTC ELSE Deleted.creDate_UTC END,
+  CASE WHEN $ACTION = 'INSERT' OR ($ACTION = 'UPDATE' AND Deleted.DInd = 'Y' AND Inserted.DInd = 'N') THEN '01' WHEN $ACTION = 'UPDATE' AND Inserted.DInd = 'Y' THEN '03' ELSE '02' END, 
+  GETUTCDATE()
+ INTO BSADB.dbo.OFAC_GLSpec_Log (ent_num, spec_name, updated_date, remark, DInd, creUserID, IDENTO, STATE, ADDRESS, COUNTRY, GROUPID, IDENT, IDNUM, DOB,
+                EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, CreationDate, updated_date_UTC,
+                ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, CreationDate_UTC, ActionCD, ActionDt);
+
+
+ IF OBJECT_ID('tempdb..#tempDJBlacklistJP') IS NOT NULL
+  DROP TABLE #tempDJBlacklistJP
+ IF OBJECT_ID('tempdb..#tempDJBlacklistDetailsJP') IS NOT NULL
+  DROP TABLE #tempDJBlacklistDetailsJP
+
+ CREATE TABLE #tempDJBlacklistJP (EntNum INT NOT NULL, SdnName NVARCHAR(350) NOT NULL, UpdatedDate VARCHAR(8) NOT NULL)
+
+ CREATE TABLE #tempDJBlacklistDetailsJP(Num INT ,EntNum INT NOT NULL, SdnName NVARCHAR(350) NOT NULL, UpdatedDate VARCHAR(8) NOT NULL, 
+   Address NVARCHAR(400), City NVARCHAR(200), Country NVARCHAR(100), IdentType VARCHAR(2), IdentNumber NVARCHAR(44), DOB VARCHAR(8))
+
+        
+ INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate )
+ SELECT  A.EntNum, A.SdnName, MAX(A.UpdatedDate) AS UpdatedDate 
+ FROM BSADB.dbo.DJ_List_Data_A A JOIN BSADB.dbo.DJ_SanctionListReference B 
+  ON A.EntNum = B.EntityId
+ WHERE A.NamePropertyBitCode & 1 > 0 AND SanctionListReference LIKE '%Japanese Finance%'
+ GROUP BY A.EntNum, A.SdnName 
+
+
+ ;WITH TempAddress AS (
+  SELECT A.EntityId, A.Address, A.City, A.AddressCountry, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId'
+  FROM BSADB.dbo.DJ_Address A WITH(NOLOCK) 
+  WHERE A.Deleted = 0  AND EXISTS(SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
+ ), TempIdent AS(
+  SELECT EntityId, CASE WHEN ISNULL(IdentificationType,'') = '' THEN NULL ELSE @OtherIdentMthCode END 'IdentificationType', IdentificationNumber, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId' 
+  FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH(NOLOCK) WHERE A.Deleted = 0 AND EXISTS(SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
+ ), TempDOB AS (
+  SELECT EntityId, InfoDay, InfoMonth, InfoYear, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId' 
+  FROM BSADB.dbo.DJ_DateTypeInfo A WITH(NOLOCK) WHERE A.DateType = 'Date of Birth' AND A.Deleted = 0 AND EXISTS(SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
+ ), TempNUM AS (
+  SELECT A.spec_name, A.updated_date, A.remark, A.TaxID, A.IDENT, A.IDENTO, A.TaxIDCD, A.IDNUM, A.issBy, A.DInd, A.creUserID, A.STATE, A.ADDRESS, A.COUNTRY,
+  A.GROUPID, A.SOURCE, A.EnterFlag, A.ApprovedBy, A.ApprovedDate, A.DelUserID, A.DelDate, A.ApproveDelUserID, A.ApproveDelDate, A.creDate,
+  A.updated_date_UTC, A.ApprovedDate_UTC, A.DelDate_UTC, A.ApproveDelDate_UTC, A.creDate_UTC, A.ent_num, A.DOB
+  FROM BSADBJP..OFAC_SPEC A WHERE A.GROUPID = 5 and A.DInd = 'N'
+ )
+ INSERT INTO #tempDJBlacklistDetailsJP (Num, EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB )
+ SELECT E.ent_num, A.EntNum, A.SdnName, A.UpdatedDate, B.Address, LEFT(B.City,100), LEFT(B.AddressCountry,100),
+   C.IdentificationType, LEFT(C.IdentificationNumber,44) , 
+   CASE WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL THEN D.InfoYear ELSE        CONVERT(VARCHAR(8),dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) END
+ FROM #tempDJBlacklistJP A 
+  LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1 
+  LEFT JOIN TempIdent C ON A.EntNum = C.EntityId AND C.RowId = 1 
+  LEFT JOIN TempDOB D ON A.EntNum = D.EntityId AND D.RowId = 1 
+  LEFT JOIN TempNUM E on A.EntNum = E.remark and A.SdnName = E.spec_name
+
+ DECLARE @MAXNo INT
+ SELECT @MAXNo=MAX(ent_num) FROM BSADBJP..OFAC_SPEC
+
+ UPDATE #tempDJBlacklistDetailsJP
+ SET @MAXNo = @MAXNo +1 , Num = @MAXNo
+ WHERE Num IS NULL
+
+ ;WITH TargetTable AS (
+  SELECT A.spec_name, A.updated_date, A.remark, A.TaxID, A.IDENT, A.IDENTO, A.TaxIDCD, A.IDNUM, A.issBy, A.DInd, A.creUserID, A.STATE, A.ADDRESS, A.COUNTRY,
+    A.GROUPID, A.SOURCE, A.EnterFlag, A.ApprovedBy, A.ApprovedDate, A.DelUserID, A.DelDate, A.ApproveDelUserID, A.ApproveDelDate, A.creDate,
+    A.updated_date_UTC, A.ApprovedDate_UTC, A.DelDate_UTC, A.ApproveDelDate_UTC, A.creDate_UTC, A.ent_num, A.DOB
+  FROM BSADBJP..OFAC_SPEC A WHERE A.GROUPID = 5
+ )
+ MERGE TargetTable T
+ USING (SELECT NUM, EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB FROM #tempDJBlacklistDetailsJP) S
+ ON T.spec_name = S.SdnName AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+ WHEN NOT MATCHED BY TARGET THEN
+  INSERT (spec_name,updated_date,remark,TaxID,IDENT,IDENTO,TaxIDCD,IDNUM,IssBy,DInd,
+    creUserID,STATE,ADDRESS,COUNTRY,GROUPID,SOURCE,EnterFlag,ApprovedBy,ApprovedDate,DelUserID,
+    DelDate,ApproveDelUserID,ApproveDelDate,creDate,updated_date_UTC,ApprovedDate_UTC,DelDate_UTC,ApproveDelDate_UTC,creDate_UTC,
+    ent_num,DOB)
+  VALUES(S.SdnName, S.UpdatedDate,EntNum,'', S.IdentType, S.IdentNumber,'','','JP' ,'N', 
+    'System Admin', ISNULL(S.City,''), S.Address, S.Country, '5', 'JP FINANCE', NULL, 'System Admin', GETDATE(), NULL, 
+    NULL, NULL, NULL, GETDATE(),GETUTCDATE(),GETUTCDATE(),NULL,NULL,GETUTCDATE(),S.num,
+    S.DOB)
+ WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN 
+  UPDATE SET T.DInd = 'Y', T.DelUserID = 'System Admin', T.DelDate = GETDATE(), T.ApproveDelUserID = 'System Admin', T.ApproveDelDate = GETDATE(),
+    T.DelDate_UTC = GETUTCDATE()
+ WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN 
+  UPDATE SET T.DInd = 'N', T.updated_date = S.UpdatedDate, T.DelUserID = NULL, T.DelDate = NULL, T.ApproveDelUserID = NULL, T.ApproveDelDate = NULL,
+    T.DelDate_UTC = NULL, T.EnterFlag = 'D', T.updated_date_UTC = GETUTCDATE(),
+    T.ADDRESS = S.ADDRESS, T.STATE = ISNULL(S.City,''), T.COUNTRY = S.Country, T.IDENT = S.IdentType, T.IDNUM = S.IdentNumber, T.DOB = S.DOB
+ OUTPUT CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ent_num ELSE Deleted.ent_num END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.spec_name ELSE Deleted.spec_name END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date ELSE Deleted.updated_date END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.remark ELSE Deleted.remark END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.taxid ELSE Deleted.taxid END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENT ELSE Deleted.IDENT END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENTO ELSE Deleted.IDENTO END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.TaxIDCD ELSE Deleted.TaxIDCD END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDNUM ELSE Deleted.IDNUM END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.issby ELSE Deleted.issby END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DInd ELSE Deleted.DInd END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creUserID ELSE Deleted.creUserID END,
+  CASE WHEN $ACTION IN ('INSERT') THEN 'System Admin' ELSE 'System Admin' END,
+  CASE WHEN $ACTION IN ('INSERT') THEN GETUTCDATE() ELSE GETUTCDATE() END,  
+  CASE WHEN $ACTION = 'INSERT' OR ($ACTION = 'UPDATE' AND Deleted.DInd = 'Y' AND Inserted.DInd = 'N') THEN '01' WHEN $ACTION = 'UPDATE' AND Inserted.DInd = 'Y' THEN '03' ELSE '02' END, 
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ADDRESS ELSE Deleted.ADDRESS END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.STATE ELSE Deleted.STATE END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.COUNTRY ELSE Deleted.COUNTRY END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.GROUPID ELSE Deleted.GROUPID END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.SOURCE ELSE Deleted.SOURCE END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.EnterFlag ELSE Deleted.EnterFlag END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedBy ELSE Deleted.ApprovedBy END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate ELSE Deleted.ApprovedDate END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelUserID ELSE Deleted.DelUserID END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate ELSE Deleted.DelDate END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelUserID ELSE Deleted.ApproveDelUserID END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate ELSE Deleted.ApproveDelDate END,
+  CASE WHEN $ACTION IN ('INSERT') THEN GETUTCDATE() ELSE GETUTCDATE() END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate_UTC ELSE Deleted.ApprovedDate_UTC END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate_UTC ELSE Deleted.DelDate_UTC END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate_UTC ELSE Deleted.ApproveDelDate_UTC END,
+  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DOB ELSE Deleted.DOB END
+ INTO BSADBJP.dbo.OFAC_SPEC_LOG (ent_num, spec_name, updated_date, remark, TaxID, IDENT, IDENTO,
+  TaxIDCD, IDNUM, IssBy, DInd, creUserID, UserID, ActionDT, ActionCD, Address, State, Country, GROUPID, SOURCE, EnterFlag,
+  ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, ActionDT_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC ,
+  DOB);
+
+
+END
+GO
+
+
+
+我的自建名單code 應該是上面這些
+然後日本user 有問下面這些問題
+
+幫我看看我該怎麼查找
+
+[‎2026/‎8/‎25 下午 02:20]  
+貫軒您好，我是東京分行法遵組的洪鈺婷 
+ 
+[‎2026/‎8/‎25 下午 02:20]  
+想請教一個AML系統internal list的一個問題 
+ 
+[‎2026/‎8/‎25 下午 02:20]  
+東京分行在AML系統internal list有一個”全銀協”的list 
+ 
+[‎2026/‎8/‎25 下午 02:20]  
+日本全銀協會定期會email反社會勢力名單給我們，我們會使用資訊處提供的一個轉檔工具，把這個名單轉檔成可以上傳AML系統的檔案，然後上傳AML系統。 
+ 
+[‎2026/‎8/‎25 下午 02:21]  
+不過我們發現，8/20我們上傳了四個檔案，合計329筆資料。但是AML系統internal list只顯示出93筆資料。 
+我們不清楚原因為何，所以想向您請教。
+想請問AML系統在接收我們上傳的資料時，是否會自動篩選並剔除重複的資料?還是說我們上傳329筆，系統就會出現329筆呢？ 
+ 
+[‎2026/‎8/‎25 下午 02:22]  
+我確認一下
+ 
+[‎2026/‎8/‎25 下午 02:26]  
+我記得匯入internal list 都是有機制的 
+我去看一下
+想先問一下 你有辦法給一個 有寫入跟 沒寫入的 名單範例?
+ 
+[‎2026/‎8/‎25 下午 02:27]  
+好的，我找一下傳給您
+ 
+系統已儲存此交談。您很快就會在商務用 Skype 的 [交談] 索引標籤及 Outlook 的 [交談記錄] 資料夾中看見該內容。 
+[‎2026/‎8/‎25 下午 02:46]  
+*有寫入的名單範例
+山尾輝斗
+金東力
+光田孝
+田井中健
+
+*沒寫入的名單範例
+久留生賢一
+田口義高
+野村悟 
+ 
+系統正在儲存此交談。您很快就會在您的 Outlook [收件匣] 資料夾中看見該內容。 
+[‎2026/‎8/‎25 下午 03:31]  
+好
+ 
