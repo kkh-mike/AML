@@ -41,29 +41,52 @@ function Write-Log {
 
 
 # ============================================
-# 3. 計算 Physical Line Count
-#
-# 注意：
-# ReadLine() 計算的是「實際換行數」
-# 不代表真正 CSV 筆數
+# 3. 高效能雙計數函式 (取代原本低效的雙重讀取)
+# 
+# 特點：
+# 1. 單次遍歷 (Single Pass) 同時計算 Physical Lines 與 CSV Records
+# 2. 採用底層 StreamReader (64KB Buffer)，記憶體佔用極低
+# 3. 支援雙引號內含換行之 CSV 格式
 # ============================================
 
-function Get-PhysicalLineCount {
+function Get-CsvCountsOptimized {
     param(
         [string]$filePath
     )
 
-    $count = 0
+    $physicalLines = 0
+    $csvRecords    = 0
+    $inQuotes      = $false
+    $hasContent    = $false
+    $prevChar      = [char]0
 
-    $reader = New-Object System.IO.StreamReader(
-        $filePath,
-        [System.Text.Encoding]::UTF8,
-        $true
-    )
+    $bufferSize = 65536
+    $reader = New-Object System.IO.StreamReader($filePath, [System.Text.Encoding]::UTF8, $true, $bufferSize)
 
     try {
-        while ($reader.ReadLine() -ne $null) {
-            $count++
+        while (($charInt = $reader.Read()) -ne -1) {
+            $char = [char]$charInt
+            $hasContent = $true
+
+            if ($char -eq '"') {
+                $inQuotes = -not $inQuotes
+            }
+            elseif ($char -eq "`n") {
+                $physicalLines++
+                if (-not $inQuotes) {
+                    $csvRecords++
+                }
+            }
+
+            $prevChar = $char
+        }
+
+        # 處理檔案結尾沒有換行符號的情況
+        if ($hasContent -and $prevChar -ne "`n" -and $prevChar -ne "`r") {
+            $physicalLines++
+            if (-not $inQuotes) {
+                $csvRecords++
+            }
         }
     }
     finally {
@@ -71,70 +94,15 @@ function Get-PhysicalLineCount {
         $reader.Dispose()
     }
 
-    return $count
+    return [PSCustomObject]@{
+        PhysicalLines = $physicalLines
+        CsvRecords    = $csvRecords
+    }
 }
 
 
 # ============================================
-# 4. 計算真正 CSV Record Count
-#
-# 使用 TextFieldParser
-#
-# 可以處理：
-#
-# "AAA
-# BBB
-# CCC",123,456
-#
-# 這種欄位內容包含換行的 CSV
-# ============================================
-
-function Get-CsvRecordCount {
-    param(
-        [string]$filePath
-    )
-
-    Add-Type -AssemblyName Microsoft.VisualBasic
-
-    $count = 0
-
-    $parser = New-Object Microsoft.VisualBasic.FileIO.TextFieldParser($filePath)
-
-    try {
-
-        # CSV 使用逗號分隔
-        $parser.TextFieldType =
-            [Microsoft.VisualBasic.FileIO.FieldType]::Delimited
-
-        $parser.SetDelimiters(",")
-
-        # 支援雙引號包住的欄位
-        $parser.HasFieldsEnclosedInQuotes = $true
-
-        # 不自動移除空白
-        $parser.TrimWhiteSpace = $false
-
-        while (-not $parser.EndOfData) {
-
-            # 讀取一整筆 CSV Record
-            # 即使欄位內有換行，也會視為同一筆
-            $null = $parser.ReadFields()
-
-            $count++
-        }
-
-    }
-    finally {
-        $parser.Close()
-        $parser.Dispose()
-    }
-
-    return $count
-}
-
-
-# ============================================
-# 5. 作業開始
+# 4. 作業開始
 # ============================================
 
 Write-Log "============================================"
@@ -146,11 +114,10 @@ Write-Log "============================================"
 
 
 # ============================================
-# 6. 檢查 Input Folder
+# 5. 檢查 Input Folder
 # ============================================
 
 if (!(Test-Path $folderPath)) {
-
     Write-Log `
         "ERROR TYPE : INPUT FOLDER NOT FOUND (Path: $folderPath)" `
         "ERROR"
@@ -160,11 +127,10 @@ if (!(Test-Path $folderPath)) {
 
 
 # ============================================
-# 7. 檢查 Baseline File
+# 6. 檢查 Baseline File
 # ============================================
 
 if (!$hasError -and !(Test-Path $baselineFile)) {
-
     Write-Log `
         "ERROR TYPE : BASELINE FILE NOT FOUND (File: $baselineFile)" `
         "ERROR"
@@ -174,11 +140,10 @@ if (!$hasError -and !(Test-Path $baselineFile)) {
 
 
 # ============================================
-# 8. 基本環境檢核失敗
+# 7. 基本環境檢核失敗
 # ============================================
 
 if ($hasError) {
-
     Write-Log "============================================"
     Write-Log "JOB STATUS : FAILED (Exit Code: 1)" "ERROR"
     Write-Log "============================================"
@@ -188,23 +153,20 @@ if ($hasError) {
 
 
 # ============================================
-# 9. 讀取與解析 AML_CHECK_SUM_1.csv
+# 8. 讀取與解析 AML_CHECK_SUM_1.csv
 #
 # 格式：
-#
 # AML_SPEC_OFAC_SPEC.csv;1933;MD5
 # ============================================
 
 $baseline = @{}
 
 try {
-
     $lines = Get-Content `
         -Path $baselineFile `
         -Encoding UTF8
 
     foreach ($line in $lines) {
-
         # 忽略空白行
         if ([string]::IsNullOrWhiteSpace($line)) {
             continue
@@ -212,10 +174,8 @@ try {
 
         $parts = $line.Split(";")
 
-        # 至少需要：
-        # FileName ; Count ; MD5
+        # 至少需要：FileName ; Count ; MD5
         if ($parts.Count -lt 3) {
-
             Write-Log `
                 "ERROR TYPE : BASELINE FORMAT ERROR -> Line: $line" `
                 "ERROR"
@@ -224,34 +184,12 @@ try {
             continue
         }
 
-
-        # --------------------------------------------
-        # File Name
-        # --------------------------------------------
-
-        $fileName = $parts[0].Trim()
-
-
-        # --------------------------------------------
-        # Count
-        # --------------------------------------------
-
+        $fileName  = $parts[0].Trim()
         $countText = $parts[1].Trim()
+        $md5       = $parts[2].Trim().ToLowerInvariant()
 
-
-        # --------------------------------------------
-        # MD5
-        # --------------------------------------------
-
-        $md5 = $parts[2].Trim().ToLowerInvariant()
-
-
-        # --------------------------------------------
         # 檢查 File Name
-        # --------------------------------------------
-
         if ([string]::IsNullOrWhiteSpace($fileName)) {
-
             Write-Log `
                 "ERROR TYPE : EMPTY FILE NAME -> Line: $line" `
                 "ERROR"
@@ -260,18 +198,9 @@ try {
             continue
         }
 
-
-        # --------------------------------------------
         # 檢查 Count
-        # --------------------------------------------
-
         $expectedCount = 0
-
-        if (-not [int64]::TryParse(
-            $countText,
-            [ref]$expectedCount
-        )) {
-
+        if (-not [int64]::TryParse($countText, [ref]$expectedCount)) {
             Write-Log `
                 "ERROR TYPE : INVALID COUNT -> File: $fileName, Count: $countText" `
                 "ERROR"
@@ -280,13 +209,8 @@ try {
             continue
         }
 
-
-        # --------------------------------------------
         # 檢查 MD5 Format
-        # --------------------------------------------
-
         if ($md5 -notmatch '^[0-9a-f]{32}$') {
-
             Write-Log `
                 "ERROR TYPE : INVALID MD5 FORMAT -> File: $fileName, MD5: $md5" `
                 "ERROR"
@@ -295,13 +219,8 @@ try {
             continue
         }
 
-
-        # --------------------------------------------
         # 儲存 Baseline
-        # --------------------------------------------
-
         $key = $fileName.ToLowerInvariant()
-
         $baseline[$key] = @{
             FileName = $fileName
             Count    = $expectedCount
@@ -310,7 +229,6 @@ try {
     }
 }
 catch {
-
     Write-Log `
         "ERROR TYPE : BASELINE READ ERROR -> $($_.Exception.Message)" `
         "ERROR"
@@ -320,11 +238,10 @@ catch {
 
 
 # ============================================
-# 10. Baseline 解析失敗
+# 9. Baseline 解析失敗
 # ============================================
 
 if ($hasError) {
-
     Write-Log "============================================"
     Write-Log "JOB STATUS : FAILED (Exit Code: 1)" "ERROR"
     Write-Log "============================================"
@@ -334,15 +251,13 @@ if ($hasError) {
 
 
 # ============================================
-# 11. 逐檔比對
+# 10. 逐檔比對
 #
 # 比對：
-#
 # 1. CSV Record Count
 # 2. MD5
 #
 # 同時記錄：
-#
 # Physical Line Count
 # ============================================
 
@@ -355,31 +270,16 @@ foreach ($key in $baseline.Keys) {
     $targetFile = $null
     $matchedLeaf = $null
 
-
-    # ============================================
-    # 11-1. 直接比對檔名
-    # ============================================
-
-    $directPath = Join-Path `
-        $folderPath `
-        $expectedFileName
-
+    # 10-1. 直接比對檔名
+    $directPath = Join-Path $folderPath $expectedFileName
 
     if (Test-Path $directPath) {
-
         $targetFile = $directPath
         $matchedLeaf = Split-Path $targetFile -Leaf
-
     }
     else {
-
-        # ============================================
-        # 11-2. 自動嘗試副檔名變體
-        # ============================================
-
-        $baseStem = $expectedFileName `
-            -replace '(\.Table)?\.(sql|csv)$', ''
-
+        # 10-2. 自動嘗試副檔名變體
+        $baseStem = $expectedFileName -replace '(\.Table)?\.(sql|csv)$', ''
 
         $candidateFiles = @(
             (Join-Path $folderPath "$baseStem.sql"),
@@ -387,96 +287,45 @@ foreach ($key in $baseline.Keys) {
             (Join-Path $folderPath "$baseStem.csv")
         )
 
-
         foreach ($candidate in $candidateFiles) {
-
             if (Test-Path $candidate) {
-
                 $targetFile = $candidate
                 $matchedLeaf = Split-Path $targetFile -Leaf
 
-                Write-Log `
-                    "Matched '$expectedFileName' -> local file '$matchedLeaf'"
-
+                Write-Log "Matched '$expectedFileName' -> local file '$matchedLeaf'"
                 break
             }
         }
     }
 
-
-    # ============================================
-    # 11-3. 檢查檔案是否存在
-    # ============================================
-
+    # 10-3. 檢查檔案是否存在
     if ($null -eq $targetFile) {
-
         Write-Log `
             "ERROR TYPE : FILE NOT FOUND -> Expected: $expectedFileName" `
             "ERROR"
 
         $hasError = $true
-
         continue
     }
 
-
-    # ============================================
-    # 11-4. 計算 Count 與 MD5
-    # ============================================
-
+    # 10-4. 計算 Count 與 MD5
     try {
-
         Write-Log "Checking File: $expectedFileName"
 
+        # 單次讀取完成 Physical Line Count 與 CSV Record Count
+        $counts = Get-CsvCountsOptimized -filePath $targetFile
+        $physicalLineCount = $counts.PhysicalLines
+        $actualCount       = $counts.CsvRecords
 
-        # --------------------------------------------
-        # Physical Line Count
-        #
-        # 實際換行數
-        # --------------------------------------------
+        # MD5 計算
+        $actualMD5 = (Get-FileHash -Path $targetFile -Algorithm MD5).Hash.ToLowerInvariant()
 
-        $physicalLineCount =
-            Get-PhysicalLineCount -filePath $targetFile
+        # 10-5. Log Count Information
+        Write-Log "CSV RECORD COUNT -> File: $expectedFileName (Expected: $expectedCount, Actual: $actualCount)"
+        Write-Log "PHYSICAL LINE COUNT -> File: $expectedFileName (Actual: $physicalLineCount)"
 
-
-        # --------------------------------------------
-        # CSV Record Count
-        #
-        # 真正 CSV 筆數
-        # --------------------------------------------
-
-        $actualCount =
-            Get-CsvRecordCount -filePath $targetFile
-
-
-        # --------------------------------------------
-        # MD5
-        # --------------------------------------------
-
-        $actualMD5 =
-            (Get-FileHash `
-                -Path $targetFile `
-                -Algorithm MD5
-            ).Hash.ToLowerInvariant()
-
-
-        # ============================================
-        # 11-5. Log Count Information
-        # ============================================
-
-        Write-Log `
-            "CSV RECORD COUNT -> File: $expectedFileName (Expected: $expectedCount, Actual: $actualCount)"
-
-        Write-Log `
-            "PHYSICAL LINE COUNT -> File: $expectedFileName (Actual: $physicalLineCount)"
-
-
-        # ============================================
-        # 11-6. 檢驗 CSV Record Count
-        # ============================================
-
+        # 10-6. 檢驗 CSV Record Count
         if ($actualCount -ne $expectedCount) {
-
             Write-Log `
                 "COUNT MISMATCH -> File: $expectedFileName (Expected: $expectedCount, Actual: $actualCount)" `
                 "ERROR"
@@ -484,13 +333,8 @@ foreach ($key in $baseline.Keys) {
             $hasError = $true
         }
 
-
-        # ============================================
-        # 11-7. 檢驗 MD5
-        # ============================================
-
+        # 10-7. 檢驗 MD5
         if ($actualMD5 -ne $expectedMD5) {
-
             Write-Log `
                 "MD5 MISMATCH -> File: $expectedFileName (Expected: $expectedMD5, Actual: $actualMD5)" `
                 "ERROR"
@@ -498,23 +342,14 @@ foreach ($key in $baseline.Keys) {
             $hasError = $true
         }
 
-
-        # ============================================
-        # 11-8. Count + MD5 都正確
-        # ============================================
-
-        if (
-            $actualCount -eq $expectedCount -and
-            $actualMD5 -eq $expectedMD5
-        ) {
-
+        # 10-8. Count + MD5 都正確
+        if ($actualCount -eq $expectedCount -and $actualMD5 -eq $expectedMD5) {
             Write-Log `
                 "PASSED -> File: $expectedFileName (CSV Records: $actualCount, Physical Lines: $physicalLineCount, MD5: OK)"
         }
 
     }
     catch {
-
         Write-Log `
             "ERROR TYPE : FILE PROCESS ERROR -> File: $expectedFileName, Message: $($_.Exception.Message)" `
             "ERROR"
@@ -525,33 +360,25 @@ foreach ($key in $baseline.Keys) {
 
 
 # ============================================
-# 12. 最終結果與 Exit Code
+# 11. 最終結果與 Exit Code
 # ============================================
 
 Write-Log "============================================"
 
-
 if ($hasError) {
-
     Write-Log `
         "JOB STATUS : FAILED (Exit Code: 1)" `
         "ERROR"
 
     Write-Log "============================================"
-
     exit 1
 }
 else {
-
     Write-Log `
         "JOB STATUS : SUCCESS (Exit Code: 0)" `
         "INFO"
 
     Write-Log "============================================"
-
     exit 0
 }
 
-
-跑到其中一個AML_LoadTrxn.csv 會跑超久
-  我懷疑CODE 有寫法不對 幫我看一下
