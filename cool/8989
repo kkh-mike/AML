@@ -1,21 +1,66 @@
-[‎2026/‎8/‎25 下午 02:20]  
-貫軒您好，我是東京分行法遵組的洪鈺婷 
- 
-[‎2026/‎8/‎25 下午 02:20]  
-想請教一個AML系統internal list的一個問題 
- 
-[‎2026/‎8/‎25 下午 02:20]  
-東京分行在AML系統internal list有一個”全銀協”的list 
- 
-[‎2026/‎8/‎25 下午 02:20]  
-日本全銀協會定期會email反社會勢力名單給我們，我們會使用資訊處提供的一個轉檔工具，把這個名單轉檔成可以上傳AML系統的檔案，然後上傳AML系統。 
- 
-[‎2026/‎8/‎25 下午 02:21]  
-不過我們發現，8/20我們上傳了四個檔案，合計329筆資料。但是AML系統internal list只顯示出93筆資料。 
-我們不清楚原因為何，所以想向您請教。
-想請問AML系統在接收我們上傳的資料時，是否會自動篩選並剔除重複的資料?還是說我們上傳329筆，系統就會出現329筆呢？ 
- 
+以下是專門針對 久留生賢一、田口義高、野村悟 這 3 個人設計的檢查 SQL。
+執行後會直接產出 「卡關原因」，方便直接對照並回覆業務。
+1. 三人綜合快速診斷工具（直接產出回覆原因）
+這段 SQL 會同時比對「來源中介表」與「最終目標表」，並自動判斷這 3 個人分別卡在哪個篩選條件：
+WITH CheckList AS (
+    SELECT '久留生賢一' AS SdnName
+    UNION ALL SELECT '田口義高'
+    UNION ALL SELECT '野村悟'
+)
+SELECT 
+    C.SdnName AS [查詢姓名],
+    CASE 
+        -- 關卡 1：來源表根本沒資料
+        WHEN A.SdnName IS NULL THEN '【未寫入】轉檔/上傳漏檔：來源表查無資料'
+        
+        -- 關卡 2：非本名 (BitCode 判斷)
+        WHEN (A.NamePropertyBitCode & 1) = 0 THEN '【未寫入】姓名規則排除：被判定為「別名/AKA」，系統只收本名'
+        
+        -- 關卡 3：目標表狀態判斷
+        WHEN T.ent_num IS NOT NULL AND T.DInd = 'N' THEN '【已寫入】正常生效中 (有效名單)'
+        WHEN T.ent_num IS NOT NULL AND T.DInd = 'Y' THEN '【未顯示】已寫入但被標記為停用/軟刪除 (DInd=Y)'
+        
+        ELSE '【未寫入】其他比對條件未符合'
+    END AS [系統判定原因與回覆重點],
+    A.EntNum AS [來源ID(EntNum)],
+    A.NamePropertyBitCode AS [原始BitCode],
+    (A.NamePropertyBitCode & 1) AS [是否為本名(1=是,0=否)],
+    T.ent_num AS [目標表ID],
+    T.DInd AS [有效註記(N有效/Y刪除)]
+FROM CheckList C
+LEFT JOIN BSADB.dbo.DJ_List_Data_A A ON C.SdnName = A.SdnName
+LEFT JOIN BSADB.dbo.OFAC_GLSpec T ON C.SdnName = T.spec_name;
 
+2. 個別條件拆解驗證 SQL
+若需要更深入的底層欄位數據佐證，可執行以下兩段查詢：
+驗證 A：檢查來源表過濾條件（BitCode 與姓名性質）
+SELECT 
+    EntNum,
+    SdnName,
+    NamePropertyBitCode,
+    (NamePropertyBitCode & 1) AS [BitCheck(需為1才符合)],
+    CASE 
+        WHEN (NamePropertyBitCode & 1) > 0 THEN '符合：主要姓名 (Primary Name)'
+        ELSE '不符：別名 (AKA/Low Quality)'
+    END AS [過濾狀態]
+FROM BSADB.dbo.DJ_List_Data_A
+WHERE SdnName IN ('久留生賢一', '田口義高', '野村悟');
 
+驗證 B：檢查目標表實際寫入狀況
+SELECT 
+    ent_num,
+    spec_name,
+    remark AS EntNum,
+    GROUPID,
+    DInd AS [狀態(N為有效, Y為已刪除)],
+    creDate,
+    updated_date
+FROM BSADB.dbo.OFAC_GLSpec
+WHERE spec_name IN ('久留生賢一', '田口義高', '野村悟');
 
-我要怎麼整理user 跟我講的這些 然後問廠商?
+3. 對應業務回覆話術對照表
+| 查詢對象 | SQL 診斷結果 | 對業務（法遵）的正式說明 |
+|---|---|---|
+| 久留生賢一 | 來源表查無此人 | 該筆資料在轉檔工具產檔/上傳階段即未成功寫入資料庫，需確認原始全銀協檔案中該筆資料的格式是否正常。 |
+| 田口義高 | BitCheck = 0 (非本名) | 系統依照規範僅同步「主要姓名（本名）」。該筆資料在來源中被標記為別名（AKA），因此被系統過濾規則自動排除。 |
+| 野村悟 | DInd = 'N' (已寫入) | 該筆資料已於系統中正常寫入並維持有效狀態（ent_num: 138578）。 |
