@@ -1,40 +1,7 @@
--- 建立 CDC_OPEN_CASE 資料表
-CREATE TABLE CDC_OPEN_CASE (
-    CustomerNo VARCHAR(50) COLLATE Chinese_Taiwan_Stroke_CI_AS NULL
-);
+Hi team,
 
--- 建立 RM_OPEN_CASE 資料表
-CREATE TABLE RM_OPEN_CASE (
-    CustomerNo VARCHAR(50) COLLATE Chinese_Taiwan_Stroke_CI_AS NULL
-);
+I checked the access permissions for all AML systems and found that A10 is for Taiwan. Therefore, Zhaolin is unable to access the Hong Kong system.
 
+Could you please help check which permission Zhaolin can apply for to access the Hong Kong AML system?
 
-
-使用 SQL Server 的 BULK INSERT 指令可以直接將 CSV 檔案匯入資料表。
-依據圖片中的路徑（D:\AML_Source\Source\1141923\123\新增資料夾 (3)\）與檔案內容（第一行為資料，無標題列），可直接執行以下 SQL：
--- 1. 匯入 CDC_OPEN_CASE.csv
-BULK INSERT CDC_OPEN_CASE
-FROM 'D:\AML_Source\Source\1141923\123\新增資料夾 (3)\CDC_OPEN_CASE.csv'
-WITH (
-    FIELDTERMINATOR = ',',      -- 欄位分隔符號
-    ROWTERMINATOR = '0x0a',     -- 換行符號 (若遇到結尾問題可改用 '\n' 或 '0x0d0a')
-    FIRSTROW = 1                -- 由於無 Header 欄位名稱，直接從第 1 行開始讀取
-);
-
--- 2. 匯入 RM_OPEN_CASE.csv
-BULK INSERT RM_OPEN_CASE
-FROM 'D:\AML_Source\Source\1141923\123\新增資料夾 (3)\RM_OPEN_CASE.csv'
-WITH (
-    FIELDTERMINATOR = ',',      -- 欄位分隔符號
-    ROWTERMINATOR = '0x0a',     -- 換行符號
-    FIRSTROW = 1                -- 從第 1 行開始讀取
-);
-
-驗證查詢
--- 檢查匯入筆數與內容
-SELECT COUNT(*) AS CDC_Count FROM CDC_OPEN_CASE;
-SELECT TOP 10 * FROM CDC_OPEN_CASE;
-
-SELECT COUNT(*) AS RM_Count FROM RM_OPEN_CASE;
-SELECT TOP 10 * FROM RM_OPEN_CASE;
-
+Thank you.
