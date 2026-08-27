@@ -36,6 +36,49 @@ function Write-Log {
 }
 
 # ============================================
+# 2.1 CSV 資料筆數計算函式 (支援欄位內含折行/雙引號)
+# ============================================
+function Get-CsvRecordCount {
+    param (
+        [string]$filePath
+    )
+
+    $recordCount = 0
+    $inQuotes    = $false
+    $hasContent  = $false
+
+    # 以串流逐字元讀取，避免記憶體溢位且精準處理 RFC 4180 引號折行
+    $stream = [System.IO.File]::OpenRead($filePath)
+    $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
+
+    try {
+        while (-not $reader.EndOfStream) {
+            $char = [char]$reader.Read()
+            $hasContent = $true
+
+            if ($char -eq '"') {
+                $inQuotes = -not $inQuotes
+            }
+            elseif ($char -eq "`n" -and -not $inQuotes) {
+                $recordCount++
+            }
+        }
+        # 若最後一行結尾無換行符號
+        if ($hasContent -and $char -ne "`n") {
+            $recordCount++
+        }
+    }
+    finally {
+        $reader.Close()
+        $reader.Dispose()
+        $stream.Close()
+        $stream.Dispose()
+    }
+
+    return $recordCount
+}
+
+# ============================================
 # 3. 作業開始
 # ============================================
 Write-Log "============================================"
@@ -171,14 +214,18 @@ foreach ($key in $baseline.Keys) {
         continue
     }
 
-    # 計算行數與 MD5
+    # 計算行數/筆數與 MD5
     try {
-        # 行數計算
-        $actualCount = 0
+        # 1. 計算 MD5
+        $actualMD5 = (Get-FileHash -Path $targetFile -Algorithm MD5).Hash.ToLowerInvariant()
+        $md5Matched = ($actualMD5 -eq $expectedMD5)
+
+        # 2. 計算原始實體行數
+        $actualPhysicalCount = 0
         $reader = New-Object System.IO.StreamReader($targetFile)
         try {
             while ($reader.ReadLine() -ne $null) {
-                $actualCount++
+                $actualPhysicalCount++
             }
         }
         finally {
@@ -186,23 +233,36 @@ foreach ($key in $baseline.Keys) {
             $reader.Dispose()
         }
 
-        # MD5 計算
-        $actualMD5 = (Get-FileHash -Path $targetFile -Algorithm MD5).Hash.ToLowerInvariant()
+        # 3. 判斷筆數（若實體行數不同，則啟動 CSV 引號解析計算 Record Count）
+        $actualCount = $actualPhysicalCount
+        $isWrappedLine = $false
 
-        # 檢驗行數
+        if ($actualPhysicalCount -ne $expectedCount) {
+            $csvRecordCount = Get-CsvRecordCount -filePath $targetFile
+            if ($csvRecordCount -eq $expectedCount) {
+                $actualCount = $csvRecordCount
+                $isWrappedLine = $true
+            }
+        }
+
+        # 4. 驗證結果輸出
         if ($actualCount -ne $expectedCount) {
-            Write-Log "COUNT MISMATCH -> File: $expectedFileName (Expected: $expectedCount, Actual: $actualCount)" "ERROR"
+            Write-Log "COUNT MISMATCH -> File: $expectedFileName (Expected: $expectedCount, Actual Physical: $actualPhysicalCount, CSV Records: $actualCount)" "ERROR"
             $hasError = $true
         }
 
-        # 檢驗 MD5
-        if ($actualMD5 -ne $expectedMD5) {
+        if (-not $md5Matched) {
             Write-Log "MD5 MISMATCH -> File: $expectedFileName (Expected: $expectedMD5, Actual: $actualMD5)" "ERROR"
             $hasError = $true
         }
 
-        if ($actualCount -eq $expectedCount -and $actualMD5 -eq $expectedMD5) {
-            Write-Log "PASSED -> File: $expectedFileName (Count: $actualCount, MD5: OK)"
+        if ($actualCount -eq $expectedCount -and $md5Matched) {
+            if ($isWrappedLine) {
+                Write-Log "PASSED -> File: $expectedFileName (CSV Records: $actualCount, Physical Lines: $actualPhysicalCount [Multiline Embedded], MD5: OK)"
+            }
+            else {
+                Write-Log "PASSED -> File: $expectedFileName (Count: $actualCount, MD5: OK)"
+            }
         }
     }
     catch {
@@ -226,22 +286,3 @@ else {
     Write-Log "============================================"
     exit 0
 }
-
-
-幫我修改一下，因為有遇到這個問題
-
-
-我先問
-Hi新煜
-檔案AML_SPEC_OFAC_SPEC.csv與AML_CHECK_SUM_1.csv資訊不一致，請協助確認，謝謝 !!
-	筆數
-	Checksum為1,933
-	檔案內筆數為3,415
-
-
-他回復
-若蘭你好,
-1.	檔案AML_SPEC_OFAC_SPEC.csv與AML_CHECK_SUM_1.csv資訊是一致，請再確認，謝謝 !!
-2.	AML_SPEC_OFAC_SPEC.csv 檔案用UltraEdit 開啟時會顯示3415列，但實際SQL撈取為1933(含表投1筆)，
-因它每一筆內容較長會折行。
-3.	CHECK_SUM  MD5  與實際下指令是相同的。
