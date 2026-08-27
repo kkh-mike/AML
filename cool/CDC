@@ -1,6 +1,5 @@
-
 # ==========================================
-# 自動抓取 LDAP 連線資訊 + 批次執行 Split 資料夾內 SQL + 執行各 Table Update / Delete
+# 自動抓取 LDAP 連線資訊 + 批次執行 Table Truncate / Delete
 # ==========================================
 
 # 1. 資料夾準備與全域 Log 初始化
@@ -57,7 +56,9 @@ catch {
     exit 1
 }
 
+# ==========================================
 # 3. 自動解析連線字串參數
+# ==========================================
 $Server   = if ($connStr -match '(?:Data Source|Server)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
 $Database = if ($connStr -match '(?:Initial Catalog|Database)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
 $User     = if ($connStr -match '(?:User ID|UID)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
@@ -70,199 +71,258 @@ if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($Data
     exit 1
 }
 
+# ==========================================
+# 4. 定義欲執行的 SQL 語句
+# ==========================================
+$cleanupSql = @"
+USE BSADBTW;
 
-幫我做一個執行下面這些
-
-use BSADBTW
-
-truncate table Customer_Migrate_Exception_Table
+TRUNCATE TABLE Customer_Migrate_Exception_Table;
 
 DELETE A FROM sourcedbtw..CIF_CVT_Source A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM BSA_SUB_CUST_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM PB_CUSTOMER_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM ACCT_XREF_DIM A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM ACCT_XREF_EXT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM WIRE_MTHLY_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM TTL_MTHLY_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM CTS_MTHLY_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM ACH_MTHLY_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM MOI_MTHLY_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM CHK_MTHLY_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM ATM_CSH_MTHLY_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM ATM_NCSH_MTHLY_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM OTHER_MTHLY_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM TRSF_MTHLY_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM CCD_MTHLY_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM DCD_MTHLY_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM WIRE_MTHLY_ACCT_SMRY A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM TTL_MTHLY_ACCT_SMRY A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM CTS_MTHLY_ACCT_SMRY A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM ACH_MTHLY_ACCT_SMRY A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM MOI_MTHLY_ACCT_SMRY A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM CHK_MTHLY_ACCT_SMRY A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM ATM_CSH_MTHLY_ACCT_SMRY A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM ATM_NCSH_MTHLY_ACCT_SMRY A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM OTHER_MTHLY_ACCT_SMRY A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM TRSF_MTHLY_ACCT_SMRY A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM CCD_MTHLY_ACCT_SMRY A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM DCD_MTHLY_ACCT_SMRY A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM WIRE_TXN_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM CTS_TXN_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM ACH_TXN_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM CASHIERCHK_FACT A 
-JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
+JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY;
 
 DELETE A FROM CHK_TXN_FACT A 
-JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
+JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY;
 
 DELETE A FROM OTHER_TXN_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM TRSF_TXN_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM CCARD_TXN_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM DCARD_TXN_FACT A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM BSA_SUB_CUST_FACT_Extension A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM PB_CustomerOptionalAnswers A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM EDD_ReviewSchedule A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM PB_Appointer_Fact A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM PB_BoardOfDirector_Fact A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM PB_LegalAgent_Fact A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM PB_MainClient_Fact A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM PB_MainShareHolder_Fact A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM PB_OtherRelatedParty_Fact A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
 
 DELETE A FROM PB_OtherRelatedParty_SubTypeCodes A 
 JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+WHERE B.ACTION = 'INSERT';
+"@
+
+# ==========================================
+# 5. 連線資料庫並在交易中執行
+# ==========================================
+$sqlConnString = "Server=$Server;Database=$Database;User Id=$User;Password=$Password;Connection Timeout=60;"
+$connection = New-Object System.Data.SqlClient.SqlConnection($sqlConnString)
+
+try {
+    Write-Log "正在連線至 SQL Server ($Server)..." -ForegroundColor Yellow
+    $connection.Open()
+    Write-Log "資料庫連線成功。" -ForegroundColor Green
+
+    # 開啟交易機制
+    $transaction = $connection.BeginTransaction("CleanupTransaction")
+    $cmd = $connection.CreateCommand()
+    $cmd.Transaction = $transaction
+    $cmd.CommandTimeout = 0  # 設為 0 代表不限逾時時間 (防止大資料量刪除超時)
+
+    # 依分號切分語句依序執行
+    $statements = $cleanupSql -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Trim()) }
+
+    foreach ($statement in $statements) {
+        $trimmedSql = $statement.Trim()
+        
+        # 擷取操作的 Table 名稱以顯示 Log
+        $targetTable = if ($trimmedSql -match '(?i)(?:FROM|TRUNCATE\s+TABLE)\s+([^\s\r\n]+)') { $matches[1] } else { "SQL 語句" }
+        
+        Write-Log "正在執行: $targetTable ..." -ForegroundColor Gray
+        $cmd.CommandText = $trimmedSql
+        $affectedRows = $cmd.ExecuteNonQuery()
+
+        if ($trimmedSql -match '(?i)^DELETE') {
+            Write-Log "已完成 $targetTable 清除作業 (刪除筆數: $affectedRows)" -ForegroundColor Green
+        }
+        elseif ($trimmedSql -match '(?i)^TRUNCATE') {
+            Write-Log "已完成 $targetTable Truncate 作業" -ForegroundColor Green
+        }
+    }
+
+    # 全部執行無誤則 Commit
+    $transaction.Commit()
+    Write-Log "=== 所有清除指令執行完畢並已成功 Commit ===" -ForegroundColor Cyan
+}
+catch {
+    Write-Log "執行 SQL 時發生錯誤: $($_.Exception.Message)" -ForegroundColor Red -IsError
+    if ($null -ne $transaction -and $transaction.Connection -ne $null) {
+        $transaction.Rollback()
+        Write-Log "發生錯誤，交易已全數 Rollback 回滾。" -ForegroundColor Yellow
+    }
+    exit 1
+}
+finally {
+    if ($connection.State -eq [System.Data.ConnectionState]::Open) {
+        $connection.Close()
+        Write-Log "資料庫連線已關閉。" -ForegroundColor DarkGray
+    }
+}
