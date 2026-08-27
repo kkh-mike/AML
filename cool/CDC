@@ -1,5 +1,5 @@
 # ==========================================
-# 自動抓取 LDAP 連線資訊 + 批次執行 Split 資料夾內 SQL + 執行各 Table Update / Delete
+# 自動抓取 LDAP 連線資訊 + 執行各 Table TRUNCATE / DELETE 清理作業
 # ==========================================
 
 # 1. 資料夾準備與全域 Log 初始化
@@ -56,7 +56,9 @@ catch {
     exit 1
 }
 
+# ==========================================
 # 3. 自動解析連線字串參數
+# ==========================================
 $Server   = if ($connStr -match '(?:Data Source|Server)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
 $Database = if ($connStr -match '(?:Initial Catalog|Database)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
 $User     = if ($connStr -match '(?:User ID|UID)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
@@ -64,42 +66,85 @@ $Password = if ($connStr -match '(?:Password|PWD)\s*=\s*([^;]+)') { $matches[1].
 
 Write-Log "解析連線資訊 -> Server: $Server | DB: $Database | User: $User" -ForegroundColor DarkCyan
 
-if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($Database)) {
-    Write-Log "錯誤：無法正確解析 Server 或 Database 連線資訊！" -ForegroundColor Red -IsError
+if ([string]::IsNullOrWhiteSpace($Server)) {
+    Write-Log "錯誤：無法正確解析 Server 連線資訊！" -ForegroundColor Red -IsError
     exit 1
 }
 
+# ==========================================
+# 4. 執行各 Table TRUNCATE 與 DELETE 語法
+# ==========================================
+$targetDatabase = "BSADBTW" # SQL 執行的目標資料庫
 
-幫我做一個執行下面這些
+# 定義要執行的完整 SQL 語句
+$sqlScript = @"
+SET NOCOUNT ON;
 
-use BSADBTW
+-- 1. Truncate 資料表
+TRUNCATE TABLE dbo.lowrisklistgroups;
+TRUNCATE TABLE dbo.OFAC_SPEC;
+TRUNCATE TABLE dbo.OFAC_SPEC_RestrictedCountry;
 
-TRUNCATE TABLE  dbo.lowrisklistgroups
+-- 2. 刪除名單設定 (list = 'SPEC')
+DELETE FROM dbo.BlackList_Setting_Pending         WHERE list = 'SPEC';
+DELETE FROM dbo.BlackList_Setting                 WHERE list = 'SPEC';
+DELETE FROM dbo.DWire_BlackListSetting             WHERE list = 'SPEC';
+DELETE FROM dbo.DWire_BlackListSetting_Pending     WHERE list = 'SPEC';
+DELETE FROM dbo.TradeFin_BlackListSetting_Pending  WHERE list = 'SPEC';
+DELETE FROM dbo.TradeFin_BlackListSetting          WHERE list = 'SPEC';
+DELETE FROM dbo.SWIFTMX_BlackList_Setting_Pending  WHERE list = 'SPEC';
+DELETE FROM dbo.SWIFTMX_BlackList_Setting          WHERE list = 'SPEC';
+"@
 
-TRUNCATE TABLE  dbo.OFAC_SPEC
-TRUNCATE TABLE  dbo.OFAC_SPEC_RestrictedCountry
+Write-Log "開始連線至資料庫 [$Server].[$targetDatabase] 執行清理作業..." -ForegroundColor Yellow
 
-                
-DELETE FROM dbo.BlackList_Setting_Pending
-WHERE list = 'SPEC' 
+# 重組連線字串（使用指定 Database: BSADBTW）
+$builder = New-Object System.Data.SqlClient.SqlConnectionStringBuilder
+$builder["Data Source"] = $Server
+$builder["Initial Catalog"] = $targetDatabase
 
-DELETE FROM dbo.BlackList_Setting
-WHERE list = 'SPEC'         
-                
-DELETE FROM dbo.DWire_BlackListSetting
-WHERE list = 'SPEC'         
+if (-not [string]::IsNullOrWhiteSpace($User)) {
+    $builder["User ID"] = $User
+    $builder["Password"] = $Password
+} else {
+    $builder["Integrated Security"] = $true
+}
 
-DELETE FROM dbo.DWire_BlackListSetting_Pending
-WHERE list = 'SPEC'         
+$dbConn = New-Object System.Data.SqlClient.SqlConnection($builder.ConnectionString)
+$transaction = $null
 
-DELETE FROM TradeFin_BlackListSetting_Pending
-WHERE list = 'SPEC'         
+try {
+    $dbConn.Open()
+    Write-Log "資料庫連線成功，啟用 Transaction 執行語法..." -ForegroundColor Green
 
-DELETE FROM TradeFin_BlackListSetting
-WHERE list = 'SPEC'         
+    # 啟用交易控制，若任一指令失敗即全部 Rollback
+    $transaction = $dbConn.BeginTransaction("CleanupTransaction")
+    $cmd = $dbConn.CreateCommand()
+    $cmd.Transaction = $transaction
+    $cmd.CommandText = $sqlScript
+    $cmd.CommandTimeout = 120 # 逾時時間 120 秒
 
-DELETE FROM dbo.SWIFTMX_BlackList_Setting_Pending
-WHERE list = 'SPEC' 
-
-DELETE FROM dbo.SWIFTMX_BlackList_Setting
-WHERE list = 'SPEC' 
+    $rowsAffected = $cmd.ExecuteNonQuery()
+    
+    # 提交交易
+    $transaction.Commit()
+    Write-Log "語法執行成功！受影響總筆數 (DELETE 部分): $rowsAffected 筆" -ForegroundColor Green
+}
+catch {
+    if ($null -ne $transaction) {
+        try { 
+            $transaction.Rollback() 
+            Write-Log "執行失敗，已觸發 Rollback 回滾所有變更。" -ForegroundColor Yellow
+        } 
+        catch {}
+    }
+    Write-Log "錯誤：SQL 執行過程發生例外: $($_.Exception.Message)" -ForegroundColor Red -IsError
+    exit 1
+}
+finally {
+    if ($dbConn.State -eq [System.Data.ConnectionState]::Open) {
+        $dbConn.Close()
+        $dbConn.Dispose()
+    }
+    Write-Log "=== 批次處理作業完成 ===" -ForegroundColor Cyan
+}
