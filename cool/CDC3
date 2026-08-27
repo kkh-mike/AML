@@ -1,6 +1,3 @@
-
-
--------------------------------------------------------------------這是一行一行
 # ==========================================
 # 自動抓取 LDAP 連線資訊 + 切換至 BSADBTW + 建立資料表 + 透過 SqlBulkCopy 匯入 CSV
 # ==========================================
@@ -80,18 +77,28 @@ if ([string]::IsNullOrWhiteSpace($Server)) {
 }
 
 # ==========================================
-# 4. 定義 CSV 檔案路徑與對應 Table（讀取與 ps1 同層目錄）
+# 4. 定義 CSV 檔案路徑與對應 Table（加入多行 CSV 旗標）
 # ==========================================
 $tasks = @(
     @{
-        TableName = "CDC_OPEN_CASE"
-        FilePath  = Join-Path -Path $PSScriptRoot -ChildPath "CDC_OPEN_CASE.csv"
+        TableName       = "CDC_OPEN_CASE"
+        FilePath        = Join-Path -Path $PSScriptRoot -ChildPath "CDC_OPEN_CASE.csv"
+        IsMultiLineCsv  = $false
     },
     @{
-        TableName = "RM_OPEN_CASE"
-        FilePath  = Join-Path -Path $PSScriptRoot -ChildPath "RM_OPEN_CASE.csv"
+        TableName       = "RM_OPEN_CASE"
+        FilePath        = Join-Path -Path $PSScriptRoot -ChildPath "RM_OPEN_CASE.csv"
+        IsMultiLineCsv  = $false
+    },
+    @{
+        TableName       = "AML_SPEC_OFAC_SPEC"
+        FilePath        = Join-Path -Path $PSScriptRoot -ChildPath "AML_SPEC_OFAC_SPEC.csv"
+        IsMultiLineCsv  = $true  # 針對此檔案啟用支援引號內換行的解析器
     }
 )
+
+# 載入支援 CSV 多行解析的組件
+Add-Type -AssemblyName "Microsoft.VisualBasic"
 
 # ==========================================
 # 5. 連線資料庫、切換至 BSADBTW 並執行 寫入
@@ -107,8 +114,9 @@ try {
     Write-Log "已切換資料庫至: $TargetDB" -ForegroundColor Cyan
 
     foreach ($task in $tasks) {
-        $table   = $task.TableName
-        $csvPath = $task.FilePath
+        $table          = $task.TableName
+        $csvPath        = $task.FilePath
+        $isMultiLine    = $task.IsMultiLineCsv
 
         Write-Log "--- 開始處理: $TargetDB.dbo.$table ---" -ForegroundColor Yellow
 
@@ -132,17 +140,43 @@ TRUNCATE TABLE [dbo].[$table];
         $initCmd.CommandText = $initTableSql
         $initCmd.ExecuteNonQuery() | Out-Null
 
-        # 讀取 CSV 內容
         $dt = New-Object System.Data.DataTable
         $null = $dt.Columns.Add("CustomerNo", [string])
 
-        $lines = [System.IO.File]::ReadAllLines($csvPath, [System.Text.Encoding]::Default)
-        foreach ($line in $lines) {
-            $val = $line.Trim()
-            if (-not [string]::IsNullOrEmpty($val)) {
-                $row = $dt.NewRow()
-                $row["CustomerNo"] = $val
-                $dt.Rows.Add($row)
+        # 根據檔案類型選擇讀取邏輯
+        if ($isMultiLine) {
+            Write-Log "使用 TextFieldParser 解析含換行之 CSV..." -ForegroundColor DarkGray
+            
+            # 使用 Default 編碼 (BIG5 / ANSI)，若檔案為 UTF8 可改為 [System.Text.Encoding]::UTF8
+            $parser = New-Object Microsoft.VisualBasic.FileIO.TextFieldParser($csvPath, [System.Text.Encoding]::Default)
+            $parser.TextFieldType = [Microsoft.VisualBasic.FileIO.FieldType]::Delimited
+            $parser.SetDelimiters(",")
+            $parser.HasFieldsEnclosedInQuotes = $true
+
+            while (-not $parser.EndOfData) {
+                $fields = $parser.ReadFields()
+                if ($fields.Length -gt 0) {
+                    $val = $fields[0].Trim()
+                    if (-not [string]::IsNullOrEmpty($val)) {
+                        $row = $dt.NewRow()
+                        $row["CustomerNo"] = $val
+                        $dt.Rows.Add($row)
+                    }
+                }
+            }
+            $parser.Close()
+            $parser.Dispose()
+        }
+        else {
+            # 一般單純按行讀取
+            $lines = [System.IO.File]::ReadAllLines($csvPath, [System.Text.Encoding]::Default)
+            foreach ($line in $lines) {
+                $val = $line.Trim()
+                if (-not [string]::IsNullOrEmpty($val)) {
+                    $row = $dt.NewRow()
+                    $row["CustomerNo"] = $val
+                    $dt.Rows.Add($row)
+                }
             }
         }
 
@@ -178,10 +212,3 @@ if ($hasError) {
     Write-Log "=== 作業成功完成，退出代碼: 0 ===" -ForegroundColor Green
     exit 0
 }
-
---------這是有換行
-
-但我現在AML_SPEC_OFAC_SPEC.csv 
-有換行問題
-
-可以只針對這個檔按用換行的方式? 
