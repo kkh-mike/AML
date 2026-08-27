@@ -1,287 +1,544 @@
-USE [BSADB]
-GO
+Sub A_Use_This()
 
-/****** Object:  StoredProcedure [dbo].[GLSPEC_SyncDJToInternalList]    Script Date: 2026/8/12 銝���� 03:53:06 ******/
-SET ANSI_NULLS ON
-GO
+'上限10欄（F~O）
+'B~E為保留欄位
+'B：Count/1000
+'C：組字串
+'D、E：備用
 
-SET QUOTED_IDENTIFIER ON
-GO
+    Application.ScreenUpdating = False
+    
+    If ActiveSheet.Name = "Insert" Then
 
-
-
-ALTER PROCEDURE [dbo].[GLSPEC_SyncDJToInternalList]
-@GroupId BIGINT
-AS
-BEGIN
- DECLARE @OtherIdentMthCode VARCHAR(2)
- SELECT @OtherIdentMthCode = IDENTCODE FROM dbo.IDENTMTHD_DIM WHERE OTHIND = 'Y' 
-
- IF OBJECT_ID('tempdb..#tempDJBlacklist') IS NOT NULL
-     DROP TABLE #tempDJBlacklist
- IF OBJECT_ID('tempdb..#tempDJBlacklistDetails') IS NOT NULL
-     DROP TABLE #tempDJBlacklistDetails
-
- CREATE TABLE #tempDJBlacklist (EntNum INT NOT NULL, SdnName NVARCHAR(350) NOT NULL, UpdatedDate VARCHAR(8) NOT NULL)
-
- CREATE TABLE #tempDJBlacklistDetails(EntNum INT NOT NULL, SdnName NVARCHAR(350) NOT NULL, UpdatedDate VARCHAR(8) NOT NULL, 
-  Address NVARCHAR(400), City NVARCHAR(200), Country NVARCHAR(100), IdentType VARCHAR(2), IdentNumber NVARCHAR(44), DOB VARCHAR(8))
-
- 
- INSERT INTO #tempDJBlacklist ( EntNum, SdnName, UpdatedDate )
- SELECT  A.EntNum, A.SdnName, MAX(A.UpdatedDate) AS UpdatedDate 
- FROM BSADB.dbo.DJ_List_Data_A A 
- WHERE A.NamePropertyBitCode & 1 > 0 
- GROUP BY A.EntNum, A.SdnName 
-
- ;WITH TempAddress AS (
-  SELECT A.EntityId, A.Address, A.City, A.AddressCountry, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId'
-  FROM BSADB.dbo.DJ_Address A WITH(NOLOCK) 
-  WHERE A.Deleted = 0  AND EXISTS(SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
- ), TempIdent AS(
-  SELECT EntityId, CASE WHEN ISNULL(IdentificationType,'') = '' THEN NULL ELSE @OtherIdentMthCode END 'IdentificationType', IdentificationNumber, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId' 
-  FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH(NOLOCK) WHERE A.Deleted = 0 AND EXISTS(SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
- ), TempDOB AS (
-  SELECT EntityId, InfoDay, InfoMonth, InfoYear, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId' 
-  FROM BSADB.dbo.DJ_DateTypeInfo A WITH(NOLOCK) WHERE A.DateType = 'Date of Birth' AND A.Deleted = 0 AND EXISTS(SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
- )
- INSERT INTO #tempDJBlacklistDetails ( EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB )
- SELECT A.EntNum, A.SdnName, A.UpdatedDate, B.Address, LEFT(B.City,100), LEFT(B.AddressCountry,100),
-  C.IdentificationType, LEFT(C.IdentificationNumber,44) , 
-  CASE WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL THEN D.InfoYear ELSE CONVERT(VARCHAR(8),dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) END
- FROM #tempDJBlacklist A 
-  LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1 
-  LEFT JOIN TempIdent C ON A.EntNum = C.EntityId AND C.RowId = 1 
-  LEFT JOIN TempDOB D ON A.EntNum = D.EntityId AND D.RowId = 1 
-
-
- ;WITH TargetTable AS (
-  SELECT A.spec_name, A.updated_date, A.remark, A.TaxID, A.IDENT, A.IDENTO, A.TaxIDCD, A.IDNUM, A.DInd, A.creUserID, A.STATE, A.ADDRESS, A.COUNTRY,
-               A.GROUPID, A.SOURCE, A.EnterFlag, A.ApprovedBy, A.ApprovedDate, A.DelUserID, A.DelDate, A.ApproveDelUserID, A.ApproveDelDate, A.creDate,
-               A.updated_date_UTC, A.ApprovedDate_UTC, A.DelDate_UTC, A.ApproveDelDate_UTC, A.creDate_UTC, A.ent_num, A.DOB
-  /*A.spec_name, A.updated_date, A.remark, A.DInd, A.creUserID, A.STATE, A.ADDRESS, A.COUNTRY,
-      A.GROUPID, A.SOURCE, A.EnterFlag, A.ApprovedBy, A.ApprovedDate, A.DelUserID, A.DelDate, A.ApproveDelUserID, A.ApproveDelDate, A.creDate,
-      A.updated_date_UTC, A.ApprovedDate_UTC, A.DelDate_UTC, A.ApproveDelDate_UTC, A.creDate_UTC, A.ent_num*/
-  FROM BSADB.dbo.OFAC_GLSpec A WHERE A.GROUPID = @GroupId --AND A.DInd = 'N'
- )
- MERGE TargetTable T 
- USING (SELECT EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB FROM #tempDJBlacklistDetails) S
- ON T.spec_name = S.SdnName AND T.remark = CAST(S.EntNum AS VARCHAR(100))
- WHEN NOT MATCHED BY TARGET THEN
-  INSERT ( spec_name, updated_date, remark, DInd, creUserID, STATE, ADDRESS, COUNTRY, GROUPID, IDENT, IDNUM, DOB,
-                SOURCE, EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, creDate, updated_date_UTC,
-                ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, creDate_UTC)
-  VALUES(S.SdnName, S.UpdatedDate, S.EntNum, 'N', 'System Admin', ISNULL(S.City,''), S.Address, S.Country, @GroupId, S.IdentType, S.IdentNumber, S.DOB,
-    NULL, 'D', 'System Admin', GETDATE(), 'System Admin', GETDATE(), 'System Admin', GETDATE(), GETDATE(), GETDATE(), 
-    GETUTCDATE(), NULL, NULL, GETUTCDATE())
- WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN 
-  UPDATE SET T.DInd = 'Y', T.DelUserID = 'System Admin', T.DelDate = GETDATE(), T.ApproveDelUserID = 'System Admin', T.ApproveDelDate = GETDATE(),
-    T.DelDate_UTC = GETUTCDATE()
- WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN 
-  UPDATE SET T.DInd = 'N', T.updated_date = S.UpdatedDate, T.DelUserID = NULL, T.DelDate = NULL, T.ApproveDelUserID = NULL, T.ApproveDelDate = NULL,
-    T.DelDate_UTC = NULL, T.EnterFlag = 'D', T.updated_date_UTC = GETUTCDATE(),
-    T.ADDRESS = S.ADDRESS, T.STATE = ISNULL(S.City,''), T.COUNTRY = S.Country, T.IDENT = S.IdentType, T.IDNUM = S.IdentNumber, T.DOB = S.DOB
- OUTPUT CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ent_num ELSE Deleted.ent_num END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.spec_name ELSE Deleted.spec_name END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date ELSE Deleted.updated_date END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.remark ELSE Deleted.remark END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DInd ELSE Deleted.DInd END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creUserID ELSE Deleted.creUserID END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENTO ELSE Deleted.IDENTO END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.STATE ELSE Deleted.STATE END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ADDRESS ELSE Deleted.ADDRESS END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.COUNTRY ELSE Deleted.COUNTRY END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.GROUPID ELSE Deleted.GROUPID END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENT ELSE Deleted.IDENT END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDNUM ELSE Deleted.IDNUM END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DOB ELSE Deleted.DOB END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.EnterFlag ELSE Deleted.EnterFlag END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedBy ELSE Deleted.ApprovedBy END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate ELSE Deleted.ApprovedDate END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelUserID ELSE Deleted.DelUserID END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate ELSE Deleted.DelDate END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelUserID ELSE Deleted.ApproveDelUserID END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate ELSE Deleted.ApproveDelDate END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creDate ELSE Deleted.creDate END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date_UTC ELSE Deleted.updated_date_UTC END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate_UTC ELSE Deleted.ApprovedDate_UTC END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate_UTC ELSE Deleted.DelDate_UTC END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate_UTC ELSE Deleted.ApproveDelDate_UTC END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creDate_UTC ELSE Deleted.creDate_UTC END,
-  CASE WHEN $ACTION = 'INSERT' OR ($ACTION = 'UPDATE' AND Deleted.DInd = 'Y' AND Inserted.DInd = 'N') THEN '01' WHEN $ACTION = 'UPDATE' AND Inserted.DInd = 'Y' THEN '03' ELSE '02' END, 
-  GETUTCDATE()
- INTO BSADB.dbo.OFAC_GLSpec_Log (ent_num, spec_name, updated_date, remark, DInd, creUserID, IDENTO, STATE, ADDRESS, COUNTRY, GROUPID, IDENT, IDNUM, DOB,
-                EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, CreationDate, updated_date_UTC,
-                ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, CreationDate_UTC, ActionCD, ActionDt);
-
-
- IF OBJECT_ID('tempdb..#tempDJBlacklistJP') IS NOT NULL
-  DROP TABLE #tempDJBlacklistJP
- IF OBJECT_ID('tempdb..#tempDJBlacklistDetailsJP') IS NOT NULL
-  DROP TABLE #tempDJBlacklistDetailsJP
-
- CREATE TABLE #tempDJBlacklistJP (EntNum INT NOT NULL, SdnName NVARCHAR(350) NOT NULL, UpdatedDate VARCHAR(8) NOT NULL)
-
- CREATE TABLE #tempDJBlacklistDetailsJP(Num INT ,EntNum INT NOT NULL, SdnName NVARCHAR(350) NOT NULL, UpdatedDate VARCHAR(8) NOT NULL, 
-   Address NVARCHAR(400), City NVARCHAR(200), Country NVARCHAR(100), IdentType VARCHAR(2), IdentNumber NVARCHAR(44), DOB VARCHAR(8))
-
+        '清除Del資料
+        Sheets("Del").Cells.Clear
+        Range("A1").Select
         
- INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate )
- SELECT  A.EntNum, A.SdnName, MAX(A.UpdatedDate) AS UpdatedDate 
- FROM BSADB.dbo.DJ_List_Data_A A JOIN BSADB.dbo.DJ_SanctionListReference B 
-  ON A.EntNum = B.EntityId
- WHERE A.NamePropertyBitCode & 1 > 0 AND SanctionListReference LIKE '%Japanese Finance%'
- GROUP BY A.EntNum, A.SdnName 
+        '編號
+        Sheets("Insert").Select
+        Range("A2").Select
+        
+        Dim RowCount
+        RowCount = Sheets("Insert").Range("F2").End(xlDown).Row
+        
+        If Range("F4").Value = "" Or RowCount = 1048576 Then
+            MsgBox "請輸入至少三筆資料", , "：）"
+            Range("A1").Select
+            Exit Sub
+        End If
+        
+        Range("A2").Value = "1"
+        Range("A3").Value = "2"
+        Set SourceRange = Worksheets("Insert").Range("A2:A3")
+        Set fillRange = Worksheets("Insert").Range("A2:A" & RowCount)
+        SourceRange.AutoFill Destination:=fillRange
+        
+        Dim AtName
+        Dim ColNum
+        
+        'InputBox
+        Func = InputBox("0:ID補0  9:去ID底線  10:Others" & vbNewLine _
+                      & "1:審核結果" & vbNewLine & "2:Occup  3:JobTitle  4:ServingEntity" & vbNewLine _
+                      & "5:出生地  6:永久住址  7:郵寄地址  8:開戶目的", "Function")
+        
+        Select Case Func
+            'ID補0
+            Case 0
+                Columns("B:B").Select
+                Selection.NumberFormatLocal = "@"
+                
+                Dim strAreaCode As String
+                
+                '檢核身分證
+                For i = 2 To (RowCount)
+                    Range("B" & i).Value = Trim(Range("B" & i))
+                    Set strUserID = Worksheets("Insert").Range("B" & i)
+                    ' 轉為大寫
+                    strUserID = UCase(strUserID)
+                    ' 確定有10碼
+                    If Len(Trim(strUserID)) = 10 Then
+                        Range("B" & i).Value = Trim(Range("B" & i)) & "0"
+                    Else
+                        Range("B" & i).Value = Trim(Range("B" & i))
+                    End If
+                Next
+                
+                Range("A1").Select
+                Exit Sub
+                
+            '去除_
+            Case 9
+                Columns("F:F").Select
+                Selection.NumberFormatLocal = "@"
+                
+                For i = 2 To (RowCount)
+                    Range("F" & i).Value = Trim(Range("F" & i))
+                    Set strUserID = Worksheets("Insert").Range("F" & i)
+                    '移除底線
+                    If Mid(Range("F" & i), 1, 1) = "_" Then
+                        Range("F" & i).Value = Right(strUserID, Len(strUserID) - 1)
+                    End If
+                    ' 轉為大寫
+                    strUserID = UCase(strUserID)
+                    ' 取最後一碼是否為零
+                    strZero = Right(strUserID, 1)
+                    ' 確定有10碼
+                    If Len(Trim(strUserID)) = 11 And strZero = 0 Then
+                        Range("P" & i).Value = "OK"
+                    Else
+                        Range("P" & i).Value = "ERROR"
+                    End If
+                Next
+                
+                Range("A1").Select
+                Exit Sub
+            
+            'NextReviewDate
+            Case 1
+                AtName = "@CustID"
+                ColNum = 3
+             
+            'Occup
+            Case 2
+                AtName = "#Cust_OCCUP"
+                ColNum = 2
+                For i = 2 To (RowCount)
+                    'Check
+                    checkData = WorksheetFunction.IfError(Application.VLookup(Left(Range("G" & i), 4), Worksheets("Check").Range("B:B"), 1, False), "Error")
+                    If checkData = "Error" Then
+                        Range("G" & i).Interior.Color = RGB(255, 220, 220)
+                        MsgBox "格式錯誤", , "格式錯誤"
+                        Exit Sub
+                    End If
+                    
+                    '取前四碼
+                    Range("G" & i).Value = Trim(Range("G" & i))
+                    Range("G" & i) = Left(Range("G" & i), 4)
+                    
+                Next
+            
+            'JobTitle
+            Case 3
+                AtName = "#Cust_JOBTITLE"
+                ColNum = 2
+                For i = 2 To (RowCount)
+                    'Check
+                    checkData = WorksheetFunction.IfError(Application.VLookup(Left(Range("G" & i), 4), Worksheets("Check").Range("C:C"), 1, False), "Error")
+                    If checkData = "Error" Then
+                        Range("G" & i).Interior.Color = RGB(255, 220, 220)
+                        MsgBox "格式錯誤", , "格式錯誤"
+                        Exit Sub
+                    End If
+                    
+                    '取前四碼
+                    Range("G" & i).Value = Trim(Range("G" & i))
+                    Range("G" & i) = Left(Range("G" & i), 4)
+                Next
+            
+            'ServingEntity
+            Case 4
+                AtName = "#Cust_Serving_Entity"
+                ColNum = 2
+                
+          'POB 出生地國家
+Case 5
+    AtName = "@CUST_PLACE_OF_BIRTH"
+    ColNum = 2
+
+    'Check
+    For i = 2 To RowCount
+        
+        Dim originalValue As String
+        Dim checkValue As String
+        
+        originalValue = Trim(CStr(Range("G" & i).Value))
+        checkValue = Left(originalValue, 4)
+        
+        checkData = WorksheetFunction.IfError( _
+                        Application.VLookup( _
+                            checkValue, _
+                            Worksheets("Check").Range("A:A"), _
+                            1, _
+                            False), _
+                        "Error")
+        
+        If checkData = "Error" Then
+            
+            '標記錯誤欄位
+            Range("G" & i).Interior.Color = RGB(255, 220, 220)
+            
+            MsgBox _
+                "格式錯誤！" & vbNewLine & vbNewLine & _
+                "Excel列數：" & i & vbNewLine & _
+                "原始資料：" & originalValue & vbNewLine & _
+                "檢查值（前4碼）：" & checkValue & vbNewLine & _
+                "查找範圍：Check!A:A", _
+                vbExclamation, _
+                "格式錯誤"
+            
+            Range("G" & i).Select
+            Exit Sub
+        End If
+        
+    Next
+                
+            'P_CTRYCD 永久住址國家
+            Case 6
+                AtName = "@CUST_P_CTRYCD"
+                ColNum = 2
+                'Check
+                For i = 2 To (RowCount)
+                    checkData = WorksheetFunction.IfError(Application.VLookup(Left(Range("G" & i), 4), Worksheets("Check").Range("A:A"), 1, False), "Error")
+                    If checkData = "Error" Then
+                        Range("G" & i).Interior.Color = RGB(255, 220, 220)
+                        MsgBox "格式錯誤", , "格式錯誤"
+                        Exit Sub
+                    End If
+                Next
+                
+            'C_CTRYCD 郵寄地址國家
+            Case 7
+                AtName = "@CUST_C_CTRYCD"
+                ColNum = 2
+                'Check
+                For i = 2 To (RowCount)
+                    checkData = WorksheetFunction.IfError(Application.VLookup(Left(Range("G" & i), 4), Worksheets("Check").Range("A:A"), 1, False), "Error")
+                    If checkData = "Error" Then
+                        Range("G" & i).Interior.Color = RGB(255, 220, 220)
+                        MsgBox "格式錯誤", , "格式錯誤"
+                        Exit Sub
+                    End If
+                Next
+                
+            'Purpose 開戶目的
+            Case 8
+                AtName = "@CUST_ACCOUNT_PURPOSE"
+                ColNum = 2
+                'Check
+                For i = 2 To (RowCount)
+                    checkData = WorksheetFunction.IfError(Application.VLookup(Left(Range("G" & i), 4), Worksheets("Check").Range("D:D"), 1, False), "Error")
+                    If checkData = "Error" Then
+                        Range("G" & i).Interior.Color = RGB(255, 220, 220)
+                        MsgBox "格式錯誤", , "格式錯誤"
+                        Exit Sub
+                    End If
+                Next
+            
+            'Other
+            Case 10
+                'InputBox
+                AtName = InputBox("TempTableName（記得加@/#）", "TableName")
+                ColNum = InputBox("1~10 Column", "Column")
+            
+            '非1~10
+            Case Else
+                MsgBox "請輸入1~10", , "：）"
+                Exit Sub
+            
+        End Select
+        
+        
+        '計算1000餘數
+        For i = 2 To (RowCount - 1)
+            Range("B" & i) = Range("A" & i) Mod 1000
+            
+            Range("F" & i).Value = Trim(Range("F" & i))
+            Range("G" & i).Value = Trim(Range("G" & i))
+            Range("H" & i).Value = Trim(Range("H" & i))
+            Range("I" & i).Value = Trim(Range("I" & i))
+            Range("J" & i).Value = Trim(Range("J" & i))
+            Range("K" & i).Value = Trim(Range("K" & i))
+            Range("L" & i).Value = Trim(Range("L" & i))
+            Range("M" & i).Value = Trim(Range("M" & i))
+            Range("N" & i).Value = Trim(Range("N" & i))
+            Range("O" & i).Value = Trim(Range("O" & i))
+            
+            Select Case ColNum
+                Case 1
+                    '條件判斷產生字串
+                    If (Range("B" & i) = 1) Then
+                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "'),"
+                    ElseIf (Range("B" & i) = 0) Then
+                        Range("C" & i).Value = "('" & Range("F" & i) & "');"
+                    Else
+                        Range("C" & i).Value = "('" & Range("F" & i) & "'),"
+                    End If
+                    
+                    '最後一筆
+                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
+                    
+                    If (Range("B" & RowCount) = 1) Then
+                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "');"
+                    Else
+                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "');"
+                    End If
+                    
+                Case 2
+                    '條件判斷產生字串
+                    If (Range("B" & i) = 1) Then
+                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "'),"
+                    ElseIf (Range("B" & i) = 0) Then
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "');"
+                    Else
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "'),"
+                    End If
+                    
+                    '最後一筆
+                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
+                    
+                    If (Range("B" & RowCount) = 1) Then
+                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "');"
+                    Else
+                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "');"
+                    End If
+                    
+                Case 3
+                    '條件判斷產生字串
+                    If (Range("B" & i) = 1) Then
+                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "'),"
+                    ElseIf (Range("B" & i) = 0) Then
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "');"
+                    Else
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "'),"
+                    End If
+                    
+                    '最後一筆
+                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
+                    
+                    If (Range("B" & RowCount) = 1) Then
+                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" _
+                        & Range("H" & RowCount) & "');"
+                    Else
+                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" & Range("H" & RowCount) & "');"
+                    End If
+                    
+                Case 4
+                    '條件判斷產生字串
+                    If (Range("B" & i) = 1) Then
+                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "'),"
+                    ElseIf (Range("B" & i) = 0) Then
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "');"
+                    Else
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "'),"
+                    End If
+                    
+                    '最後一筆
+                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
+                    
+                    If (Range("B" & RowCount) = 1) Then
+                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" _
+                        & Range("H" & RowCount) & "','" & Range("I" & i) & "');"
+                    Else
+                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" & Range("H" & RowCount) & "','" _
+                        & Range("I" & i) & "');"
+                    End If
+                    
+                Case 5
+                    '條件判斷產生字串
+                    If (Range("B" & i) = 1) Then
+                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "'),"
+                    ElseIf (Range("B" & i) = 0) Then
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "');"
+                    Else
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "'),"
+                    End If
+                    
+                    '最後一筆
+                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
+                    
+                    If (Range("B" & RowCount) = 1) Then
+                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" _
+                        & Range("H" & RowCount) & "','" & Range("I" & i) & "','" & Range("J" & i) & "');"
+                    Else
+                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" & Range("H" & RowCount) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "');"
+                    End If
+                    
+                Case 6
+                    '條件判斷產生字串
+                    If (Range("B" & i) = 1) Then
+                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "'),"
+                    ElseIf (Range("B" & i) = 0) Then
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "');"
+                    Else
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "'),"
+                    End If
+                    
+                    '最後一筆
+                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
+                    
+                    If (Range("B" & RowCount) = 1) Then
+                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" _
+                        & Range("H" & RowCount) & "','" & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "');"
+                    Else
+                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" & Range("H" & RowCount) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "');"
+                    End If
+                    
+                Case 7
+                    '條件判斷產生字串
+                    If (Range("B" & i) = 1) Then
+                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "'),"
+                    ElseIf (Range("B" & i) = 0) Then
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "');"
+                    Else
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "'),"
+                    End If
+                    
+                    '最後一筆
+                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
+                    
+                    If (Range("B" & RowCount) = 1) Then
+                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" _
+                        & Range("H" & RowCount) & "','" & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "');"
+                    Else
+                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" & Range("H" & RowCount) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "');"
+                    End If
+                    
+                Case 8
+                    '條件判斷產生字串
+                    If (Range("B" & i) = 1) Then
+                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "'),"
+                    ElseIf (Range("B" & i) = 0) Then
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "');"
+                    Else
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "'),"
+                    End If
+                    
+                    '最後一筆
+                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
+                    
+                    If (Range("B" & RowCount) = 1) Then
+                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" _
+                        & Range("H" & RowCount) & "','" & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" _
+                        & Range("M" & i) & "');"
+                    Else
+                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" & Range("H" & RowCount) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "');"
+                    End If
+                    
+                Case 9
+                    '條件判斷產生字串
+                    If (Range("B" & i) = 1) Then
+                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "','" _
+                        & Range("N" & i) & "'),"
+                    ElseIf (Range("B" & i) = 0) Then
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "','" _
+                        & Range("N" & i) & "');"
+                    Else
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "','" _
+                        & Range("N" & i) & "'),"
+                    End If
+                    
+                    '最後一筆
+                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
+                    
+                    If (Range("B" & RowCount) = 1) Then
+                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" _
+                        & Range("H" & RowCount) & "','" & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" _
+                        & Range("M" & i) & "','" & Range("N" & i) & "');"
+                    Else
+                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" & Range("H" & RowCount) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "','" _
+                        & Range("N" & i) & "');"
+                    End If
+                    
+                Case 10
+                    '條件判斷產生字串
+                    If (Range("B" & i) = 1) Then
+                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "','" _
+                        & Range("N" & i) & "','" & Range("O" & i) & "'),"
+                    ElseIf (Range("B" & i) = 0) Then
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "','" _
+                        & Range("N" & i) & "','" & Range("O" & i) & "');"
+                    Else
+                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "','" _
+                        & Range("N" & i) & "','" & Range("O" & i) & "'),"
+                    End If
+                    
+                    '最後一筆
+                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
+                    
+                    If (Range("B" & RowCount) = 1) Then
+                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" _
+                        & Range("H" & RowCount) & "','" & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" _
+                        & Range("M" & i) & "','" & Range("N" & i) & "','" & Range("O" & i) & "');"
+                    Else
+                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" & Range("H" & RowCount) & "','" _
+                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "','" _
+                        & Range("N" & i) & "','" & Range("O" & i) & "');"
+                    End If
+                
+                '非1~10
+                Case Else
+                    MsgBox "請輸入1~10", , "：）"
+                    Exit Sub
+                    
+            End Select
+        Next
+        
+        
+        '複製資料到Del
+        Sheets("Insert").Range("C2:C" & RowCount).Copy
+        Sheets("Del").Select
+        Range("A1").Select
+        Sheets("Del").Paste
+        Application.CutCopyMode = False
+        
+        '清除Insert資料
+        Sheets("Insert").Select
+        Range("A2:A" & RowCount).Select
+        Selection.EntireRow.Delete
+        Selection.NumberFormatLocal = "@"
+        Range("A1").Value = "序號"
+        Range("F1").Value = "1"
+        Range("G1").Value = "2"
+        Range("H1").Value = "3"
+        Range("I1").Value = "4"
+        Range("J1").Value = "5"
+        Range("K1").Value = "6"
+        Range("L1").Value = "7"
+        Range("M1").Value = "8"
+        Range("N1").Value = "9"
+        Range("O1").Value = "10"
+        Range("A1").Select
+        Sheets("Del").Select
+        
+        'Copy Del
+        Sheets("Del").Range("A1:A" & RowCount - 1).Copy
+    
+    End If
+    
+End Sub
 
 
- ;WITH TempAddress AS (
-  SELECT A.EntityId, A.Address, A.City, A.AddressCountry, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId'
-  FROM BSADB.dbo.DJ_Address A WITH(NOLOCK) 
-  WHERE A.Deleted = 0  AND EXISTS(SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
- ), TempIdent AS(
-  SELECT EntityId, CASE WHEN ISNULL(IdentificationType,'') = '' THEN NULL ELSE @OtherIdentMthCode END 'IdentificationType', IdentificationNumber, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId' 
-  FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH(NOLOCK) WHERE A.Deleted = 0 AND EXISTS(SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
- ), TempDOB AS (
-  SELECT EntityId, InfoDay, InfoMonth, InfoYear, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId' 
-  FROM BSADB.dbo.DJ_DateTypeInfo A WITH(NOLOCK) WHERE A.DateType = 'Date of Birth' AND A.Deleted = 0 AND EXISTS(SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
- ), TempNUM AS (
-  SELECT A.spec_name, A.updated_date, A.remark, A.TaxID, A.IDENT, A.IDENTO, A.TaxIDCD, A.IDNUM, A.issBy, A.DInd, A.creUserID, A.STATE, A.ADDRESS, A.COUNTRY,
-  A.GROUPID, A.SOURCE, A.EnterFlag, A.ApprovedBy, A.ApprovedDate, A.DelUserID, A.DelDate, A.ApproveDelUserID, A.ApproveDelDate, A.creDate,
-  A.updated_date_UTC, A.ApprovedDate_UTC, A.DelDate_UTC, A.ApproveDelDate_UTC, A.creDate_UTC, A.ent_num, A.DOB
-  FROM BSADBJP..OFAC_SPEC A WHERE A.GROUPID = 5 and A.DInd = 'N'
- )
- INSERT INTO #tempDJBlacklistDetailsJP (Num, EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB )
- SELECT E.ent_num, A.EntNum, A.SdnName, A.UpdatedDate, B.Address, LEFT(B.City,100), LEFT(B.AddressCountry,100),
-   C.IdentificationType, LEFT(C.IdentificationNumber,44) , 
-   CASE WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL THEN D.InfoYear ELSE        CONVERT(VARCHAR(8),dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) END
- FROM #tempDJBlacklistJP A 
-  LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1 
-  LEFT JOIN TempIdent C ON A.EntNum = C.EntityId AND C.RowId = 1 
-  LEFT JOIN TempDOB D ON A.EntNum = D.EntityId AND D.RowId = 1 
-  LEFT JOIN TempNUM E on A.EntNum = E.remark and A.SdnName = E.spec_name
-
- DECLARE @MAXNo INT
- SELECT @MAXNo=MAX(ent_num) FROM BSADBJP..OFAC_SPEC
-
- UPDATE #tempDJBlacklistDetailsJP
- SET @MAXNo = @MAXNo +1 , Num = @MAXNo
- WHERE Num IS NULL
-
- ;WITH TargetTable AS (
-  SELECT A.spec_name, A.updated_date, A.remark, A.TaxID, A.IDENT, A.IDENTO, A.TaxIDCD, A.IDNUM, A.issBy, A.DInd, A.creUserID, A.STATE, A.ADDRESS, A.COUNTRY,
-    A.GROUPID, A.SOURCE, A.EnterFlag, A.ApprovedBy, A.ApprovedDate, A.DelUserID, A.DelDate, A.ApproveDelUserID, A.ApproveDelDate, A.creDate,
-    A.updated_date_UTC, A.ApprovedDate_UTC, A.DelDate_UTC, A.ApproveDelDate_UTC, A.creDate_UTC, A.ent_num, A.DOB
-  FROM BSADBJP..OFAC_SPEC A WHERE A.GROUPID = 5
- )
- MERGE TargetTable T
- USING (SELECT NUM, EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB FROM #tempDJBlacklistDetailsJP) S
- ON T.spec_name = S.SdnName AND T.remark = CAST(S.EntNum AS VARCHAR(100))
- WHEN NOT MATCHED BY TARGET THEN
-  INSERT (spec_name,updated_date,remark,TaxID,IDENT,IDENTO,TaxIDCD,IDNUM,IssBy,DInd,
-    creUserID,STATE,ADDRESS,COUNTRY,GROUPID,SOURCE,EnterFlag,ApprovedBy,ApprovedDate,DelUserID,
-    DelDate,ApproveDelUserID,ApproveDelDate,creDate,updated_date_UTC,ApprovedDate_UTC,DelDate_UTC,ApproveDelDate_UTC,creDate_UTC,
-    ent_num,DOB)
-  VALUES(S.SdnName, S.UpdatedDate,EntNum,'', S.IdentType, S.IdentNumber,'','','JP' ,'N', 
-    'System Admin', ISNULL(S.City,''), S.Address, S.Country, '5', 'JP FINANCE', NULL, 'System Admin', GETDATE(), NULL, 
-    NULL, NULL, NULL, GETDATE(),GETUTCDATE(),GETUTCDATE(),NULL,NULL,GETUTCDATE(),S.num,
-    S.DOB)
- WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN 
-  UPDATE SET T.DInd = 'Y', T.DelUserID = 'System Admin', T.DelDate = GETDATE(), T.ApproveDelUserID = 'System Admin', T.ApproveDelDate = GETDATE(),
-    T.DelDate_UTC = GETUTCDATE()
- WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN 
-  UPDATE SET T.DInd = 'N', T.updated_date = S.UpdatedDate, T.DelUserID = NULL, T.DelDate = NULL, T.ApproveDelUserID = NULL, T.ApproveDelDate = NULL,
-    T.DelDate_UTC = NULL, T.EnterFlag = 'D', T.updated_date_UTC = GETUTCDATE(),
-    T.ADDRESS = S.ADDRESS, T.STATE = ISNULL(S.City,''), T.COUNTRY = S.Country, T.IDENT = S.IdentType, T.IDNUM = S.IdentNumber, T.DOB = S.DOB
- OUTPUT CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ent_num ELSE Deleted.ent_num END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.spec_name ELSE Deleted.spec_name END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date ELSE Deleted.updated_date END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.remark ELSE Deleted.remark END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.taxid ELSE Deleted.taxid END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENT ELSE Deleted.IDENT END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENTO ELSE Deleted.IDENTO END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.TaxIDCD ELSE Deleted.TaxIDCD END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDNUM ELSE Deleted.IDNUM END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.issby ELSE Deleted.issby END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DInd ELSE Deleted.DInd END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creUserID ELSE Deleted.creUserID END,
-  CASE WHEN $ACTION IN ('INSERT') THEN 'System Admin' ELSE 'System Admin' END,
-  CASE WHEN $ACTION IN ('INSERT') THEN GETUTCDATE() ELSE GETUTCDATE() END,  
-  CASE WHEN $ACTION = 'INSERT' OR ($ACTION = 'UPDATE' AND Deleted.DInd = 'Y' AND Inserted.DInd = 'N') THEN '01' WHEN $ACTION = 'UPDATE' AND Inserted.DInd = 'Y' THEN '03' ELSE '02' END, 
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ADDRESS ELSE Deleted.ADDRESS END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.STATE ELSE Deleted.STATE END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.COUNTRY ELSE Deleted.COUNTRY END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.GROUPID ELSE Deleted.GROUPID END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.SOURCE ELSE Deleted.SOURCE END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.EnterFlag ELSE Deleted.EnterFlag END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedBy ELSE Deleted.ApprovedBy END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate ELSE Deleted.ApprovedDate END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelUserID ELSE Deleted.DelUserID END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate ELSE Deleted.DelDate END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelUserID ELSE Deleted.ApproveDelUserID END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate ELSE Deleted.ApproveDelDate END,
-  CASE WHEN $ACTION IN ('INSERT') THEN GETUTCDATE() ELSE GETUTCDATE() END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate_UTC ELSE Deleted.ApprovedDate_UTC END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate_UTC ELSE Deleted.DelDate_UTC END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate_UTC ELSE Deleted.ApproveDelDate_UTC END,
-  CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DOB ELSE Deleted.DOB END
- INTO BSADBJP.dbo.OFAC_SPEC_LOG (ent_num, spec_name, updated_date, remark, TaxID, IDENT, IDENTO,
-  TaxIDCD, IDNUM, IssBy, DInd, creUserID, UserID, ActionDT, ActionCD, Address, State, Country, GROUPID, SOURCE, EnterFlag,
-  ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, ActionDT_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC ,
-  DOB);
-
-
-END
-GO
 
 
 
-我的自建名單code 應該是上面這些
-然後日本user 有問下面這些問題
 
-幫我看看我該怎麼查找
 
-[‎2026/‎8/‎25 下午 02:20]  
-貫軒您好，我是東京分行法遵組的洪鈺婷 
- 
-[‎2026/‎8/‎25 下午 02:20]  
-想請教一個AML系統internal list的一個問題 
- 
-[‎2026/‎8/‎25 下午 02:20]  
-東京分行在AML系統internal list有一個”全銀協”的list 
- 
-[‎2026/‎8/‎25 下午 02:20]  
-日本全銀協會定期會email反社會勢力名單給我們，我們會使用資訊處提供的一個轉檔工具，把這個名單轉檔成可以上傳AML系統的檔案，然後上傳AML系統。 
- 
-[‎2026/‎8/‎25 下午 02:21]  
-不過我們發現，8/20我們上傳了四個檔案，合計329筆資料。但是AML系統internal list只顯示出93筆資料。 
-我們不清楚原因為何，所以想向您請教。
-想請問AML系統在接收我們上傳的資料時，是否會自動篩選並剔除重複的資料?還是說我們上傳329筆，系統就會出現329筆呢？ 
- 
-[‎2026/‎8/‎25 下午 02:22]  
-我確認一下
- 
-[‎2026/‎8/‎25 下午 02:26]  
-我記得匯入internal list 都是有機制的 
-我去看一下
-想先問一下 你有辦法給一個 有寫入跟 沒寫入的 名單範例?
- 
-[‎2026/‎8/‎25 下午 02:27]  
-好的，我找一下傳給您
- 
-系統已儲存此交談。您很快就會在商務用 Skype 的 [交談] 索引標籤及 Outlook 的 [交談記錄] 資料夾中看見該內容。 
-[‎2026/‎8/‎25 下午 02:46]  
-*有寫入的名單範例
-山尾輝斗
-金東力
-光田孝
-田井中健
+我巨集選擇2 OCCUP 但出現格式錯誤
 
-*沒寫入的名單範例
-久留生賢一
-田口義高
-野村悟 
- 
-系統正在儲存此交談。您很快就會在您的 Outlook [收件匣] 資料夾中看見該內容。 
-[‎2026/‎8/‎25 下午 03:31]  
-好
- 
+我的資料可能哪裡錯了?
