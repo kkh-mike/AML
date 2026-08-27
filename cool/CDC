@@ -1,5 +1,5 @@
 # ==========================================
-# 自動抓取 LDAP 連線資訊 + 批次執行 Split 資料夾內 SQL + 執行各 Table Update (含分行代號轉換)
+# 自動抓取 LDAP 連線資訊 + 批次執行 Split 資料夾內 SQL + 執行各 Table Update / Delete
 # ==========================================
 
 # 1. 資料夾準備與全域 Log 初始化
@@ -70,7 +70,7 @@ if ([string]::IsNullOrWhiteSpace($Server) -or [string]::IsNullOrWhiteSpace($Data
 }
 
 # ==========================================
-# 6. 解析 BatchControl.sql 取得 BatchID 並逐一 Update 各 Table
+# 6. 解析 BatchControl.sql 取得 BatchID
 # ==========================================
 Write-Log ""
 Write-Log "========================================="
@@ -78,6 +78,7 @@ Write-Log "開始讀取 BatchControl.sql 擷取 BatchID..." -ForegroundColor Cya
 
 $BatchControlPath = Join-Path -Path $PSScriptRoot -ChildPath "BatchControl.sql"
 if (-not (Test-Path $BatchControlPath)) {
+    $SplitFolder = Join-Path -Path $PSScriptRoot -ChildPath "Split"
     $BatchControlPath = Join-Path -Path $SplitFolder -ChildPath "BatchControl.sql"
 }
 
@@ -96,34 +97,74 @@ if ($batchFileContent -match "VALUES\s*\(\s*N?'([^']+)'") {
     exit 1
 }
 
+# ==========================================
+# 7. 依 BatchID 刪除各 Table 既有資料 (含交易控制)
+# ==========================================
+Write-Log ""
+Write-Log "========================================="
+Write-Log "開始清理各 Table 中 BatchID = '$ExtractedBatchID' 的資料..." -ForegroundColor Cyan
 
+# 欲刪除資料的 Table 清單 (依照外鍵相依性排序，先刪子表再刪主表)
+$tablesToDelete = @(
+    "SAR_Trxn_Detail",
+    "SAR_Trxn_Detail_All",
+    "SAR_Trxn_Summary",
+    "SAR_Suspect_Info",
+    "SAR_Matched_Scenarios",
+    "SAR_Conductor_Info",
+    "SAR_Case_Trxn_Date_Range",
+    "SAR_Case_Trxn_Branch",
+    "SAR_Case_Main",
+    "SAR_Acct_Info",
+    "BatchControl"
+)
 
+# 建立 DB 連線
+$dbConn = New-Object System.Data.SqlClient.SqlConnection($connStr)
+
+try {
+    $dbConn.Open()
+    $transaction = $dbConn.BeginTransaction("DeleteBatchData")
+
+    foreach ($tableName in $tablesToDelete) {
+        $deleteSql = "DELETE FROM [$tableName] WHERE [BatchID] = @BatchID"
+        $cmd = $dbConn.CreateCommand()
+        $cmd.Transaction = $transaction
+        $cmd.CommandText = $deleteSql
+        
+        $param = $cmd.Parameters.Add("@BatchID", [System.Data.SqlDbType]::VarChar)
+        $param.Value = $ExtractedBatchID
+
+        $rowsAffected = $cmd.ExecuteNonQuery()
+        Write-Log "已刪除 [$tableName] 共 $rowsAffected 筆資料" -ForegroundColor Gray
+    }
+
+    # 全部成功則提交交易
+    $transaction.Commit()
+    Write-Log "所有 Table 資料刪除完成並已提交 Transaction。" -ForegroundColor Green
+}
+catch {
+    if ($null -ne $transaction) {
+        $transaction.Rollback()
+        Write-Log "刪除資料失敗，已執行 Rollback 回滾交易。" -ForegroundColor Yellow
+    }
+    Write-Log "資料庫執行例外: $($_.Exception.Message)" -ForegroundColor Red -IsError
+    if ($dbConn.State -eq [System.Data.ConnectionState]::Open) {
+        $dbConn.Close()
+    }
+    exit 1
+}
+finally {
+    if ($dbConn.State -eq [System.Data.ConnectionState]::Open) {
+        $dbConn.Close()
+    }
+}
 
 # ==========================================
 # 8. 最終結果與 Exit Code 回傳
 # ==========================================
 Write-Log ""
 Write-Log "========================================="
-Write-Log "" -ForegroundColor Green
+Write-Log "批次作業執行完畢！" -ForegroundColor Green
 Write-Log "========================================="
 exit 0
-
-
-幫我修改一下
-
-我要加上
-這些要刪除資料
-BatrchID 用 擷取 的
-
-SELECT * FROM BatchControl WHERE BatchID  = ''
-SELECT * FROM SAR_Acct_Info WHERE BatchID  = ''
-SELECT * FROM SAR_Case_Main WHERE BatchID  = ''
-SELECT * FROM SAR_Case_Trxn_Branch WHERE BatchID  = ''
-
-SELECT * FROM SAR_Case_Trxn_Date_Range WHERE BatchID  = ''
-SELECT * FROM SAR_Conductor_Info WHERE BatchID  = ''
-SELECT * FROM SAR_Matched_Scenarios WHERE BatchID  = ''
-SELECT * FROM SAR_Suspect_Info WHERE BatchID  = ''
-SELECT * FROM SAR_Trxn_Summary WHERE BatchID  = ''
-SELECT * FROM SAR_Trxn_Detail_All WHERE BatchID  = ''
-SELECT * FROM SAR_Trxn_Detail WHERE BatchID  = ''
