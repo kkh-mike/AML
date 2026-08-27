@@ -1,214 +1,247 @@
-# ==========================================
-# 自動抓取 LDAP 連線資訊 + 切換至 BSADBTW + 建立資料表 + 透過 SqlBulkCopy 匯入 CSV
-# ==========================================
+# ============================================
+# 1. 路徑與基本設定
+# ============================================
+$folderPath   = "D:\UATR3\AMLDataMigrator"
+$baselineFile = Join-Path $folderPath "AML_CHECK_SUM_1.csv"
+$logFolder    = Join-Path $folderPath "Log"
+
+# 確保 Log 目錄存在
+if (!(Test-Path $logFolder)) {
+    New-Item -ItemType Directory -Path $logFolder | Out-Null
+}
+
+# 帶有時間戳記的 Log 檔案
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$logFile   = Join-Path $logFolder "SKcheck_CHECK_SUM_CIF_$timestamp.log"
 
 $hasError = $false
-$TargetDB = "BSADBTW"  # 指定目標資料庫
 
-# 1. 資料夾準備與全域 Log 初始化
-$LogFolder = Join-Path -Path $PSScriptRoot -ChildPath "Log"
-if (!(Test-Path $LogFolder)) {
-    New-Item -ItemType Directory -Path $LogFolder | Out-Null
-}
-
-$Timestamp   = Get-Date -Format "yyyyMMdd_HHmmss"
-$MainLogFile = Join-Path -Path $LogFolder -ChildPath "Execution_$Timestamp.log"
-
+# ============================================
+# 2. Log 輸出函式 (同時記錄到檔案與 Console)
+# ============================================
 function Write-Log {
-    param (
-        [string]$Message,
-        [ConsoleColor]$ForegroundColor = [ConsoleColor]::White,
-        [switch]$IsError
+    param(
+        [string]$msg,
+        [string]$level = "INFO"
     )
-    $timePrefix = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $formattedMsg = "[$timePrefix] $Message"
-    
-    Write-Host $Message -ForegroundColor $ForegroundColor
-    Add-Content -Path $MainLogFile -Value $formattedMsg -Encoding UTF8
-    
-    if ($IsError) {
-        $global:hasError = $true
-    }
+
+    $time    = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logLine = "[$time] [$level] $msg"
+
+    # 輸出到 Control-M Console
+    Write-Output $logLine
+
+    # 寫入實體 Log 檔
+    Add-Content -Path $logFile -Value $logLine -Encoding UTF8
 }
 
-Write-Log "=== 開始執行 CSV 讀取與 SQL 匯入作業 ===" -ForegroundColor Cyan
-Write-Log "主執行紀錄檔: $MainLogFile" -ForegroundColor DarkGray
+# ============================================
+# 3. 作業開始
+# ============================================
+Write-Log "============================================"
+Write-Log "JOB START: Checksum & RowCount Verification"
+Write-Log "Input Path   : $folderPath"
+Write-Log "Baseline File: $baselineFile"
+Write-Log "Log File     : $logFile"
+Write-Log "============================================"
 
-# ==========================================
-# 2. 載入 LDAP DLL 並取得連線字串
-# ==========================================
-$dllPath = Join-Path -Path $PSScriptRoot -ChildPath "Tsbldapdbc.dll"
+# 檢查 Input Folder
+if (!(Test-Path $folderPath)) {
+    Write-Log "ERROR TYPE : INPUT FOLDER NOT FOUND (Path: $folderPath)" "ERROR"
+    $hasError = $true
+}
 
-if (-not (Test-Path -Path $dllPath)) {
-    Write-Log "錯誤：找不到 DLL 檔案: $dllPath" -ForegroundColor Red -IsError
+# 檢查 Baseline File
+if (!$hasError -and !(Test-Path $baselineFile)) {
+    Write-Log "ERROR TYPE : BASELINE FILE NOT FOUND (File: $baselineFile)" "ERROR"
+    $hasError = $true
+}
+
+# 基本環境檢核失敗直接退出
+if ($hasError) {
+    Write-Log "============================================"
+    Write-Log "STATUS : FAILED (Exit Code: 1)" "ERROR"
+    Write-Log "============================================"
     exit 1
 }
+
+# ============================================
+# 4. 讀取與解析 AML_CHECK_SUM.csv
+# ============================================
+$baseline = @{}
 
 try {
-    if (-not ([System.Management.Automation.PSTypeName]'Tsbldapdbc.RunBat').Type) {
-        Add-Type -Path $dllPath
-    }
+    $lines = Get-Content -Path $baselineFile -Encoding UTF8
 
-    $App = New-Object Tsbldapdbc.RunBat
-    $App.SSL = $false
-    $App.ldapHost = "10.6.95.91"
-    $App.searchBase = "o=tsbank"
-    $sApp = "AML"
-    $iCStr = 7
-
-    $connStr = $App.GetRunBat($sApp, $iCStr)
-}
-catch {
-    Write-Log "錯誤：讀取 LDAP 連線資訊時發生例外: $($_.Exception.Message)" -ForegroundColor Red -IsError
-    exit 1
-}
-
-# 3. 自動解析連線字串參數
-$Server   = if ($connStr -match '(?:Data Source|Server)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
-$Database = if ($connStr -match '(?:Initial Catalog|Database)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
-$User     = if ($connStr -match '(?:User ID|UID)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
-$Password = if ($connStr -match '(?:Password|PWD)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
-
-Write-Log "解析連線資訊 -> Server: $Server | 預設 DB: $Database | User: $User" -ForegroundColor DarkCyan
-
-if ([string]::IsNullOrWhiteSpace($Server)) {
-    Write-Log "錯誤：無法正確解析 Server 連線資訊！" -ForegroundColor Red -IsError
-    exit 1
-}
-
-# ==========================================
-# 4. 定義 CSV 檔案路徑與對應 Table（加入多行 CSV 旗標）
-# ==========================================
-$tasks = @(
-    @{
-        TableName       = "CDC_OPEN_CASE"
-        FilePath        = Join-Path -Path $PSScriptRoot -ChildPath "CDC_OPEN_CASE.csv"
-        IsMultiLineCsv  = $false
-    },
-    @{
-        TableName       = "RM_OPEN_CASE"
-        FilePath        = Join-Path -Path $PSScriptRoot -ChildPath "RM_OPEN_CASE.csv"
-        IsMultiLineCsv  = $false
-    },
-    @{
-        TableName       = "AML_SPEC_OFAC_SPEC"
-        FilePath        = Join-Path -Path $PSScriptRoot -ChildPath "AML_SPEC_OFAC_SPEC.csv"
-        IsMultiLineCsv  = $true  # 針對此檔案啟用支援引號內換行的解析器
-    }
-)
-
-# 載入支援 CSV 多行解析的組件
-Add-Type -AssemblyName "Microsoft.VisualBasic"
-
-# ==========================================
-# 5. 連線資料庫、切換至 BSADBTW 並執行 寫入
-# ==========================================
-$sqlConn = New-Object System.Data.SqlClient.SqlConnection($connStr)
-
-try {
-    $sqlConn.Open()
-    Write-Log "成功連線至伺服器: $Server" -ForegroundColor Green
-
-    # 切換至 BSADBTW 資料庫
-    $sqlConn.ChangeDatabase($TargetDB)
-    Write-Log "已切換資料庫至: $TargetDB" -ForegroundColor Cyan
-
-    foreach ($task in $tasks) {
-        $table          = $task.TableName
-        $csvPath        = $task.FilePath
-        $isMultiLine    = $task.IsMultiLineCsv
-
-        Write-Log "--- 開始處理: $TargetDB.dbo.$table ---" -ForegroundColor Yellow
-
-        if (-not (Test-Path -Path $csvPath)) {
-            Write-Log "錯誤：找不到檔案 $csvPath" -ForegroundColor Red -IsError
+    foreach ($line in $lines) {
+        if ([string]::IsNullOrWhiteSpace($line)) {
             continue
         }
 
-        # 確保 Table 存在並清空舊資料
-        $initTableSql = @"
-USE [$TargetDB];
-IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '$table')
-BEGIN
-    CREATE TABLE [dbo].[$table] (
-        CustomerNo VARCHAR(50) COLLATE Chinese_Taiwan_Stroke_CI_AS NULL
-    );
-END
-TRUNCATE TABLE [dbo].[$table];
-"@
-        $initCmd = $sqlConn.CreateCommand()
-        $initCmd.CommandText = $initTableSql
-        $initCmd.ExecuteNonQuery() | Out-Null
+        $parts = $line.Split(";")
 
-        $dt = New-Object System.Data.DataTable
-        $null = $dt.Columns.Add("CustomerNo", [string])
-
-        # 根據檔案類型選擇讀取邏輯
-        if ($isMultiLine) {
-            Write-Log "使用 TextFieldParser 解析含換行之 CSV..." -ForegroundColor DarkGray
-            
-            # 使用 Default 編碼 (BIG5 / ANSI)，若檔案為 UTF8 可改為 [System.Text.Encoding]::UTF8
-            $parser = New-Object Microsoft.VisualBasic.FileIO.TextFieldParser($csvPath, [System.Text.Encoding]::Default)
-            $parser.TextFieldType = [Microsoft.VisualBasic.FileIO.FieldType]::Delimited
-            $parser.SetDelimiters(",")
-            $parser.HasFieldsEnclosedInQuotes = $true
-
-            while (-not $parser.EndOfData) {
-                $fields = $parser.ReadFields()
-                if ($fields.Length -gt 0) {
-                    $val = $fields[0].Trim()
-                    if (-not [string]::IsNullOrEmpty($val)) {
-                        $row = $dt.NewRow()
-                        $row["CustomerNo"] = $val
-                        $dt.Rows.Add($row)
-                    }
-                }
-            }
-            $parser.Close()
-            $parser.Dispose()
-        }
-        else {
-            # 一般單純按行讀取
-            $lines = [System.IO.File]::ReadAllLines($csvPath, [System.Text.Encoding]::Default)
-            foreach ($line in $lines) {
-                $val = $line.Trim()
-                if (-not [string]::IsNullOrEmpty($val)) {
-                    $row = $dt.NewRow()
-                    $row["CustomerNo"] = $val
-                    $dt.Rows.Add($row)
-                }
-            }
+        if ($parts.Count -lt 3) {
+            Write-Log "ERROR TYPE : BASELINE FORMAT ERROR -> Line: $line" "ERROR"
+            $hasError = $true
+            continue
         }
 
-        # 寫入 BSADBTW 資料庫
-        $bulkCopy = New-Object System.Data.SqlClient.SqlBulkCopy($sqlConn)
-        $bulkCopy.DestinationTableName = "[$TargetDB].[dbo].[$table]"
-        $bulkCopy.BulkCopyTimeout = 300
-        $bulkCopy.BatchSize = 10000
-        $bulkCopy.ColumnMappings.Add("CustomerNo", "CustomerNo") | Out-Null
-        $bulkCopy.WriteToServer($dt)
-        $bulkCopy.Close()
+        $fileName  = $parts[0].Trim()
+        $countText = $parts[1].Trim()
+        $md5       = $parts[2].Trim().ToLowerInvariant()
 
-        Write-Log "[$table] 匯入成功！共寫入 $($dt.Rows.Count) 筆資料至 $TargetDB。" -ForegroundColor Green
+        if ([string]::IsNullOrWhiteSpace($fileName)) {
+            Write-Log "ERROR TYPE : EMPTY FILE NAME -> Line: $line" "ERROR"
+            $hasError = $true
+            continue
+        }
+
+        $expectedCount = 0
+        if (-not [int64]::TryParse($countText, [ref]$expectedCount)) {
+            Write-Log "ERROR TYPE : INVALID COUNT -> File: $fileName, Count: $countText" "ERROR"
+            $hasError = $true
+            continue
+        }
+
+        if ($md5 -notmatch '^[0-9a-f]{32}$') {
+            Write-Log "ERROR TYPE : INVALID MD5 FORMAT -> File: $fileName, MD5: $md5" "ERROR"
+            $hasError = $true
+            continue
+        }
+
+        $key = $fileName.ToLowerInvariant()
+        $baseline[$key] = @{
+            FileName = $fileName
+            Count    = $expectedCount
+            MD5      = $md5
+        }
     }
 }
 catch {
-    Write-Log "執行作業時發生錯誤: $($_.Exception.Message)" -ForegroundColor Red -IsError
+    Write-Log "ERROR TYPE : BASELINE READ ERROR -> $($_.Exception.Message)" "ERROR"
+    $hasError = $true
 }
-finally {
-    if ($sqlConn.State -eq [System.Data.ConnectionState]::Open) {
-        $sqlConn.Close()
-        Write-Log "已關閉資料庫連線。" -ForegroundColor DarkGray
+
+if ($hasError) {
+    Write-Log "============================================"
+    Write-Log "STATUS : FAILED (Exit Code: 1)" "ERROR"
+    Write-Log "============================================"
+    exit 1
+}
+
+# ============================================
+# 5. 逐檔比對 (Count 行數與 MD5 Hash)
+# ============================================
+foreach ($key in $baseline.Keys) {
+
+    $expectedFileName = $baseline[$key].FileName
+    $expectedCount    = $baseline[$key].Count
+    $expectedMD5      = $baseline[$key].MD5
+
+    $targetFile = $null
+
+    # 1. 直接比對檔名
+    $directPath = Join-Path $folderPath $expectedFileName
+    if (Test-Path $directPath) {
+        $targetFile = $directPath
+    }
+    else {
+        # 2. 自動嘗試副檔名變體
+        $baseStem = $expectedFileName -replace '(\.Table)?\.(sql|csv)$', ''
+        $candidateFiles = @(
+            (Join-Path $folderPath "$baseStem.sql"),
+            (Join-Path $folderPath "$baseStem.Table.sql"),
+            (Join-Path $folderPath "$baseStem.csv")
+        )
+
+        foreach ($candidate in $candidateFiles) {
+            if (Test-Path $candidate) {
+                $targetFile = $candidate
+                $matchedLeaf = Split-Path $targetFile -Leaf
+                Write-Log "Matched '$expectedFileName' -> local file '$matchedLeaf'"
+                break
+            }
+        }
+    }
+
+    # 檢查目標檔案是否存在
+    if ($null -eq $targetFile) {
+        Write-Log "ERROR TYPE : FILE NOT FOUND -> Expected: $expectedFileName" "ERROR"
+        $hasError = $true
+        continue
+    }
+
+    # 計算行數與 MD5
+    try {
+        # 行數計算
+        $actualCount = 0
+        $reader = New-Object System.IO.StreamReader($targetFile)
+        try {
+            while ($reader.ReadLine() -ne $null) {
+                $actualCount++
+            }
+        }
+        finally {
+            $reader.Close()
+            $reader.Dispose()
+        }
+
+        # MD5 計算
+        $actualMD5 = (Get-FileHash -Path $targetFile -Algorithm MD5).Hash.ToLowerInvariant()
+
+        # 檢驗行數
+        if ($actualCount -ne $expectedCount) {
+            Write-Log "COUNT MISMATCH -> File: $expectedFileName (Expected: $expectedCount, Actual: $actualCount)" "ERROR"
+            $hasError = $true
+        }
+
+        # 檢驗 MD5
+        if ($actualMD5 -ne $expectedMD5) {
+            Write-Log "MD5 MISMATCH -> File: $expectedFileName (Expected: $expectedMD5, Actual: $actualMD5)" "ERROR"
+            $hasError = $true
+        }
+
+        if ($actualCount -eq $expectedCount -and $actualMD5 -eq $expectedMD5) {
+            Write-Log "PASSED -> File: $expectedFileName (Count: $actualCount, MD5: OK)"
+        }
+    }
+    catch {
+        Write-Log "ERROR TYPE : FILE PROCESS ERROR -> File: $expectedFileName, Message: $($_.Exception.Message)" "ERROR"
+        $hasError = $true
     }
 }
 
-# ==========================================
-# 6. 狀態判定與 Exit Code 回傳
-# ==========================================
+# ============================================
+# 6. 最終結果與 Exit Code
+# ============================================
+Write-Log "============================================"
+
 if ($hasError) {
-    Write-Log "=== 作業失敗，退出代碼: 1 ===" -ForegroundColor Red
+    Write-Log "JOB STATUS : FAILED (Exit Code: 1)" "ERROR"
+    Write-Log "============================================"
     exit 1
-} else {
-    Write-Log "=== 作業成功完成，退出代碼: 0 ===" -ForegroundColor Green
+}
+else {
+    Write-Log "JOB STATUS : SUCCESS (Exit Code: 0)" "INFO"
+    Write-Log "============================================"
     exit 0
 }
+
+
+幫我修改一下，因為有遇到這個問題
+
+
+我先問
+Hi新煜
+檔案AML_SPEC_OFAC_SPEC.csv與AML_CHECK_SUM_1.csv資訊不一致，請協助確認，謝謝 !!
+	筆數
+	Checksum為1,933
+	檔案內筆數為3,415
+
+
+他回復
+若蘭你好,
+1.	檔案AML_SPEC_OFAC_SPEC.csv與AML_CHECK_SUM_1.csv資訊是一致，請再確認，謝謝 !!
+2.	AML_SPEC_OFAC_SPEC.csv 檔案用UltraEdit 開啟時會顯示3415列，但實際SQL撈取為1933(含表投1筆)，
+因它每一筆內容較長會折行。
+3.	CHECK_SUM  MD5  與實際下指令是相同的。
