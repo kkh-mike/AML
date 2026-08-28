@@ -1,46 +1,55 @@
-    IF @ModuleName = 'ACCT'
-                    BEGIN
+     IF @ModuleName = 'TRXN'
+                        BEGIN
+                                                
+						--CREATE CLUSTERED INDEX IX_LoadTrxn_CIF 
+						--ON dbo.LoadTrxn_Migrate_buffer (CIF_KEY);
+						
+						--CREATE INDEX IX_LoadTrxn_YYYYMM
+						--ON dbo.LoadTrxn_Migrate_buffer (YYYYMM);	
+						
+						--CREATE INDEX IX_LoadTrxn_ACCT_KEY 
+						--ON dbo.LoadTrxn_Migrate_buffer (ACCT_KEY);	
+						
+                        IF OBJECT_ID('tempdb..#TrxnAcctFinalMapping') IS NOT NULL
+                            DROP TABLE #TrxnAcctFinalMapping;
 
-                        IF OBJECT_ID('tempdb..#AcctFinalMapping') IS NOT NULL
-                            DROP TABLE #AcctFinalMapping;
-
-                        CREATE TABLE #AcctFinalMapping
+                        CREATE TABLE #TrxnAcctFinalMapping
                             (
                               SourceAcctKey NVARCHAR(100) ,
                               FinalAcctKey NVARCHAR(100)
                             );
-             
+                        
                         IF ISNULL(@AcctMappingTable, '') <> ''
-                            BEGIN
-                                SET @sql = '
-                       WITH MappedAccounts AS (
-                           SELECT
-                                A.ACCT_KEY AS SourceAcctKey,
-                                -- Use mapped key, or default to prefix + original key
-                                COALESCE(M.' + QUOTENAME(@AcctMappingTargetColumn)
-                                    + ', ''' + ISNULL(@Prefix, '') + ''' + A.ACCT_KEY) AS FinalAcctKey,
-                                -- Assign a rank to handle duplicate ACCT_KEYs from the source or mapping
-                                ROW_NUMBER() OVER (PARTITION BY A.ACCT_KEY ORDER BY (SELECT 1)) as rn
-                           FROM dbo.Acct_Migrate_buffer A
-                           LEFT JOIN ' + QUOTENAME(@AcctMappingTable) + ' M
-                                ON M.' + QUOTENAME(@AcctMappingSourceColumn) + '= (CASE 
-							WHEN LEN(A.ACCT_KEY) < 25 
-							THEN RIGHT(REPLICATE(''0'', 25) + A.ACCT_KEY, 25) 
-							ELSE A.ACCT_KEY 
-							  END)									
-								   )
-								   INSERT INTO #AcctFinalMapping (SourceAcctKey, FinalAcctKey)
-								   SELECT
-									   SourceAcctKey,
-									   FinalAcctKey
-								   FROM MappedAccounts
-								   WHERE rn = 1 -- Keep only the first unique mapping
-								   AND ISNULL(SourceAcctKey,'''') <> ''''
-                  ';
-                    EXEC sp_executesql @sql;
-                            END;    
-                        ELSE
-                            BEGIN
+						BEGIN
+							SET @sql = '
+							WITH MappedAccounts AS (
+								SELECT
+									A.ACCT_KEY AS SourceAcctKey,
+									-- If a match exists in M, use it. Otherwise, apply the prefix.
+									COALESCE(M.' + QUOTENAME(@AcctMappingTargetColumn) + ', 
+											 ''' + ISNULL(@Prefix, '') + ''' + A.ACCT_KEY) AS FinalAcctKey,
+									ROW_NUMBER() OVER (PARTITION BY A.ACCT_KEY ORDER BY (SELECT 1)) as rn
+								FROM dbo.LoadTrxn_Migrate_buffer A
+								LEFT JOIN ' + QUOTENAME(@AcctMappingTable) + ' M
+									ON M.' + QUOTENAME(@AcctMappingSourceColumn) + ' = (
+										CASE 
+											WHEN LEN(A.ACCT_KEY) < 25 
+											THEN RIGHT(REPLICATE(''0'', 25) + A.ACCT_KEY, 25) 
+											ELSE A.ACCT_KEY 
+										END)
+							)
+							INSERT INTO #TrxnAcctFinalMapping (SourceAcctKey, FinalAcctKey)
+							SELECT
+								SourceAcctKey,
+								FinalAcctKey
+							FROM MappedAccounts
+							WHERE rn = 1 
+							AND ISNULL(SourceAcctKey, '''') <> '''';';
+
+							EXEC sp_executesql @sql;
+						END
+						ELSE
+						BEGIN
                                 WITH    PrefixedAccounts
                                           AS ( SELECT   ACCT_KEY AS SourceAcctKey ,
                                                         ISNULL(@Prefix, '')
@@ -48,9 +57,9 @@
                                                         ROW_NUMBER() OVER ( PARTITION BY ACCT_KEY ORDER BY ( SELECT
                                                               1
                                                               ) ) AS rn
-                                               FROM     dbo.Acct_Migrate_buffer
+                                               FROM     dbo.LoadTrxn_Migrate_buffer
                                              )
-                                    INSERT  INTO #AcctFinalMapping
+                                    INSERT  INTO #TrxnAcctFinalMapping
                                             ( SourceAcctKey ,
                                               FinalAcctKey
                                             )
@@ -59,294 +68,1414 @@
                                             FROM    PrefixedAccounts
                                             WHERE   rn = 1 -- Keep only the first unique account
                                                     AND ISNULL(SourceAcctKey,
-                                                              '') <> '';
-                            END;
-                        CREATE CLUSTERED INDEX IX_SourceAcctKey ON #AcctFinalMapping(SourceAcctKey);
-             
-                        MERGE dbo.ACCT_XREF_DIM AS TARGET
-                        USING
-                            ( SELECT    C.NEW_CIF_KEY AS CIF_KEY ,
-                                        A.ACCT_KEY AS SourceAcctKey ,
-                                        B.FinalAcctKey AS Final_ACCT_KEY ,
-                                        APPL ,
-                                        Banking_Acc_Type_Code ,
-                                        ATAXIDCD ,
-                                        ATAXID ,
-                                        ISNULL(BRNCH_NBR, '') BRNCH_NBR ,
-                                        ASTATCD ,
-                                        PRMY_OFFCR_NBR ,
-                                        BNK_NBR ,
-                                        ADTOPN ,
-                                        HHOLD_KEY ,
-                                        EXPECTEDTrans_Amt ,
-                                        EXPECTEDTRANS_AMT_WIRE ,
-                                        EXPECTEDTRANS_AMT_MOI ,
-                                        EXPECTEDTRANS_AMT_CHK ,
-                                       EXPECTEDTRANS_AMT_ACH ,
-                                        EXPECTEDTRANS_AMT_ATM ,
-                                        EXPECTEDTRANS_AMT_OTH ,
-                                        EXPECTEDTRANS_AMT_TRF ,
-                                       EXPECTEDTRANS_AMT_OUT ,
-                                        EXPECTEDTRANS_AMT_WIRE_OUT ,
-                                        EXPECTEDTRANS_AMT_MOI_OUT ,
-                                        EXPECTEDTRANS_AMT_CHK_OUT ,
-                                        EXPECTEDTRANS_AMT_ACH_OUT ,
-                                        EXPECTEDTRANS_AMT_ATM_OUT ,
-                                        EXPECTEDTRANS_AMT_OTH_OUT ,
-                                        EXPECTEDTRANS_AMT_TRF_OUT ,
-                                        EXPECTED_MTH_TRANAMT ,
-                                        EXPECTED_MTH_TRANAMT_WIRE ,
-                                        EXPECTED_MTH_TRANAMT_MOI ,
-                                        EXPECTED_MTH_TRANAMT_CHK ,
-                                        EXPECTED_MTH_TRANAMT_ACH ,
-                                        EXPECTED_MTH_TRANAMT_ATM ,
-                                        EXPECTED_MTH_TRANAMT_OTH ,
-                                        EXPECTED_MTH_TRANAMT_TRF ,
-                                        EXPECTED_MTH_TRANAMT_OUT ,
-                                        EXPECTED_MTH_TRANAMT_WIRE_OUT ,
-                                        EXPECTED_MTH_TRANAMT_MOI_OUT ,
-                                        EXPECTED_MTH_TRANAMT_CHK_OUT ,
-                                        EXPECTED_MTH_TRANAMT_ACH_OUT ,
-                                        EXPECTED_MTH_TRANAMT_ATM_OUT ,
-                                        EXPECTED_MTH_TRANAMT_OTH_OUT ,
-                                        EXPECTED_MTH_TRANAMT_TRF_OUT ,
-                                        EXPECTED_MTH_COUNT ,
-                                        EXPECTED_MTH_COUNT_WIRE ,
-                                        EXPECTED_MTH_COUNT_MOI ,
-                                        EXPECTED_MTH_COUNT_CHK ,
-                                        EXPECTED_MTH_COUNT_ACH ,
-                                        EXPECTED_MTH_COUNT_ATM ,
-                                        EXPECTED_MTH_COUNT_OTH ,
-                                        EXPECTED_MTH_COUNT_TRF ,
-                                        EXPECTED_MTH_COUNT_OUT ,
-                                        EXPECTED_MTH_COUNT_WIRE_OUT ,
-                                        EXPECTED_MTH_COUNT_MOI_OUT ,
-                                        EXPECTED_MTH_COUNT_CHK_OUT ,
-                                        EXPECTED_MTH_COUNT_ACH_OUT ,
-                                        EXPECTED_MTH_COUNT_ATM_OUT ,
-                                        EXPECTED_MTH_COUNT_OTH_OUT ,
-                                        EXPECTED_MTH_COUNT_TRF_OUT ,
-                                        EXPECTEDTRANS_AMT_CCD_OUT ,
-                                        EXPECTEDTRANS_AMT_DCD_OUT ,
-                                        EXPECTED_MTH_TRANAMT_CCD_OUT ,
-                                        EXPECTED_MTH_TRANAMT_DCD_OUT ,
-                                        EXPECTED_MTH_COUNT_CCD_OUT ,
-                                        EXPECTED_MTH_COUNT_DCD_OUT ,
-                                        EXPECTEDTRANS_AMT_ATMC ,
-                                        EXPECTEDTRANS_AMT_ATMC_OUT ,
-                                        EXPECTED_MTH_TRANAMT_ATMC ,
-                                        EXPECTED_MTH_TRANAMT_ATMC_OUT ,
-                                        EXPECTED_MTH_COUNT_ATMC ,
-                                        EXPECTED_MTH_COUNT_ATMC_OUT ,
-                                        ACCT_TYP_CDE ,
-                                        MULTI_CCY_ACCNO ,
-                                        AcctBalance ,
-                                        AccountFlag ,
-                                        EXPECTEDTRANS_AMT_WIRE_F ,
-                                        EXPECTEDTRANS_AMT_WIRE_F_OUT ,
-                                        EXPECTED_MTH_TRANAMT_WIRE_F ,
-                                        EXPECTED_MTH_TRANAMT_WIRE_F_OUT ,
-                                        EXPECTED_MTH_COUNT_WIRE_F ,
-                                        EXPECTED_MTH_COUNT_WIRE_F_OUT ,
-                                        EXPECTEDTRANS_AMT_TTL ,
-                                        EXPECTEDTRANS_AMT_TTL_OUT ,
-                                        EXPECTED_MTH_COUNT_TTL ,
-                                        EXPECTED_MTH_COUNT_TTL_OUT ,
-                                        EXPECTED_MTH_TRANAMT_TTL ,
-                                        EXPECTED_MTH_TRANAMT_TTL_OUT
-                              FROM      dbo.Acct_Migrate_buffer A
-                                        LEFT JOIN #AcctFinalMapping B ON A.ACCT_KEY = B.SourceAcctKey
-                                        LEFT JOIN dbo.CIF_Migrate_Mapping_TEMP C ON A.CIF_KEY = C.SOURCE_CIF_KEY
-                              WHERE     C.ACTION = 'INSERT'
-                                        AND NOT EXISTS(SELECT 1 FROM dbo.Acct_Migrate_buffer X WHERE x.ACCT_KEY = b.FinalAcctKey )
-                                              AND FinalAcctKey IS NOT NULL
-                            ) AS SOURCE
-                        ON TARGET.ACCT_KEY = SOURCE.Final_ACCT_KEY
-                            AND TARGET.APPL = SOURCE.APPL
-                        WHEN NOT MATCHED BY TARGET THEN
-                            INSERT ( CIF_KEY ,
-                                     ACCT_KEY ,
-                                     APPL ,
-                                     Banking_Acc_Type_Code ,
-                                     ATAXIDCD ,
-                                     ATAXID ,
-                                     BRNCH_NBR ,
-                                     ASTATCD ,
-                                     PRMY_OFFCR_NBR ,
-                                     BNK_NBR ,
-                                     ADTOPN ,
-                                     HHOLD_KEY ,
-                                     ACCT_TYP_CDE ,
-                                     MULTI_CCY_ACCNO ,
-                                     AcctBalance ,
-                                     AccountFlag
-                                   )
-                            VALUES ( SOURCE.CIF_KEY ,
-                                     SOURCE.Final_ACCT_KEY ,
-                                     SOURCE.APPL ,
-                                     SOURCE.Banking_Acc_Type_Code ,
-                                     SOURCE.ATAXIDCD ,
-                                     SOURCE.ATAXID ,
-                                     SOURCE.BRNCH_NBR ,
-                                     SOURCE.ASTATCD ,
-                                     SOURCE.PRMY_OFFCR_NBR ,
-                                     SOURCE.BNK_NBR ,
-                                     SOURCE.ADTOPN ,
-                                     SOURCE.HHOLD_KEY ,
-                                     SOURCE.ACCT_TYP_CDE ,
-                                     SOURCE.MULTI_CCY_ACCNO ,
-                                     SOURCE.AcctBalance ,
-                                     SOURCE.AccountFlag
-                                   )
-                        OUTPUT
-                            Inserted.CIF_KEY ,
-                            Inserted.ACCT_KEY ,
-                            Inserted.APPL ,
-                            SOURCE.EXPECTEDTrans_Amt ,
-                            SOURCE.EXPECTEDTRANS_AMT_WIRE ,
-                            SOURCE.EXPECTEDTRANS_AMT_MOI ,
-                            SOURCE.EXPECTEDTRANS_AMT_CHK ,
-                            SOURCE.EXPECTEDTRANS_AMT_ACH ,
-                            SOURCE.EXPECTEDTRANS_AMT_ATM ,
-                            SOURCE.EXPECTEDTRANS_AMT_OTH ,
-                            SOURCE.EXPECTEDTRANS_AMT_TRF ,
-                            SOURCE.EXPECTEDTRANS_AMT_OUT ,
-                            SOURCE.EXPECTEDTRANS_AMT_WIRE_OUT ,
-                            SOURCE.EXPECTEDTRANS_AMT_MOI_OUT ,
-                            SOURCE.EXPECTEDTRANS_AMT_CHK_OUT ,
-                            SOURCE.EXPECTEDTRANS_AMT_ACH_OUT ,
-                            SOURCE.EXPECTEDTRANS_AMT_ATM_OUT ,
-                            SOURCE.EXPECTEDTRANS_AMT_OTH_OUT ,
-                            SOURCE.EXPECTEDTRANS_AMT_TRF_OUT ,
-                            SOURCE.EXPECTED_MTH_TRANAMT ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_WIRE ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_MOI ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_CHK ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_ACH ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_ATM ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_OTH ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_TRF ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_OUT ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_WIRE_OUT ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_MOI_OUT ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_CHK_OUT ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_ACH_OUT ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_ATM_OUT ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_OTH_OUT ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_TRF_OUT ,
-                            SOURCE.EXPECTED_MTH_COUNT ,
-                           SOURCE.EXPECTED_MTH_COUNT_WIRE ,
-                            SOURCE.EXPECTED_MTH_COUNT_MOI ,
-                            SOURCE.EXPECTED_MTH_COUNT_CHK ,
-                            SOURCE.EXPECTED_MTH_COUNT_ACH ,
-                            SOURCE.EXPECTED_MTH_COUNT_ATM ,
-                            SOURCE.EXPECTED_MTH_COUNT_OTH ,
-                            SOURCE.EXPECTED_MTH_COUNT_TRF ,
-                            SOURCE.EXPECTED_MTH_COUNT_OUT ,
-                            SOURCE.EXPECTED_MTH_COUNT_WIRE_OUT ,
-                            SOURCE.EXPECTED_MTH_COUNT_MOI_OUT ,
-                            SOURCE.EXPECTED_MTH_COUNT_CHK_OUT ,
-                            SOURCE.EXPECTED_MTH_COUNT_ACH_OUT ,
-                            SOURCE.EXPECTED_MTH_COUNT_ATM_OUT ,
-                            SOURCE.EXPECTED_MTH_COUNT_OTH_OUT ,
-                            SOURCE.EXPECTED_MTH_COUNT_TRF_OUT ,
-                            SOURCE.EXPECTEDTRANS_AMT_CCD_OUT ,
-                            SOURCE.EXPECTEDTRANS_AMT_DCD_OUT ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_CCD_OUT ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_DCD_OUT ,
-                            SOURCE.EXPECTED_MTH_COUNT_CCD_OUT ,
-                            SOURCE.EXPECTED_MTH_COUNT_DCD_OUT ,
-                            SOURCE.EXPECTEDTRANS_AMT_ATMC ,
-                            SOURCE.EXPECTEDTRANS_AMT_ATMC_OUT ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_ATMC ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_ATMC_OUT ,
-                            SOURCE.EXPECTED_MTH_COUNT_ATMC ,
-                            SOURCE.EXPECTED_MTH_COUNT_ATMC_OUT ,
-                            SOURCE.EXPECTEDTRANS_AMT_WIRE_F ,
-                            SOURCE.EXPECTEDTRANS_AMT_WIRE_F_OUT ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_WIRE_F ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_WIRE_F_OUT ,
-                            SOURCE.EXPECTED_MTH_COUNT_WIRE_F ,
-                            SOURCE.EXPECTED_MTH_COUNT_WIRE_F_OUT ,
-                            SOURCE.EXPECTEDTRANS_AMT_TTL ,
-                            SOURCE.EXPECTEDTRANS_AMT_TTL_OUT ,
-                            SOURCE.EXPECTED_MTH_COUNT_TTL ,
-                            SOURCE.EXPECTED_MTH_COUNT_TTL_OUT ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_TTL ,
-                            SOURCE.EXPECTED_MTH_TRANAMT_TTL_OUT
-                            INTO
-                  ACCT_XREF_EXT ( CIF_KEY, ACCT_KEY, APPL, EXPECTEDTrans_Amt,
-                                EXPECTEDTRANS_AMT_WIRE, EXPECTEDTRANS_AMT_MOI,
-                                EXPECTEDTRANS_AMT_CHK, EXPECTEDTRANS_AMT_ACH,
-                                EXPECTEDTRANS_AMT_ATM, EXPECTEDTRANS_AMT_OTH,
-                                EXPECTEDTRANS_AMT_TRF, EXPECTEDTRANS_AMT_OUT,
-                                EXPECTEDTRANS_AMT_WIRE_OUT,
-                                EXPECTEDTRANS_AMT_MOI_OUT,
-                                EXPECTEDTRANS_AMT_CHK_OUT,
-                                EXPECTEDTRANS_AMT_ACH_OUT,
-                                EXPECTEDTRANS_AMT_ATM_OUT,
-                                EXPECTEDTRANS_AMT_OTH_OUT,
-                                EXPECTEDTRANS_AMT_TRF_OUT,
-                                EXPECTED_MTH_TRANAMT,
-                                EXPECTED_MTH_TRANAMT_WIRE,
-                                EXPECTED_MTH_TRANAMT_MOI,
-                                EXPECTED_MTH_TRANAMT_CHK,
-                                EXPECTED_MTH_TRANAMT_ACH,
-                                EXPECTED_MTH_TRANAMT_ATM,
-                                EXPECTED_MTH_TRANAMT_OTH,
-                                EXPECTED_MTH_TRANAMT_TRF,
-                                EXPECTED_MTH_TRANAMT_OUT,
-                                EXPECTED_MTH_TRANAMT_WIRE_OUT,
-                                EXPECTED_MTH_TRANAMT_MOI_OUT,
-                                EXPECTED_MTH_TRANAMT_CHK_OUT,
-                                EXPECTED_MTH_TRANAMT_ACH_OUT,
-                                EXPECTED_MTH_TRANAMT_ATM_OUT,
-                                EXPECTED_MTH_TRANAMT_OTH_OUT,
-                                EXPECTED_MTH_TRANAMT_TRF_OUT,
-                                EXPECTED_MTH_COUNT, EXPECTED_MTH_COUNT_WIRE,
-                                EXPECTED_MTH_COUNT_MOI, EXPECTED_MTH_COUNT_CHK,
-                                EXPECTED_MTH_COUNT_ACH, EXPECTED_MTH_COUNT_ATM,
-                                EXPECTED_MTH_COUNT_OTH, EXPECTED_MTH_COUNT_TRF,
-                                EXPECTED_MTH_COUNT_OUT,
-                                EXPECTED_MTH_COUNT_WIRE_OUT,
-                                EXPECTED_MTH_COUNT_MOI_OUT,
-                                EXPECTED_MTH_COUNT_CHK_OUT,
-                                EXPECTED_MTH_COUNT_ACH_OUT,
-                                EXPECTED_MTH_COUNT_ATM_OUT,
-                                EXPECTED_MTH_COUNT_OTH_OUT,
-                                EXPECTED_MTH_COUNT_TRF_OUT,
-                                EXPECTEDTRANS_AMT_CCD_OUT,
-                                EXPECTEDTRANS_AMT_DCD_OUT,
-                                EXPECTED_MTH_TRANAMT_CCD_OUT,
-                                EXPECTED_MTH_TRANAMT_DCD_OUT,
-                                EXPECTED_MTH_COUNT_CCD_OUT,
-                                EXPECTED_MTH_COUNT_DCD_OUT,
-                                EXPECTEDTRANS_AMT_ATMC,
-                                EXPECTEDTRANS_AMT_ATMC_OUT,
-                                EXPECTED_MTH_TRANAMT_ATMC,
-                                EXPECTED_MTH_TRANAMT_ATMC_OUT,
-                                EXPECTED_MTH_COUNT_ATMC,
-                                EXPECTED_MTH_COUNT_ATMC_OUT,
-                                EXPECTEDTRANS_AMT_WIRE_F,
-                                EXPECTEDTRANS_AMT_WIRE_F_OUT,
-                                EXPECTED_MTH_TRANAMT_WIRE_F,
-                                EXPECTED_MTH_TRANAMT_WIRE_F_OUT,
-                                EXPECTED_MTH_COUNT_WIRE_F,
-                                EXPECTED_MTH_COUNT_WIRE_F_OUT,
-                                EXPECTEDTRANS_AMT_TTL,
-                                EXPECTEDTRANS_AMT_TTL_OUT,
-                                EXPECTED_MTH_COUNT_TTL,
-                                EXPECTED_MTH_COUNT_TTL_OUT,
-                                EXPECTED_MTH_TRANAMT_TTL,
-                                EXPECTED_MTH_TRANAMT_TTL_OUT );
-                                
-                                     INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG) 
-                                     SELECT @Time, @ModuleName + ' migrate completed -------> '  , 'N';
-                    END;                                              
-                ELSE
+                                                              '') <> '';                        
+						END
+						CREATE CLUSTERED INDEX IX_SourceAcctKey ON #TrxnAcctFinalMapping(SourceAcctKey);
+              -- WIRE MTHLY FACT
+                            INSERT  INTO dbo.WIRE_MTHLY_FACT
+                                    ( CIF_KEY ,
+                                      YYYYMM ,
+                                      WIRETTL ,
+                                      WIRECRTTL ,
+                                      WIREDRTTL ,
+                                      WIRECNT ,
+                                      WIRECRCNT ,
+                                      WIREDRCNT ,
+                                      WIREMIN ,
+                                      WIREMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX ,
+                                      WIRETTL_D ,
+                                      WIRECRTTL_D ,
+                                      WIREDRTTL_D ,
+                                      WIRECNT_D ,
+                                      WIRECRCNT_D ,
+                                      WIREDRCNT_D ,
+                                      WIREMIN_D ,
+                                      WIREMAX_D ,
+                                      CRMIN_D ,
+                                      DRMIN_D ,
+                                      CRMAX_D ,
+                                      DRMAX_D ,
+                                      WIRETTL_F ,
+                                      WIRECRTTL_F ,
+                                      WIREDRTTL_F ,
+                                      WIRECNT_F ,
+                                      WIRECRCNT_F ,
+                                      WIREDRCNT_F ,
+                                      WIREMIN_F ,
+                                      WIREMAX_F ,
+                                      CRMIN_F ,
+                                      DRMIN_F ,
+                                      CRMAX_F ,
+                                      DRMAX_F
+                                      )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX ,
+                                            TTL_D ,
+                                            CRTTL_D ,
+                                            DRTTL_D ,
+                                            CNT_D ,
+                                            CRCNT_D ,
+                                            DRCNT_D ,
+                                            MIN_D ,
+                                            MAX_D ,
+                                            CRMIN_D ,
+                                            DRMIN_D ,
+                                            CRMAX_D ,
+                                            DRMAX_D ,
+                                            TTL_F ,
+                                            CRTTL_F ,
+                                            DRTTL_F ,
+                                            CNT_F ,
+                                            CRCNT_F ,
+                                            DRCNT_F ,
+                                            MIN_F ,
+                                            MAX_F ,
+                                            CRMIN_F ,
+                                            DRMIN_F ,
+                                            CRMAX_F ,
+                                            DRMAX_F
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'WIRE MTHLY FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.WIRE_MTHLY_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM );
 
+              -- TTL MTHLY FACT
+                            INSERT  INTO dbo.TTL_MTHLY_FACT
+                                    ( CIF_KEY ,
+                                      YYYYMM ,
+                                      TTL ,
+                                      CRTTL ,
+                                      DRTTL ,
+                                      CNT ,
+                                      CRCNT ,
+                                      DRCNT ,
+                                      MIN ,
+                                      MAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                      )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'TTL MTHLY FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.TTL_MTHLY_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM );
 
-幫我看一下 下面哪一些是ACCT 會用到的TABLE
+              -- CTS MTHLY FACT
+                            INSERT  INTO dbo.CTS_MTHLY_FACT
+                                    ( CIF_KEY ,
+                                      YYYYMM ,
+                                      CSHTTL ,
+                                      CSHCRTTL ,
+                                      CSHDRTTL ,
+                                      CSHCNT ,
+                                      CSHCRCNT ,
+                                      CSHDRCNT ,
+                                      CSHMIN ,
+                                      CSHMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                      )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            A.YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'CTS MTHLY FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.CTS_MTHLY_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM );
+              
+              -- ACH MTHLY FACT
+                            INSERT  INTO dbo.ACH_MTHLY_FACT
+                                    ( CIF_KEY ,
+                                      YYYYMM ,
+                                      ACHTTL ,
+                                      ACHCRTTL ,
+                                      ACHDRTTL ,
+                                      ACHCNT ,
+                                      ACHCRCNT ,
+                                      ACHDRCNT ,
+                                      ACHMIN ,
+                                      ACHMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            A.YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'ACH MTHLY FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.ACH_MTHLY_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM );
+                      
+              -- MOI MTHLY FACT               
+                            INSERT  INTO dbo.MOI_MTHLY_FACT
+                                    ( CIF_KEY ,
+                                      YYYYMM ,
+                                      MOITTL ,
+                                      MOICRTTL ,
+                                      MOIDRTTL ,
+                                      MOICNT ,
+                                      MOICRCNT ,
+                                      MOIDRCNT ,
+                                      MOIMIN ,
+                                      MOIMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            A.YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'MOI MTHLY FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.MOI_MTHLY_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM );
+
+              -- CHK MTHLY FACT
+                            INSERT  INTO dbo.CHK_MTHLY_FACT
+                                    ( CIF_KEY ,
+                                      YYYYMM ,
+                                      CHKTTL ,
+                                      CHKCRTTL ,
+                                      CHKDRTTL ,
+                                      CHKCNT ,
+                                      CHKCRCNT ,
+                                      CHKDRCNT ,
+                                      CHKMIN ,
+                                      CHKMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            A.YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'CHK MTHLY FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.CHK_MTHLY_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM );
+
+              -- ATM_CSH MTHLY FACT
+                            INSERT  INTO dbo.ATM_CSH_MTHLY_FACT
+                                    ( CIF_KEY ,
+                                      YYYYMM ,
+                                      ATMTTL ,
+                                      ATMCRTTL ,
+                                      ATMDRTTL ,
+                                      ATMCNT ,
+                                      ATMCRCNT ,
+                                      ATMDRCNT ,
+                                      ATMMIN ,
+                                      ATMMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            A.YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'ATM_CSH MTHLY FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.ATM_CSH_MTHLY_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM );
+
+              -- ATM_NCSH MTHLY FACT
+                            INSERT  INTO dbo.ATM_NCSH_MTHLY_FACT
+                                    ( CIF_KEY ,
+                                      YYYYMM ,
+                                      ATMTTL ,
+                                      ATMCRTTL ,
+                                      ATMDRTTL ,
+                                      ATMCNT ,
+                                      ATMCRCNT ,
+                                      ATMDRCNT ,
+                                      ATMMIN ,
+                                      ATMMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            A.YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'ATM_NCSH MTHLY FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.ATM_NCSH_MTHLY_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM );
+
+              -- OTHER MTHLY FACT
+                            INSERT  INTO dbo.OTHER_MTHLY_FACT
+                                    ( CIF_KEY ,
+                                      YYYYMM ,
+                                      OTHTTL ,
+                                      OTHCRTTL ,
+                                      OTHDRTTL ,
+                                      OTHCNT ,
+                                      OTHCRCNT ,
+                                      OTHDRCNT ,
+                                      OTHMIN ,
+                                      OTHMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            A.YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'OTHER MTHLY FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.OTHER_MTHLY_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM );
+
+              -- TRSF MTHLY FACT
+                            INSERT  INTO dbo.TRSF_MTHLY_FACT
+                                    ( CIF_KEY ,
+                                      YYYYMM ,
+                                      TRSFTTL ,
+                                      TRSFCRTTL ,
+                                      TRSFDRTTL ,
+                                      TRSFCNT ,
+                                      TRSFCRCNT ,
+                                      TRSFDRCNT ,
+                                     TRSFMIN ,
+                                      TRSFMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            A.YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'TRSF MTHLY FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.TRSF_MTHLY_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM );
+
+              -- CCD MTHLY FACT
+                            INSERT  INTO dbo.CCD_MTHLY_FACT
+                                    ( CIF_KEY ,
+                                      YYYYMM ,
+                                      CCDTTL ,
+                                      CCDCRTTL ,
+                                      CCDDRTTL ,
+                                      CCDCNT ,
+                                      CCDCRCNT ,
+                                      CCDDRCNT ,
+                                      CCDMIN ,
+                                      CCDMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            A.YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'CCD MTHLY FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.CCD_MTHLY_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM );
+
+              -- DCD MTHLY FACT
+                            INSERT  INTO dbo.DCD_MTHLY_FACT
+                                    ( CIF_KEY ,
+                                      YYYYMM ,
+                                      DCDTTL ,
+                                      DCDCRTTL ,
+                                      DCDDRTTL ,
+                                      DCDCNT ,
+                                      DCDCRCNT ,
+                                      DCDDRCNT ,
+                                      DCDMIN ,
+                                      DCDMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            A.YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'DCD MTHLY FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.DCD_MTHLY_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM );
+              
+              -- WIRE MTHLY SMRY
+                            INSERT  INTO dbo.WIRE_MTHLY_ACCT_SMRY
+                                    ( CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY ,
+                                      YYYYMM ,
+                                      WIRETTL ,
+                                      WIRECRTTL ,
+                                      WIREDRTTL ,
+                                      WIRECNT ,
+                                      WIRECRCNT ,
+                                      WIREDRCNT ,
+                                      WIREMIN ,
+                                      WIREMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX ,
+                                      WIRETTL_D ,
+                                      WIRECRTTL_D ,
+                                      WIREDRTTL_D ,
+                                      WIRECNT_D ,
+                                      WIRECRCNT_D ,
+                                      WIREDRCNT_D ,
+                                      WIREMIN_D ,
+                                      WIREMAX_D ,
+                                      CRMIN_D ,
+                                      DRMIN_D ,
+                                      CRMAX_D ,
+                                      DRMAX_D ,
+                                      WIRETTL_F ,
+                                      WIRECRTTL_F ,
+                                      WIREDRTTL_F ,
+                                      WIRECNT_F ,
+                                      WIRECRCNT_F ,
+                                      WIREDRCNT_F ,
+                                      WIREMIN_F ,
+                                      WIREMAX_F ,
+                                      CRMIN_F ,
+                                      DRMIN_F ,
+                                      CRMAX_F ,
+                                      DRMAX_F
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            A.APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
+                                            A.YYYYMM ,
+                                            A.TTL ,
+                                            A.CRTTL ,
+                                            A.DRTTL ,
+                                            A.CNT ,
+                                            A.CRCNT ,
+                                            A.DRCNT ,
+                                            A.MIN ,
+                                            A.MAX ,
+                                            A.CRMIN ,
+                                            A.DRMIN ,
+                                            A.CRMAX ,
+                                            A.DRMAX ,
+                                            A.TTL_D ,
+                                            A.CRTTL_D ,
+                                            A.DRTTL_D ,
+                                            A.CNT_D ,
+                                            A.CRCNT_D ,
+                                            A.DRCNT_D ,
+                                            A.MIN_D ,
+                                            A.MAX_D ,
+                                            A.CRMIN_D ,
+                                            A.DRMIN_D ,
+                                            A.CRMAX_D ,
+                                            A.DRMAX_D ,
+                                            A.TTL_F ,
+                                            A.CRTTL_F ,
+                                            A.DRTTL_F ,
+                                            A.CNT_F ,
+                                            A.CRCNT_F ,
+                                            A.DRCNT_F ,
+                                            A.MIN_F ,
+                                            A.MAX_F ,
+                                            A.CRMIN_F ,
+                                            A.DRMIN_F ,
+                                            A.CRMAX_F ,
+                                            A.DRMAX_F
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                            
+                                    WHERE   TrxnType = 'WIRE MTHLY SMRY'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.WIRE_MTHLY_ACCT_SMRY Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+              
+              -- TTL MTHLY SMRY
+                            INSERT  INTO dbo.TTL_MTHLY_ACCT_SMRY
+                                    ( CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY ,
+                                      YYYYMM ,
+                                      TTL ,
+                                      CRTTL ,
+                                      DRTTL ,
+                                      CNT ,
+                                      CRCNT ,
+                                      DRCNT ,
+                                      MIN ,
+                                      MAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
+                                            YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'TTL MTHLY SMRY'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.TTL_MTHLY_ACCT_SMRY Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM 
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+              
+              -- CTS MTHLY SMRY
+                            INSERT  INTO dbo.CTS_MTHLY_ACCT_SMRY
+                                    ( CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY ,
+                                      YYYYMM ,
+                                      CSHTTL ,
+                                      CSHCRTTL ,
+                                      CSHDRTTL ,
+                                      CSHCNT ,
+                                      CSHCRCNT ,
+                                      CSHDRCNT ,
+                                      CSHMIN ,
+                                      CSHMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
+                                            YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'CTS MTHLY SMRY'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.CTS_MTHLY_ACCT_SMRY Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM 
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+              
+              -- ACH MTHLY SMRY
+                            INSERT  INTO dbo.ACH_MTHLY_ACCT_SMRY
+                                    ( CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY ,
+                                      YYYYMM ,
+                                      ACHTTL ,
+                                      ACHCRTTL ,
+                                      ACHDRTTL ,
+                                      ACHCNT ,
+                                      ACHCRCNT ,
+                                      ACHDRCNT ,
+                                      ACHMIN ,
+                                      ACHMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
+                                            YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'ACH MTHLY SMRY'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.ACH_MTHLY_ACCT_SMRY Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM 
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+              
+              -- MOI MTHLY SMRY
+                            INSERT  INTO dbo.MOI_MTHLY_ACCT_SMRY
+                                    ( CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY ,
+                                      YYYYMM ,
+                                      MOITTL ,
+                                      MOICRTTL ,
+                                      MOIDRTTL ,
+                                      MOICNT ,
+                                      MOICRCNT ,
+                                      MOIDRCNT ,
+                                      MOIMIN ,
+                                      MOIMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
+                                            YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                    WHERE   TrxnType = 'MOI MTHLY SMRY'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.MOI_MTHLY_ACCT_SMRY Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM 
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+              
+              -- CHK MTHLY SMRY
+                            INSERT  INTO dbo.CHK_MTHLY_ACCT_SMRY
+                                    ( CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY ,
+                                      YYYYMM ,
+                                      CHKTTL ,
+                                      CHKCRTTL ,
+                                      CHKDRTTL ,
+                                      CHKCNT ,
+                                      CHKCRCNT ,
+                                      CHKDRCNT ,
+                                      CHKMIN ,
+                                      CHKMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
+                                            YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'CHK MTHLY SMRY'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.CHK_MTHLY_ACCT_SMRY Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM 
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );           
+              
+              -- ATM_CSH MTHLY SMRY
+                            INSERT  INTO dbo.ATM_CSH_MTHLY_ACCT_SMRY
+                                    ( CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY ,
+                                      YYYYMM ,
+                                      ATMTTL ,
+                                      ATMCRTTL ,
+                                      ATMDRTTL ,
+                                      ATMCNT ,
+                                      ATMCRCNT ,
+                                      ATMDRCNT ,
+                                      ATMMIN ,
+                                      ATMMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
+                                            YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'ATM_CSH MTHLY SMRY'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.ATM_CSH_MTHLY_ACCT_SMRY Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM 
+															  AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+              
+              -- ATM_NCSH MTHLY SMRY
+                            INSERT  INTO dbo.ATM_NCSH_MTHLY_ACCT_SMRY
+                                    ( CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY ,
+                                      YYYYMM ,
+                                      ATMTTL ,
+                                      ATMCRTTL ,
+                                      ATMDRTTL ,
+                                      ATMCNT ,
+                                      ATMCRCNT ,
+                                      ATMDRCNT ,
+                                      ATMMIN ,
+                                      ATMMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
+                                            YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'ATM_NCSH MTHLY SMRY'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.ATM_NCSH_MTHLY_ACCT_SMRY Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM 
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+              
+              -- OTHER MTHLY SMRY
+                            INSERT  INTO dbo.OTHER_MTHLY_ACCT_SMRY
+                                    ( CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY ,
+                                      YYYYMM ,
+                                      OTHTTL ,
+                                      OTHCRTTL ,
+                                      OTHDRTTL ,
+                                      OTHCNT ,
+                                      OTHCRCNT ,
+                                      OTHDRCNT ,
+                                      OTHMIN ,
+                                      OTHMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
+                                            YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'OTHER MTHLY SMRY'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.OTHER_MTHLY_ACCT_SMRY Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+              
+              -- TRSF MTHLY SMRY
+                            INSERT  INTO dbo.TRSF_MTHLY_ACCT_SMRY
+                                    ( CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY ,
+                                      YYYYMM ,
+                                     TRSFTTL ,
+                                      TRSFCRTTL ,
+                                      TRSFDRTTL ,
+                                      TRSFCNT ,
+                                      TRSFCRCNT ,
+                                      TRSFDRCNT ,
+                                      TRSFMIN ,
+                                      TRSFMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
+                                            YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'TRSF MTHLY SMRY'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.TRSF_MTHLY_ACCT_SMRY Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+              
+              -- CCD MTHLY SMRY
+                            INSERT  INTO dbo.CCD_MTHLY_ACCT_SMRY
+                                    ( CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY ,
+                                      YYYYMM ,
+                                      CCDTTL ,
+                                      CCDCRTTL ,
+                                      CCDDRTTL ,
+                                      CCDCNT ,
+                                      CCDCRCNT ,
+                                      CCDDRCNT ,
+                                      CCDMIN ,
+                                      CCDMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
+                                            YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'CCD MTHLY SMRY'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.CCD_MTHLY_ACCT_SMRY Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM 
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+              
+              -- DCD MTHLY SMRY
+                            INSERT  INTO dbo.DCD_MTHLY_ACCT_SMRY
+                                    ( CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY ,
+                                      YYYYMM ,
+                                      DCDTTL ,
+                                      DCDCRTTL ,
+                                      DCDDRTTL ,
+                                      DCDCNT ,
+                                      DCDCRCNT ,
+                                      DCDDRCNT ,
+                                      DCDMIN ,
+                                      DCDMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
+                                            YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'DCD MTHLY SMRY'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.DCD_MTHLY_ACCT_SMRY Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM 
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+              
+              -- WIRE FACT
+                            INSERT  INTO dbo.WIRE_TXN_FACT
+                                    ( TRANDT ,
+                                      CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY ,
+                                      reference
+                                    )
+                                    SELECT  A.TRANDT ,
+                                            B.NEW_CIF_KEY ,
+                                            A.APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
+                                            A.reference
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'WIRE FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.WIRE_TXN_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY 
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY)
+                                                              AND Z.reference = A.reference );
+              
+              -- CTS FACT
+                            INSERT  INTO dbo.CTS_TXN_FACT
+                                    ( TRANDT ,
+                                      CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY
+                                    )
+                                    SELECT  A.TRANDT ,
+                                            B.NEW_CIF_KEY ,
+                                            A.APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) 
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'CTS FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.CTS_TXN_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY 
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY)
+                                                              AND Z.TRANDT = A.TRANDT );
+              
+              -- ACH FACT
+                            INSERT  INTO dbo.ACH_TXN_FACT
+                                    ( TRANDT ,
+                                      CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY
+                                    )
+                                    SELECT  A.TRANDT ,
+                                            B.NEW_CIF_KEY ,
+                                            A.APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) 
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'ACH FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.ACH_TXN_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY 
+                                                              AND Z.TRANDT = A.TRANDT
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+              
+              -- CASHIERCHK FACT
+                            INSERT  INTO dbo.CASHIERCHK_FACT
+                                    ( TRANDT ,
+                                      CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY
+                                    )
+                                    SELECT  A.TRANDT ,
+                                            B.NEW_CIF_KEY ,
+                                            A.APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) 
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'CASHIERCHK FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.CASHIERCHK_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY 
+                                                              AND Z.TRANDT = A.TRANDT
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+              
+              -- CHK FACT
+                            INSERT  INTO dbo.CHK_TXN_FACT
+                                    ( TRANDT ,
+                                      CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY ,
+                                      TraceNo
+                                    )
+                                    SELECT  A.TRANDT ,
+                                            B.NEW_CIF_KEY ,
+                                            A.APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
+                                            A.reference
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'CHK FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.CHK_TXN_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY 
+                                                              AND Z.TraceNo = A.reference
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+              
+              -- OTHER FACT
+                            INSERT  INTO dbo.OTHER_TXN_FACT
+                                    ( TRANDT ,
+                                      CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY ,
+                                      TRANNO
+                                    )
+                                   SELECT  A.TRANDT ,
+                                            B.NEW_CIF_KEY ,
+                                            A.APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
+                                            A.reference
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'OTHER FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.OTHER_TXN_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY 
+                                                              AND Z.TRANNO = A.reference
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+                           
+              -- TRSF FACT
+                            INSERT  INTO dbo.TRSF_TXN_FACT
+                                    ( TRANDT ,
+                                      CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY
+                                    )
+                                    SELECT  A.TRANDT ,
+                                            B.NEW_CIF_KEY ,
+                                            A.APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) 
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'TRSF FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.TRSF_TXN_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.TRANDT = A.TRANDT
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+              
+              -- CCARD FACT
+                            INSERT  INTO dbo.CCARD_TXN_FACT
+                                    ( TRANDT ,
+                                      CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY
+                                    )
+                                    SELECT  A.TRANDT ,
+                                            B.NEW_CIF_KEY ,
+                                            A.APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) 
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'CCARD FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                            FROM
+                                                              dbo.CCARD_TXN_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY 
+                                                              AND Z.TRANDT = A.TRANDT
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+              
+              -- DCARD FACT
+                            INSERT  INTO dbo.DCARD_TXN_FACT
+                                    ( TRANDT ,
+                                      CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY
+                                    )
+                                    SELECT  A.TRANDT ,
+                                            B.NEW_CIF_KEY ,
+                                            A.APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) 
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'DCARD FACT'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.DCARD_TXN_FACT Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.TRANDT = A.TRANDT
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+                                                              
+                                INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG) 
+                                SELECT @Time, @ModuleName + ' migrate completed -------> '  , 'N';
+                        END;
+        
+
+幫我看一下 下面哪一些是TRXN 會用到的TABLE
 
 
 -----------------------------CIF
