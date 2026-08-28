@@ -1,34 +1,66 @@
-TRUNCATE TABLE  dbo.lowrisklistgroups
+----------------------------------------------------------------------------------------------------
+-- 模組名稱: SPEC (Special List / 名單掃描與交易過濾設定模組)
+-- 用途說明: 清理 SPEC 模組寫入之「低風險/特有名單群組主檔」、「過濾名單事實表」以及「各交易管道黑名單掃描設定」
+-- 執行時機: 1. SPEC 模組轉檔失敗需重跑 (Re-run / Rollback) 時
+--          2. 重新初始化 SPEC 相關名單設定資料時
+----------------------------------------------------------------------------------------------------
 
-TRUNCATE TABLE  dbo.OFAC_SPEC
-TRUNCATE TABLE  dbo.OFAC_SPEC_RestrictedCountry
+-- ==========================================
+-- 1. 清理名單群組與過濾名單主檔 (實體名單資料)
+-- ==========================================
+-- 清空低風險名單群組主檔 (lowrisklistgroups)
+TRUNCATE TABLE dbo.lowrisklistgroups;
 
-                
+-- 清空特有名單/OFAC名單主檔 (姓名、證號、地址等基本特徵)
+TRUNCATE TABLE dbo.OFAC_SPEC;
+
+-- 清空受限國家/地區名單主檔 (SpecType = 2 國家過濾名單)
+TRUNCATE TABLE dbo.OFAC_SPEC_RestrictedCountry;
+
+
+-- ==========================================
+-- 2. 清理通用核心黑名單掃描設定 (Core BlackList Settings)
+-- ==========================================
+-- 刪除通用黑名單待生效設定 (Pending)
 DELETE FROM dbo.BlackList_Setting_Pending
-WHERE list = 'SPEC' 
+WHERE LIST = 'SPEC';
 
+-- 刪除通用黑名單正式生效設定
 DELETE FROM dbo.BlackList_Setting
-WHERE list = 'SPEC'         
-                
+WHERE LIST = 'SPEC';
+
+
+-- ==========================================
+-- 3. 清理境內匯款黑名單掃描設定 (Domestic Wire Settings)
+-- ==========================================
+-- 刪除境內匯款黑名單正式生效設定
 DELETE FROM dbo.DWire_BlackListSetting
-WHERE list = 'SPEC'         
+WHERE List = 'SPEC';
 
+-- 刪除境內匯款黑名單待生效設定 (Pending)
 DELETE FROM dbo.DWire_BlackListSetting_Pending
-WHERE list = 'SPEC'         
+WHERE List = 'SPEC';
 
+
+-- ==========================================
+-- 4. 清理貿易融資黑名單掃描設定 (Trade Finance Settings)
+-- ==========================================
+-- 刪除貿易融資黑名單待生效設定 (Pending)
 DELETE FROM TradeFin_BlackListSetting_Pending
-WHERE list = 'SPEC'         
+WHERE List = 'SPEC';
 
+-- 刪除貿易融資黑名單正式生效設定
 DELETE FROM TradeFin_BlackListSetting
-WHERE list = 'SPEC'         
+WHERE List = 'SPEC';
 
+
+-- ==========================================
+-- 5. 清理 SWIFT MX 電文黑名單掃描設定 (SWIFT MX Message Settings)
+-- ==========================================
+-- 刪除 SWIFT MX 黑名單待生效設定 (Pending)
 DELETE FROM dbo.SWIFTMX_BlackList_Setting_Pending
-WHERE list = 'SPEC' 
+WHERE LIST = 'SPEC';
 
+-- 刪除 SWIFT MX 黑名單正式生效設定
 DELETE FROM dbo.SWIFTMX_BlackList_Setting
-WHERE list = 'SPEC' 
-
-
-
-
-這個也能幫我註解一下?
+WHERE LIST = 'SPEC';
