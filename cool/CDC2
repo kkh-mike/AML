@@ -1,17 +1,45 @@
--- 查最新的 20 筆資料
-SELECT TOP 20
-    ent_num,
-    spec_name          AS IdentificationNumber,
-    remark             AS EntNum,
-    ADDRESS            AS FullAddress,
-    -- 反解出 IdentificationType
-    REPLACE(ADDRESS, '; Please go to Dowjones website for more detail', '') AS IdentificationType,
-    updated_date,
-    DInd,              -- N: 有效, Y: 已停用/軟刪除
-    EnterFlag,
-    ApprovedBy,
-    DelDate,
-    creDate
+可以，但建議只挑選少數幾筆（例如 2~3 筆）來刪除做樣本驗證，千萬不要把整個 GROUPID = 10 的表全清掉，因為如果全清掉，你的 MERGE Script 就**無法測試到 Update（情境 B/C）和 軟刪除（情境 D）**的邏輯。
+你可以按照以下步驟進行精準測試：
+第一步：挑選 2 筆樣本並備份
+先隨機挑 2 筆目前存在的資料，記錄下它們的 key：
+-- 挑選 2 筆現有資料
+SELECT TOP 2 
+    ent_num, spec_name, remark, ADDRESS, updated_date, DInd
+FROM BSADB.dbo.OFAC_GLSpec
+WHERE GROUPID = 10 AND DInd = 'N';
+
+(記下查出來的 remark 和 spec_name)
+第二步：只刪除這 2 筆（製造情境 A：全新新增）
+-- 假設剛才挑到的 remark 是 '12345' 和 '67890'
+DELETE FROM BSADB.dbo.OFAC_GLSpec
+WHERE GROUPID = 10
+  AND remark IN ('12345', '67890');
+
+第三步：重新驗證情境 A 查詢
+這時候再去跑剛才查無資料的情境 A 查詢：
+SELECT TOP 3 'Case A: Insert (全新)' AS TestCase, S.*
+FROM #SrcList S
+LEFT JOIN BSADB.dbo.OFAC_GLSpec T
+  ON T.GROUPID = 10
+ AND T.spec_name = S.IdentificationNumber
+ AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+ AND T.ADDRESS = S.TargetAddress
+WHERE T.spec_name IS NULL
+  AND S.EntNum IN (12345, 67890);
+
+此時就會成功撈出這 2 筆資料。
+第四步：執行你的 MERGE Script 並看 After
+執行完你的原始同步 Script 後，立刻檢查這 2 筆是否被補寫回來且 Log 是否正確：
+-- 1. 檢查 Target 是否補寫成功
+SELECT ent_num, spec_name, remark, updated_date, DInd, creUserID, creDate
 FROM BSADB.dbo.OFAC_GLSpec
 WHERE GROUPID = 10
-ORDER BY creDate DESC;
+  AND remark IN ('12345', '67890');
+
+-- 2. 檢查 Log 表 ActionCD 是否為 '01' (新增)
+SELECT ent_num, spec_name, remark, DInd, ActionCD, ActionDt
+FROM BSADB.dbo.OFAC_GLSpec_Log
+WHERE GROUPID = 10
+  AND remark IN ('12345', '67890')
+ORDER BY ActionDt DESC;
+
