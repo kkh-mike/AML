@@ -1,3 +1,15 @@
-可以簡單寫：
+SELECT * FROM BSADBTW..GM_NotificationMailOutboX WHERE CreatedDate>'2026-07-20 19:45:14.363' AND Status='PENDING   ' --AND Subject LIKE '【AML案件%'
 
-協助東京分行確認 AML Internal List 匯入資料筆數異常問題，並釐清系統匯入及重複資料篩選機制。
+
+
+UPDATE BSADBTW..GM_NotificationMailOutboX 
+SET Status='Completed' 
+WHERE CreatedDate>'2026-07-20 19:45:14.363' AND Status='PENDING   ' AND Subject not LIKE '【AML案件%'
+
+
+
+SELECT * FROM BSADBTW..GM_NotificationMailOutboX WHERE CreatedDate>'2026-07-20 19:45:14.363' AND Status='PENDING   ' --AND Subject LIKE '【AML案件%'
+
+
+
+幫我註解一下
