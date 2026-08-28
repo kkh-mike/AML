@@ -1,48 +1,5 @@
-WITH DeceasedList AS
-(
-    SELECT 
-        A.EntityId, 
-        A.FullName AS SdnName, 
-        MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate,
-        -- 判斷 DJ 的業務分類類型 (PEP / BL / NN)
-        CASE 
-            WHEN MAX(CASE WHEN A.ProfileNotes LIKE '%PEP%' OR A.OccupationTitle LIKE '%PEP%' THEN 1 ELSE 0 END) = 1 THEN 'PEP (政要名單)'
-            WHEN MAX(CASE WHEN A.ProfileNotes LIKE '%Sanction%' THEN 1 ELSE 0 END) = 1 THEN 'BL (黑名單/制裁)'
-            ELSE 'NN / 其他實體'
-        END AS 名單原始類型,
-        '是 (Deceased)' AS 死亡名單標記
-    FROM BSADB.dbo.DJ_Entity A
-    JOIN BSADB.dbo.DJ_SanctionListReference B 
-      ON A.EntityId = B.EntityId
-    WHERE A.Deceased = 1
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-      AND NOT EXISTS (
-          SELECT 1 
-          FROM BSADB.dbo.DJ_List_Data_A X
-          JOIN BSADB.dbo.DJ_SanctionListReference Y 
-            ON X.EntNum = Y.EntityId
-          WHERE X.NamePropertyBitCode & 1 > 0
-            AND Y.SanctionListReference LIKE '%Japanese Finance%'
-            AND X.EntNum = A.EntityId
-      )
-    GROUP BY A.EntityId, A.FullName
-)
-SELECT 
-    D.EntityId,
-    D.SdnName,
-    D.名單原始類型,
-    D.死亡名單標記,
-    D.UpdatedDate AS 來源更新日,
-    T.updated_date AS 目標表現有更新日,
-    T.DInd AS 目標表現有DInd,
-    CASE 
-        WHEN T.spec_name IS NULL THEN '會執行 INSERT (全新寫入)'
-        WHEN T.DInd = 'Y' THEN '會執行 UPDATE (重新啟用)'
-        WHEN D.UpdatedDate <> T.updated_date THEN '會執行 UPDATE (更新異動日與明細)'
-        ELSE '略過 (資料已是最新且啟用中)'
-    END AS 執行SP後的動作
-FROM DeceasedList D
-LEFT JOIN BSADBJP..OFAC_SPEC T 
-       ON T.spec_name = D.SdnName 
-      AND T.remark = CAST(D.EntityId AS VARCHAR(100))
-      AND T.GROUPID = '11';
+訊息 207，層級 16，狀態 1，行 115
+無效的資料行名稱 'OccupationTitle'。
+
+
+我只是要把死亡名單的分類出來
