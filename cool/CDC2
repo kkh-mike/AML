@@ -1,21 +1,93 @@
------------------------------CIF
+USE [BSADBTW]
+GO
 
-truncate table Customer_Migrate_Exception_Table  -- 客戶合併排除與異常名單
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
 
--- 1. SOURCEDB 來源對照表
-DELETE A FROM sourcedbtw..CIF_CVT_Source A    
-JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+ALTER PROCEDURE [dbo].[usp_Rollback_CIF_Module]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
 
--- 2. 核心客戶主檔
-DELETE A FROM BSA_SUB_CUST_FACT A 
-JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+    BEGIN TRY
+        BEGIN TRANSACTION;
 
--- 3. Data Warehouse 客戶事實表
-DELETE A FROM PB_CUSTOMER_FACT A 
-JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+        -- ==========================================
+        -- 1. 清理客戶合併排除與異常暫存表
+        -- ==========================================
+        IF OBJECT_ID('dbo.Customer_Migrate_Exception_Table', 'U') IS NOT NULL
+            TRUNCATE TABLE dbo.Customer_Migrate_Exception_Table;
 
 
-這個也幫我包
+        -- ==========================================
+        -- 2. 清理 SOURCEDB 來源對照表
+        -- ==========================================
+        -- 註：比對 Internal_Cif_Key 或 CIF_KEY 依實際環境欄位對應
+        DELETE A 
+        FROM sourcedbtw..CIF_CVT_Source A
+        INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B 
+            ON A.Internal_Cif_Key = B.NEW_CIF_KEY
+        WHERE B.ACTION = 'INSERT';
+
+
+        -- ==========================================
+        -- 3. 清理核心客戶主檔
+        -- ==========================================
+        DELETE A 
+        FROM dbo.BSA_SUB_CUST_FACT A 
+        INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B 
+            ON A.CIF_KEY = B.NEW_CIF_KEY
+        WHERE B.ACTION = 'INSERT';
+
+
+        -- ==========================================
+        -- 4. 清理 Data Warehouse 客戶事實表
+        -- ==========================================
+        DELETE A 
+        FROM dbo.PB_CUSTOMER_FACT A 
+        INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B 
+            ON A.CIF_KEY = B.NEW_CIF_KEY
+        WHERE B.ACTION = 'INSERT';
+
+
+        -- ==========================================
+        -- 5. 清理 CIF 寫入之產品與帳戶用途設定表 (防護補齊)
+        -- ==========================================
+        IF OBJECT_ID('dbo.PB_CustProdAndServicesUsed', 'U') IS NOT NULL
+            DELETE A 
+            FROM dbo.PB_CustProdAndServicesUsed A 
+            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B 
+                ON A.CIF_KEY = B.NEW_CIF_KEY
+            WHERE B.ACTION = 'INSERT';
+
+        IF OBJECT_ID('dbo.PB_CustPurposeOfAcc', 'U') IS NOT NULL
+            DELETE A 
+            FROM dbo.PB_CustPurposeOfAcc A 
+            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B 
+                ON A.CIF_KEY = B.NEW_CIF_KEY
+            WHERE B.ACTION = 'INSERT';
+
+
+        -- 記錄 Rollback 成功日誌
+        IF OBJECT_ID('dbo.Migrator_LOG', 'U') IS NOT NULL
+            INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG)
+            SELECT GETDATE(), 'CIF module rollback completed -------> ', 'N';
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+
+        -- 記錄 Rollback 失敗日誌並拋出錯誤
+        IF OBJECT_ID('dbo.Migrator_LOG', 'U') IS NOT NULL
+            INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG)
+            SELECT GETDATE(), 'CIF module rollback FAILED: ' + ERROR_MESSAGE(), 'Y';
+
+        THROW;
+    END CATCH;
+END
+GO
