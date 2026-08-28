@@ -1,506 +1,1207 @@
-           IF @ModuleName = 'CUST_NP'
-                            BEGIN
-                                IF OBJECT_ID(N'tempdb..#AffectedCif', 'U') IS NOT NULL
-                                    DROP TABLE #AffectedCif;
+             IF @ModuleName = 'RP_NP'
+                                BEGIN
+              -- Direct Insert For New CIF
+              -- APP             
+                                    MERGE dbo.PB_Appointer_Fact T
+                                    USING
+                                        ( SELECT    A.RefNo ,
+                                                    B.NEW_CIF_KEY ,
+                                                    ISNULL(
+														MAX(A.PEPBitwiseCode & 1)
+													  | MAX(A.PEPBitwiseCode & 2)
+													  | MAX(A.PEPBitwiseCode & 4)
+													  | MAX(A.PEPBitwiseCode & 8)
+													  | MAX(A.PEPBitwiseCode & 16)
+													  | MAX(A.PEPBitwiseCode & 32)
+													  | MAX(A.PEPBitwiseCode & 64)
+													  | MAX(A.PEPBitwiseCode & 128)
+													  | MAX(A.PEPBitwiseCode & 256), 0
+													) AS PEPBitwiseCode,
+                                                    MIN(CAST(A.IsDeleted AS INT)) AS IsDeleted
+                                          FROM      dbo.RP_NP_Migrate_buffer A
+                                                    INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIFKey = B.SOURCE_CIF_KEY
+                                          WHERE     A.RP = 'APP'
+                                          GROUP BY B.NEW_CIF_KEY, A.RefNo
+                                        ) S
+                                    ON ( T.CIFKey = S.NEW_CIF_KEY
+                                         AND T.RefNo = S.RefNo
+                                       )
+                                    WHEN MATCHED THEN
+                                        UPDATE SET T.PEPBitwiseCode = ISNULL(T.PEPBitwiseCode,0) | S.PEPBitwiseCode
+                                    WHEN NOT MATCHED BY TARGET THEN
+                                        INSERT ( RefNo ,
+                                                 CIFKey ,
+                                                 PEPBitwiseCode ,
+                                                 CreatedBy ,
+                                                 CreatedDt ,
+                                                 CreatedDt_UTC ,
+                                                 LastUpdatedBy ,
+                                                 LastUpdatedDt ,
+                                                 LastUpdatedDt_UTC ,
+                                                 IsDeleted
+                                               )
+                                        VALUES ( S.RefNo ,
+                                                 S.NEW_CIF_KEY ,
+                                                 S.PEPBitwiseCode ,
+                                                 @UserId ,
+                                                 @Date ,
+                                                 @DateUTC ,
+                                                 @UserId ,
+                                                 @Date ,
+                                                 @DateUTC ,
+                                                 S.isDeleted
+                                               );
 
-                                CREATE TABLE #AffectedCif
-                                    (
-                                      CIF_KEY UNIQUEIDENTIFIER ,
-                                      IsComplexStructure_Before CHAR(1) NULL ,
-                                      IsComplexStructure_After CHAR(1) NULL ,
-                                      IsBearerShares_Before CHAR(1) NULL ,
-                                      IsBearerShares_After CHAR(1) NULL ,
-                                      PEPBitwiseCode_Before INT NULL ,
-                                      PEPBitwiseCode_After INT NULL ,
-                                      Warn_Restrict_Account_Before CHAR(1) NULL ,
-                                      Warn_Restrict_Account_After CHAR(1) NULL ,
-                                      SDST2400001_Before NVARCHAR(MAX) NULL ,
-                                      SDST2400001_After NVARCHAR(MAX) NULL
-                                    );
+              -- BOD
+                                    MERGE dbo.PB_BoardOfDirector_Fact T
+                                    USING
+                                        ( SELECT    A.RefNo ,
+                                                    B.NEW_CIF_KEY ,
+                                                    ISNULL(
+														MAX(A.PEPBitwiseCode & 1)
+													  | MAX(A.PEPBitwiseCode & 2)
+													  | MAX(A.PEPBitwiseCode & 4)
+													  | MAX(A.PEPBitwiseCode & 8)
+													  | MAX(A.PEPBitwiseCode & 16)
+													  | MAX(A.PEPBitwiseCode & 32)
+													  | MAX(A.PEPBitwiseCode & 64)
+													  | MAX(A.PEPBitwiseCode & 128)
+													  | MAX(A.PEPBitwiseCode & 256), 0
+													) AS PEPBitwiseCode,
+                                                    MIN(CAST(A.IsDeleted AS INT)) AS IsDeleted
+                                         FROM      dbo.RP_NP_Migrate_buffer A
+                                                    INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIFKey = B.SOURCE_CIF_KEY
+                                          WHERE     A.RP = 'BOD'
+                                          GROUP BY B.NEW_CIF_KEY, A.RefNo
+                                        ) S
+                                    ON ( T.CIFKey = S.NEW_CIF_KEY
+                                         AND T.RefNo = S.RefNo
+                                       )
+                                    WHEN MATCHED THEN
+                                        UPDATE SET T.PEPBitwiseCode = ISNULL(T.PEPBitwiseCode,0) | S.PEPBitwiseCode
+                                    WHEN NOT MATCHED BY TARGET THEN
+                                        INSERT ( RefNo ,
+                                                 CIFKey ,
+                                                 PEPBitwiseCode ,
+                                                 CreatedBy ,
+                                                 CreatedDt ,
+                                                 CreatedDt_UTC ,
+                                                 LastUpdatedBy ,
+                                                 LastUpdatedDt ,
+                                                 LastUpdatedDt_UTC ,
+                                                 IsDeleted
+                                               )
+                                        VALUES ( S.RefNo ,
+                                                 S.NEW_CIF_KEY ,
+                                                 S.PEPBitwiseCode ,
+                                                 @UserId ,
+                                                 @Date ,
+                                                 @DateUTC ,
+                                                 @UserId ,
+                                                 @Date ,
+                                                 @DateUTC ,
+                                                 S.IsDeleted
+                                               );
 
-              -- CIPT1300004, CIPT1700061 - IsComplexStructure, Warn_Restrict_Account, RiskLevel, RiskScore
-                                ;WITH AggNP AS (
-                                    SELECT
-                                        M.NEW_CIF_KEY,                                                                    
-                                        CASE MAX(CASE S.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END)
-                                            WHEN 3 THEN 'H' WHEN 2 THEN 'M' WHEN 1 THEN 'L' ELSE NULL
-                                        END AS HIGHRISK,                                        
-                                        MAX(CASE S.HIGHRISK
-                                                WHEN 'H' THEN S.RiskScore
-                                                WHEN 'M' THEN S.RiskScore
-                                                WHEN 'L' THEN S.RiskScore
-                                                ELSE NULL END) AS RiskScore,
-                                        MAX(CAST(S.IsSARFiled AS INT)) AS IsSARFiled,
-                                        CASE WHEN MAX(CAST(S.IsComplexStructure AS INT)) = 1 THEN 1
-                                             WHEN MAX(CAST(S.IsComplexStructure AS INT)) IS NULL THEN NULL
-                                             ELSE 0 END AS IsComplexStructure,
-                                        CASE WHEN MAX(CAST(S.Warn_Restrict_Account AS INT)) = 1 THEN 'Y'
-                                             WHEN MAX(CAST(S.Warn_Restrict_Account AS INT)) IS NULL THEN NULL
-                                             ELSE 'N' END AS Warn_Restrict_Account
-                                    FROM dbo.CIF_Migrate_Mapping_TEMP M
-                                    JOIN dbo.Cust_NP_Migrate_buffer   S ON S.CIF_KEY = M.SOURCE_CIF_KEY
-                                    GROUP BY M.NEW_CIF_KEY
-                                )
-                                UPDATE  T
-                                SET     T.IsSARFiled = CASE
-                                   WHEN T.IsSARFiled = 1 OR A.IsSARFiled = 1 THEN 1
-                                   WHEN T.IsSARFiled IS NULL AND A.IsSARFiled IS NULL THEN NULL
-                                   ELSE 0
-                               END ,
-                       -- HighRisk ��� highest wins
-                                        T.HIGHRISK = CASE
-                                             WHEN CASE A.HIGHRISK
-                                                      WHEN 'L' THEN 1
-                                                      WHEN 'M' THEN 2
-                                                      WHEN 'H' THEN 3
-                                                      ELSE 0
-                                                  END > CASE T.HIGHRISK
-                                                           WHEN 'L' THEN 1
-                                                           WHEN 'M' THEN 2
-                                                           WHEN 'H' THEN 3
-                                                           ELSE 0
-                                                       END
-                                             THEN A.HIGHRISK
-                                             ELSE T.HIGHRISK
-                                         END ,
-                       -- RiskScore ��� follow chosen HighRisk
-                                        T.RiskScore = CASE
-                                            WHEN CASE A.HIGHRISK WHEN 'L' THEN 1 WHEN 'M' THEN 2 WHEN 'H' THEN 3 ELSE 0 END
-                                               > CASE T.HIGHRISK WHEN 'L' THEN 1 WHEN 'M' THEN 2 WHEN 'H' THEN 3 ELSE 0 END
-                                            THEN A.RiskScore   
-                                            WHEN CASE A.HIGHRISK WHEN 'L' THEN 1 WHEN 'M' THEN 2 WHEN 'H' THEN 3 ELSE 0 END
-                                               = CASE T.HIGHRISK WHEN 'L' THEN 1 WHEN 'M' THEN 2 WHEN 'H' THEN 3 ELSE 0 END
-                                            THEN CASE WHEN ISNULL(A.RiskScore, 0) > ISNULL(T.RiskScore, 0) 
-                                                      THEN A.RiskScore
-                                                      ELSE T.RiskScore
-                                                 END
-                                            ELSE T.RiskScore   
-                                        END ,
-                       -- IsComplexStructure ��� fill if NULL
-                                        T.IsComplexStructure = CASE
-                                                                   WHEN T.IsComplexStructure = 1 OR A.IsComplexStructure = 1 THEN 1
-                                                                   WHEN T.IsComplexStructure IS NULL AND A.IsComplexStructure IS NULL THEN NULL
-                                                                   ELSE 0
-                                                               END ,
-                                        T.Warn_Restrict_Account = CASE
-                                                                      WHEN T.Warn_Restrict_Account = 'Y' OR A.Warn_Restrict_Account = 'Y' THEN 'Y'
-                                                                      WHEN T.Warn_Restrict_Account IS NULL AND A.Warn_Restrict_Account IS NULL THEN NULL
-                                                                      ELSE 'N'
-                                                                  END
-                                OUTPUT  Inserted.CIF_KEY ,
-                                        Deleted.IsComplexStructure ,
-                                        Inserted.IsComplexStructure ,
-                                        Deleted.Warn_Restrict_Account ,
-                                        Inserted.Warn_Restrict_Account
-                                        INTO #AffectedCif ( CIF_KEY,
-                                                            IsComplexStructure_Before,
-                                                            IsComplexStructure_After,
-                                                            Warn_Restrict_Account_Before,
-                                                            Warn_Restrict_Account_After )
-                                FROM    dbo.BSA_SUB_CUST_FACT T
-                                        JOIN    AggNP A ON T.CIF_KEY = A.NEW_CIF_KEY;
-                                
-              -- CIPT1600002 - IsBearerShares, NameProperties
-                                MERGE dbo.BSA_SUB_CUST_FACT_Extension T
-                                USING
-                                    ( SELECT    M.NEW_CIF_KEY ,
-                                                CASE WHEN MAX(CAST(S.IsBearerShares AS INT)) = 1    THEN 1
-                                                     WHEN MAX(CAST(S.IsBearerShares AS INT)) IS NULL THEN NULL
-                                                     ELSE 0 END AS IsBearerShares,
-                                                ISNULL(
-														MAX(S.PEPBitwiseCode & 1)
-													  | MAX(S.PEPBitwiseCode & 2)
-													  | MAX(S.PEPBitwiseCode & 4)
-													  | MAX(S.PEPBitwiseCode & 8)
-													  | MAX(S.PEPBitwiseCode & 16)
-													  | MAX(S.PEPBitwiseCode & 32)
-													  | MAX(S.PEPBitwiseCode & 64)
-													  | MAX(S.PEPBitwiseCode & 128)
-													  | MAX(S.PEPBitwiseCode & 256), 0
-													) AS PEPBitwiseCode
-                                      FROM      dbo.CIF_Migrate_Mapping_TEMP M
-                                                JOIN dbo.Cust_NP_Migrate_buffer S ON S.CIF_KEY = M.SOURCE_CIF_KEY
-                                      GROUP BY  M.NEW_CIF_KEY
-                                    ) S
-                                ON ( T.CIF_KEY = S.NEW_CIF_KEY )
-                                WHEN MATCHED THEN
-                                    UPDATE SET
-                                             T.IsBearerShares = CASE 
-																	WHEN T.IsBearerShares = 1 OR S.IsBearerShares = 1 THEN 1
-																	WHEN T.IsBearerShares IS NULL AND S.IsBearerShares IS NULL THEN NULL
-																	ELSE 0
-																END ,
-                                             T.PEPBitwiseCode = ISNULL(T.PEPBitwiseCode,0) | S.PEPBitwiseCode
-                                WHEN NOT MATCHED BY TARGET THEN
-                                    INSERT ( CIF_KEY ,
-                                             IsBearerShares ,
-                                             PEPBitwiseCode
-                                           )
-                                    VALUES ( S.NEW_CIF_KEY ,
-                                             S.IsBearerShares ,
-                                             S.PEPBitwiseCode
-                                           )
-                                OUTPUT
-                                    Inserted.CIF_KEY ,
-                                    Deleted.IsBearerShares ,
-                                    Inserted.IsBearerShares ,
-                                    Deleted.PEPBitwiseCode ,
-                                    Inserted.PEPBitwiseCode
-                                    INTO #AffectedCif ( CIF_KEY,
-                                                        IsBearerShares_Before,
-                                                        IsBearerShares_After,
-                                                        PEPBitwiseCode_Before,
-                                                        PEPBitwiseCode_After );
+              -- LA
+                                    MERGE dbo.PB_LegalAgent_Fact T
+                                    USING
+                                        ( SELECT    A.RefNo ,
+                                                    B.NEW_CIF_KEY ,
+                                                    ISNULL(
+														MAX(A.PEPBitwiseCode & 1)
+													  | MAX(A.PEPBitwiseCode & 2)
+													  | MAX(A.PEPBitwiseCode & 4)
+													  | MAX(A.PEPBitwiseCode & 8)
+													  | MAX(A.PEPBitwiseCode & 16)
+													  | MAX(A.PEPBitwiseCode & 32)
+													  | MAX(A.PEPBitwiseCode & 64)
+													  | MAX(A.PEPBitwiseCode & 128)
+													  | MAX(A.PEPBitwiseCode & 256), 0
+													) AS PEPBitwiseCode,
+                                                    MIN(CAST(A.IsDeleted AS INT)) AS IsDeleted
+                                          FROM      dbo.RP_NP_Migrate_buffer A
+                                                    INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIFKey = B.SOURCE_CIF_KEY
+                                          WHERE     A.RP = 'LA'
+                                          GROUP BY B.NEW_CIF_KEY, A.RefNo
+                                        ) S
+                                    ON ( T.CIFKey = S.NEW_CIF_KEY
+                                         AND T.RefNo = S.RefNo
+                                       )
+                                    WHEN MATCHED THEN
+                                        UPDATE SET T.PEPBitwiseCode = ISNULL(T.PEPBitwiseCode,0) | S.PEPBitwiseCode
+                                    WHEN NOT MATCHED BY TARGET THEN
+                                        INSERT ( RefNo ,
+                                                 CIFKey ,
+                                                 PEPBitwiseCode ,
+                                                 CreatedBy ,
+                                                 CreatedDt ,
+                                                 CreatedDt_UTC ,
+                                                 LastUpdatedBy ,
+                                                 LastUpdatedDt ,
+                                                 LastUpdatedDt_UTC ,
+                                                 IsDeleted
+                                               )
+                                        VALUES ( S.RefNo ,
+                                                 S.NEW_CIF_KEY ,
+                                                 S.PEPBitwiseCode ,
+                                                 @UserId ,
+                                                 @Date ,
+                                                 @DateUTC ,
+                                                 @UserId ,
+                                                 @Date ,
+                                                 @DateUTC ,
+                                                 S.isDeleted
+                                               );
 
-              -- SDST2400001 (dropdownlist)
-                                DECLARE @SDSTemplateId NVARCHAR(100);
-                                SELECT  @SDSTemplateId = ID
-                                FROM    dbo.CIP_TEMPLATE_DIM
-                                WHERE   QueryId = 'SDST2400001';
+              -- MC
+                                    MERGE dbo.PB_MainClient_Fact T
+                                    USING
+                                        ( SELECT    A.RefNo ,
+                                                    B.NEW_CIF_KEY ,
+                                                    ISNULL(
+														MAX(A.PEPBitwiseCode & 1)
+													  | MAX(A.PEPBitwiseCode & 2)
+													  | MAX(A.PEPBitwiseCode & 4)
+													  | MAX(A.PEPBitwiseCode & 8)
+													  | MAX(A.PEPBitwiseCode & 16)
+													  | MAX(A.PEPBitwiseCode & 32)
+													  | MAX(A.PEPBitwiseCode & 64)
+													  | MAX(A.PEPBitwiseCode & 128)
+													  | MAX(A.PEPBitwiseCode & 256), 0
+													) AS PEPBitwiseCode,
+                                                    MIN(CAST(A.IsDeleted AS INT)) AS IsDeleted
+                                          FROM      dbo.RP_NP_Migrate_buffer A
+                                                    INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIFKey = B.SOURCE_CIF_KEY
+                                          WHERE     A.RP = 'MC'
+                                          GROUP BY B.NEW_CIF_KEY, A.RefNo
+                                        ) S
+                                    ON ( T.CIFKey = S.NEW_CIF_KEY
+                                         AND T.RefNo = S.RefNo
+                                       )
+                                    WHEN MATCHED THEN
+                                        UPDATE SET T.PEPBitwiseCode = ISNULL(T.PEPBitwiseCode,0) | S.PEPBitwiseCode
+                                    WHEN NOT MATCHED BY TARGET THEN
+                                        INSERT ( RefNo ,
+                                                 CIFKey ,
+                                                 PEPBitwiseCode ,
+                                                 CreatedBy ,
+                                                 CreatedDt ,
+                                                 CreatedDt_UTC ,
+                                                 LastUpdatedBy ,
+                                                 LastUpdatedDt ,
+                                                 LastUpdatedDt_UTC ,
+                                                 IsDeleted
+                                               )
+                                        VALUES ( S.RefNo ,
+                                                 S.NEW_CIF_KEY ,
+                                                 S.PEPBitwiseCode ,
+                                                 @UserId ,
+                                                 @Date ,
+                                                 @DateUTC ,
+                                                 @UserId ,
+                                                 @Date ,
+                                                 @DateUTC ,
+                                                 S.isDeleted
+                                               );
 
-                                MERGE dbo.PB_CustomerOptionalAnswers T
-                                USING
-                                    ( SELECT    M.New_CIF_KEY AS CIF_KEY,
-                                                MAX(CAST(S.SDST2400001 AS INT)) AS SDST2400001
-                                      FROM      dbo.CIF_Migrate_Mapping_TEMP M
-                                                JOIN dbo.Cust_NP_Migrate_buffer S ON S.CIF_KEY = M.SOURCE_CIF_KEY
-                                      WHERE     ISNULL(SDST2400001, '') <> ''
-                                      GROUP BY  M.NEW_CIF_KEY
-                                    ) S
-                                ON ( T.CifKey = S.CIF_KEY
-                                     AND T.CIPTemplateId = @SDSTemplateId
-                                   )
-                                WHEN MATCHED THEN
-                                    UPDATE SET
-                                             T.AnswerCode = S.SDST2400001
-                                WHEN NOT MATCHED BY TARGET THEN
-                                    INSERT ( CifKey ,
-                                             HRSTemplateId ,
-                                             AnswerCode ,
-                                             Remarks ,
-                                             CIPTemplateId
-                                           )
-                                    VALUES ( S.CIF_KEY ,
-                                             @SDSTemplateId ,
-                                             S.SDST2400001 ,
-                                             'Data Migration' ,
-                                             @SDSTemplateId
-                                           ) --ask what remark they wanted to mark as
-                                OUTPUT
-                                    Inserted.CifKey ,
-                                    Deleted.AnswerCode ,
-                                    Inserted.AnswerCode
-                                    INTO #AffectedCif ( CIF_KEY,
-                                                        SDST2400001_Before,
-                                                        SDST2400001_After ); 
+              -- MS
+                                    MERGE dbo.PB_MainShareHolder_Fact T
+                                    USING
+                                        ( SELECT    A.RefNo ,
+                                                    B.NEW_CIF_KEY ,
+                                                    ISNULL(
+														MAX(A.PEPBitwiseCode & 1)
+													  | MAX(A.PEPBitwiseCode & 2)
+													  | MAX(A.PEPBitwiseCode & 4)
+													  | MAX(A.PEPBitwiseCode & 8)
+													  | MAX(A.PEPBitwiseCode & 16)
+													  | MAX(A.PEPBitwiseCode & 32)
+													  | MAX(A.PEPBitwiseCode & 64)
+													  | MAX(A.PEPBitwiseCode & 128)
+													  | MAX(A.PEPBitwiseCode & 256), 0
+													) AS PEPBitwiseCode,
+                                                    MIN(CAST(A.IsDeleted AS INT)) AS IsDeleted
+                                          FROM      dbo.RP_NP_Migrate_buffer A
+                                                    INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIFKey = B.SOURCE_CIF_KEY
+                                          WHERE     A.RP = 'MS'
+                                          GROUP BY B.NEW_CIF_KEY, A.RefNo
+                                        ) S
+                                    ON ( T.CIFKey = S.NEW_CIF_KEY
+                                         AND T.RefNo = S.RefNo
+                                       )
+                                    WHEN MATCHED THEN
+                                        UPDATE SET T.PEPBitwiseCode = ISNULL(T.PEPBitwiseCode,0) | S.PEPBitwiseCode
+                                    WHEN NOT MATCHED BY TARGET THEN
+                                        INSERT ( RefNo ,
+                                                 CIFKey ,
+                                                 PEPBitwiseCode ,
+                                                 CreatedBy ,
+                                                 CreatedDt ,
+                                                 CreatedDt_UTC ,
+                                                 LastUpdatedBy ,
+                                                 LastUpdatedDt ,
+                                                 LastUpdatedDt_UTC ,
+                                                 IsDeleted
+                                               )
+                                        VALUES ( S.RefNo ,
+                                                 S.NEW_CIF_KEY ,
+                                                 S.PEPBitwiseCode ,
+                                                 @UserId ,
+                                                 @Date ,
+                                                 @DateUTC ,
+                                                 @UserId ,
+                                                 @Date ,
+                                                 @DateUTC ,
+                                                 S.isDeleted
+                                               );
               
-              -- Review Date
-              -- Insert for new CIF                                
-                                INSERT  INTO dbo.EDD_ReviewSchedule
-                                        ( CIFKey ,
-                                          ReviewDt ,
-                                          Status
-                                        )
-                                        SELECT  M.NEW_CIF_KEY ,
-                                                MIN(S.ReviewDt) ,  
-                                                'P'
-                                        FROM    dbo.CIF_Migrate_Mapping_TEMP M
-                                                JOIN dbo.Cust_NP_Migrate_buffer S ON S.CIF_KEY = M.SOURCE_CIF_KEY
-                                        WHERE   S.ReviewDt IS NOT NULL
-                                                AND NOT EXISTS ( SELECT 1
-                                                                 FROM   dbo.EDD_ReviewSchedule Z
-                                                                 WHERE  Z.CIFKey = M.NEW_CIF_KEY
-                                                                        AND Z.Status = 'P' )
-                                        GROUP BY M.NEW_CIF_KEY;  
+              -- OTH
+                                    MERGE dbo.PB_OtherRelatedParty_Fact T
+                                    USING
+                                        ( SELECT    A.RefNo ,
+                                                    B.NEW_CIF_KEY ,
+                                                    ISNULL(
+														MAX(A.PEPBitwiseCode & 1)
+													  | MAX(A.PEPBitwiseCode & 2)
+													  | MAX(A.PEPBitwiseCode & 4)
+													  | MAX(A.PEPBitwiseCode & 8)
+													  | MAX(A.PEPBitwiseCode & 16)
+													  | MAX(A.PEPBitwiseCode & 32)
+													  | MAX(A.PEPBitwiseCode & 64)
+													  | MAX(A.PEPBitwiseCode & 128)
+													  | MAX(A.PEPBitwiseCode & 256), 0
+													) AS PEPBitwiseCode,
+                                                    MIN(CAST(A.IsDeleted AS INT)) AS IsDeleted
+                                          FROM      dbo.RP_NP_Migrate_buffer A
+                                                    INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIFKey = B.SOURCE_CIF_KEY
+                                          WHERE     A.RP = 'OTH'
+                                          GROUP BY B.NEW_CIF_KEY, A.RefNo
+                                        ) S
+                                    ON ( T.CIFKey = S.NEW_CIF_KEY
+                                         AND T.RefNo = S.RefNo
+                                       )
+                                    WHEN MATCHED THEN
+                                        UPDATE SET T.PEPBitwiseCode = ISNULL(T.PEPBitwiseCode,0) | S.PEPBitwiseCode
+                                    WHEN NOT MATCHED BY TARGET THEN
+                                        INSERT ( RefNo ,
+                                                 CIFKey ,
+                                                 PEPBitwiseCode ,
+                                                 CreatedBy ,
+                                                 CreatedDt ,
+                                                 CreatedDt_UTC ,
+                                                 LastUpdatedBy ,
+                                                 LastUpdatedDt ,
+                                                 LastUpdatedDt_UTC ,
+                                                 IsDeleted
+                                               )
+                                        VALUES ( S.RefNo ,
+                                                 S.NEW_CIF_KEY ,
+                                                 S.PEPBitwiseCode ,
+                                                 @UserId ,
+                                                 @Date ,
+                                                 @DateUTC ,
+                                                 @UserId ,
+                                                 @Date ,
+                                                 @DateUTC ,
+                                                 S.isDeleted
+                                               );
 
-              -- Update for existing CIF
-                                IF OBJECT_ID(N'tempdb..#AffectedNextReview',
-                                             'U') IS NOT NULL
-                                    DROP TABLE #AffectedNextReview;
+              --OTH SubTypeCodes
+                                    MERGE dbo.PB_OtherRelatedParty_SubTypeCodes T
+                                    USING
+                                        ( SELECT    F.Value SubTypeCodes ,
+                                                    A.RefNo ,
+                                                    B.NEW_CIF_KEY,
+                                                    MIN(CAST(A.IsDeleted AS INT)) AS IsDeleted
+                                          FROM      dbo.RP_NP_Migrate_buffer A
+                                                    INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIFKey = B.SOURCE_CIF_KEY
+                                                    CROSS APPLY dbo.fnStringSplitter(A.RelatedPartyType,
+                                                              '|') F
+                                          WHERE     A.RP = 'OTH'
+                                                    AND ISNULL(A.RelatedPartyType,
+                                                              '') <> ''
+                                          GROUP BY B.NEW_CIF_KEY, A.RefNo, F.Value
+                                        ) S
+                                    ON ( T.CifKey = S.NEW_CIF_KEY
+                                         AND T.ReferenceNo = S.RefNo
+                                         AND T.SubTypeCodes = S.SubTypeCodes
+                                       )
+                                    WHEN NOT MATCHED BY TARGET THEN
+                                        INSERT ( CifKey ,
+                                                 ReferenceNo ,
+                                                 SubTypeCodes ,
+                                                 IsDeleted
+                                               )
+                                        VALUES ( S.NEW_CIF_KEY ,
+                                                 S.RefNo ,
+                                                 S.SubTypeCodes ,
+                                                 S.isDeleted
+                                               );
 
-                                CREATE TABLE #AffectedNextReview
-                                    (
-                                      CIF_KEY UNIQUEIDENTIFIER ,
-                                      ReviewDt DATETIME
-                                    );
 
-                                INSERT  INTO #AffectedNextReview
-                                        ( CIF_KEY ,
-                                          ReviewDt
-                                        )
-                                        SELECT  R.CIFKey ,
-                                                S.ReviewDt
-                                        FROM    dbo.EDD_ReviewSchedule R
-                                                JOIN dbo.CIF_Migrate_Mapping_TEMP M ON R.CIFKey = M.NEW_CIF_KEY
-                                                JOIN dbo.Cust_NP_Migrate_buffer S ON S.CIF_KEY = M.SOURCE_CIF_KEY
-                                                JOIN dbo.BSA_SUB_CUST_FACT T ON T.CIF_KEY = M.NEW_CIF_KEY
-                                        WHERE   R.Status = 'P'
-                                                AND CASE S.HIGHRISK
-                                                      WHEN 'L' THEN 1
-                                                      WHEN 'M' THEN 2
-                                                      WHEN 'H' THEN 3
-                                                      ELSE 0
-                                                    END > CASE T.HIGHRISK
-                                                            WHEN 'L' THEN 1
-                                                            WHEN 'M' THEN 2
-                                                            WHEN 'H' THEN 3
-                                                            ELSE 0
-                                                          END
-                                                AND S.ReviewDt < R.ReviewDt;
-
-                                UPDATE  A
-                                SET     A.Status = 'L' ,
-                                        A.LastUpdatedBy = @UserId ,
-                                        A.LastUpdatedDt = @Date ,
-                                        A.LastupdatedUTCDt = @DateUTC ,
-                                        A.ReviewDescription = 'Data Migration' --ask what remark they wanted to mark as
-                                FROM    dbo.EDD_ReviewSchedule A
-                                        INNER JOIN #AffectedNextReview B ON B.CIF_KEY = A.CIFKey
-                                WHERE   A.Status = 'P';
-
-                                INSERT  INTO dbo.EDD_ReviewSchedule
-                                        ( CIFKey ,
-                                          ReviewDt ,
-                                          Status ,
-                                          CreatedBy ,
-                                          CreatedDt ,
-                                          CreatedUTCDt ,
-                                          ReviewDescription
-                                        )
-                                        SELECT  CIF_KEY ,
-                                                ReviewDt ,
-                                                'P' ,
-                                                @UserId ,
-                                                @Date ,
-                                                @DateUTC ,
-                                                'Data Migration' --ask what remark they wanted to mark as
-                                        FROM    #AffectedNextReview;     
-
-              -- Sync data to CIP pending case
-                  --Remove cif without changes
-                                DELETE  FROM #AffectedCif
-                                WHERE   ISNULL(IsComplexStructure_Before, '') = ISNULL(IsComplexStructure_After,
+                                         INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG) 
+                                         SELECT @Time, @ModuleName + ' migrate completed -------> '  , 'N';
+                                END;
+        
+                            ELSE
+                                IF @ModuleName = 'SPEC'
+                                    BEGIN        
+                                        DECLARE @tempTable TABLE
+                                            (
+                                              [ID] [INT] NOT NULL ,
+                                              [MODULE] [NVARCHAR](50) NULL ,
+                                              [TBLNAME] [NVARCHAR](100) NULL ,
+                                              [LIST] [NVARCHAR](50) NULL ,
+                                              [LIST_ID] [NVARCHAR](50) NULL ,
+                                              [ALT_STR] [INT] NULL ,
+                                              [SHORTNAME_LEN] [INT] NULL ,
+                                              [FLAG] [CHAR](1) NULL ,
+                                              [DEL_IND] [CHAR](1) NULL ,
+                                              [Show_Flag] [CHAR](1) NULL ,
+                                              [ChineseCommercialCodeEnabled]
+                                                [BIT] ,
+                                              [Unicode_SHORTNAME_LEN] [INT]
+                                                NULL
+                                            );
+              
+                                        DECLARE @ShortName_Len INT = 0 ,
+                                            @ALT_STR INT = 7 ,
+                                            @Unicode_SHORTNAME_LEN INT = 0 ,
+                                            @CurrentSettingId INT ,
+                                            @NewSettingId INT;                  
+              
+                                        TRUNCATE TABLE lowrisklistgroups_Migrate_Mapping_TEMP;
+                                           WITH    NewIds
+                                                      AS ( SELECT
+                                                              A.GROUPID AS OldGroupId ,
+                                                              ROW_NUMBER() OVER ( ORDER BY A.GROUPID ) AS RowNum ,
+                                                              A.SpecType
+                                                           FROM
+                                                              dbo.lowrisklistgroups_Migrate_buffer A
+                                                         )
+                                            INSERT  INTO lowrisklistgroups_Migrate_Mapping_TEMP
+                                                    SELECT  OldGroupId ,
+                                                            RowNum
+                                                            + ISNULL(( SELECT
+                                                              MAX(GROUPID)
+                                                              FROM
+                                                              dbo.lowrisklistgroups
+                                                              ), 0) AS NewGroupId ,
+                                                            NewIds.SpecType
+                                                    FROM    NewIds;            
+              
+                                        INSERT  INTO dbo.lowrisklistgroups
+                                                ( GROUPID ,
+                                                  BANKNO ,
+                                                  GROUPDESCR ,
+                                                  SOURCE ,
+                                                  CreatedBy ,
+                                                  Created_Date ,
+                                                  LowRiskListGroup ,
+                                                 Created_Date_UTC ,
+                                                  CycleDate ,
+                                                  SpecType ,
+                                                  NamePropertyBitCode ,
+                                                  NameCategoryBitCode ,
+                                                  DInd ,
+                                                  DelUserID ,
+                                                  DelDate ,
+                                                  DelDate_UTC ,
+                                                  ApprovedDelUserID ,
+                                                  ApprovedDelDate ,
+                                                  ApprovedDelDate_UTC
+                                                )
+                                                SELECT  B.NewGroupID ,
+                                                        A.BANKNO ,
+                                                        CONCAT(ISNULL(@Prefix,
+                                                              ''),
+                                                              A.GROUPDESCR) GROUPDESCR ,
+                                                        A.SOURCE ,
+                                                        CASE WHEN ISNULL(A.CreatedBy,'') <> '' THEN @UserId ELSE '' END ,
+                                                        TRY_CONVERT(DATETIME, A.Created_Date, 120) ,
+                                                        A.LowRiskListGroup ,
+                                                        TRY_CONVERT(DATETIME, A.Created_Date_UTC, 120) ,
+                                                        A.CycleDate ,
+                                                        A.SpecType ,
+                                                        A.NamePropertyBitCode ,
+                                                        A.NameCategoryBitCode ,
+                                                        A.DInd ,
+                                                        CASE WHEN ISNULL(A.DelUserID,'') <> '' THEN @UserId ELSE '' END ,
+                                                        A.DelDate ,
+                                                        A.DelDate_UTC ,
+                                                        CASE WHEN ISNULL(A.ApprovedDelUserID,'') <> '' THEN @UserId ELSE '' END ,
+                                                        A.ApprovedDelDate ,
+                                                        A.ApprovedDelDate_UTC
+                                                FROM    dbo.lowrisklistgroups_Migrate_buffer A
+                                                        LEFT JOIN lowrisklistgroups_Migrate_Mapping_TEMP B ON A.GROUPID = B.OldGroupID
+                                                WHERE   NOT EXISTS ( SELECT
+                                                              1
+                                                              FROM
+                                                              dbo.lowrisklistgroups Z
+                                                              WHERE
+                                                              Z.GROUPID = B.NewGroupID );
+              
+                                        IF EXISTS ( SELECT  1
+                                                    FROM    dbo.lowrisklistgroups
+                                                            WITH ( NOLOCK )
+                                                    WHERE   GROUPID IN (
+                                                            SELECT
+                                                              NewGroupID
+                                                            FROM
+                                                              lowrisklistgroups_Migrate_Mapping_TEMP ) )
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.BlackList_Setting
+                                                              WITH ( NOLOCK )
+                                                             WHERE
+                                                              LIST = 'SPEC'
+                                                              AND LIST_ID IN (
+                                                              SELECT
+                                                              NewGroupID
+                                                              FROM
+                                                              lowrisklistgroups_Migrate_Mapping_TEMP ) )
+                                            INSERT  INTO dbo.OFAC_SPEC
+                                                    ( spec_name ,
+                                                      updated_date ,
+                                                      remark ,
+                                                      TaxID ,
+                                                      IDENT ,
+                                                      IDENTO ,
+                                                      TaxIDCD ,
+                                                      IDNUM ,
+                                                      IssBy ,
+                                                      DInd ,
+                                                      creUserID ,
+                                                      STATE ,
+                                                      ADDRESS ,
+                                                      COUNTRY ,
+                                                      GROUPID ,
+                                                      SOURCE ,
+                                                      EnterFlag ,
+                                                      ApprovedBy ,
+                                                      ApprovedDate ,
+                                                      DelUserID ,
+                                                      DelDate ,
+                                                      ApproveDelUserID ,
+                                                      ApproveDelDate ,
+                                                      creDate ,
+                                                      updated_date_UTC ,
+                                                      ApprovedDate_UTC ,
+                                                      DelDate_UTC ,
+                                                      ApproveDelDate_UTC ,
+                                                      creDate_UTC ,
+                                                      spec_name_cn ,
+                                                      BatchID ,
+                                                      ISSBY_STATE ,
+                                                      ent_num ,
+                                                      DOB ,
+                                                      GoodsCodes_1 ,
+                                                      ApproveEditUserID ,
+                                                      ApproveEditDate ,
+                                                      ApproveEditDate_UTC ,
+                                                      Gender
+                                                    )
+                                                    SELECT  A.spec_name ,
+                                                            A.updated_date ,
+                                                            A.remark ,
+                                                            A.TaxID ,
+                                                            A.IDENT ,
+                                                            A.IDENTO ,
+                                                            A.TaxIDCD ,
+                                                            A.IDNUM ,
+                                                            A.IssBy ,
+                                                            A.DInd ,
+                                                            CASE WHEN ISNULL(A.creUserID,'') <> '' THEN @UserId ELSE '' END ,
+                                                            ISNULL(A.STATE, '') ,
+                                                            A.ADDRESS ,
+                                                            A.COUNTRY ,
+                                                            B.NewGroupID ,
+                                                            A.SOURCE ,
+                                                            A.EnterFlag ,
+                                                            CASE WHEN ISNULL(A.ApprovedBy,'') <> '' THEN @UserId ELSE '' END ,
+                                                            TRY_CONVERT(DATETIME, A.ApprovedDate, 120) ,
+                                                            CASE WHEN ISNULL(A.DelUserID,'') <> '' THEN @UserId ELSE '' END ,
+                                                            TRY_CONVERT(DATETIME, A.DelDate, 120) ,
+                                                            CASE WHEN ISNULL(A.ApproveDelUserID,'') <> '' THEN @UserId ELSE '' END ,
+                                                            TRY_CONVERT(DATETIME, A.ApproveDelDate, 120) ,
+                                                            TRY_CONVERT(DATETIME, A.creDate, 120) ,
+                                                            TRY_CONVERT(DATETIME, A.updated_date_UTC, 120) ,
+                                                            TRY_CONVERT(DATETIME, A.ApprovedDate_UTC, 120) ,
+                                                            TRY_CONVERT(DATETIME, A.DelDate_UTC, 120) ,
+                                                            TRY_CONVERT(DATETIME, A.ApproveDelDate_UTC, 120) ,
+                                                            TRY_CONVERT(DATETIME, A.creDate_UTC, 120) ,
+                                                            A.spec_name_cn ,
+                                                            A.BatchID ,
+                                                            A.ISSBY_STATE ,
+                                                            A.ent_num ,
+                                                            A.DOB ,
+                                                            A.GoodsCodes_1 ,
+                                                            CASE WHEN ISNULL(A.ApproveEditUserID,'') <> '' THEN @UserId ELSE '' END ,
+                                                            TRY_CONVERT(DATETIME, A.ApproveEditDate, 120) ,
+                                                            TRY_CONVERT(DATETIME, A.ApproveEditDate_UTC, 120) ,
+                                                            A.Gender
+                                                    FROM    dbo.OFAC_SPEC_Migrate_buffer A
+                                                            JOIN lowrisklistgroups_Migrate_Mapping_TEMP B ON A.GROUPID = B.OldGroupID
+                                                    WHERE   NOT EXISTS ( SELECT
+                                                              1
+                                                              FROM
+                                                              dbo.OFAC_SPEC Z
+                                                              WHERE
+                                                              ISNULL(Z.spec_name,
+                                                              '') = ISNULL(A.spec_name,
                                                               '')
-                                        AND ISNULL(IsBearerShares_Before, '') = ISNULL(IsBearerShares_After,
+                                                              AND ISNULL(Z.spec_name_cn,
+                                                              '') = ISNULL(A.spec_name_cn,
                                                               '')
-                                        AND PEPBitwiseCode_Before = PEPBitwiseCode_After
-                                        AND ISNULL(Warn_Restrict_Account_Before,
-                                                   '') = ISNULL(Warn_Restrict_Account_After,
+                                                              AND ISNULL(Z.TaxID,
+                                                              '') = ISNULL(A.TaxID,
                                                               '')
-                                        AND ISNULL(SDST2400001_Before, '') = ISNULL(SDST2400001_After,
-                                                              '');
+                                                              AND ISNULL(Z.IDENT,
+                                                              '') = ISNULL(A.IDENT,
+                                                              '')
+                                                              AND ISNULL(Z.IDENTO,
+                                                              '') = ISNULL(A.IDENTO,
+                                                              '')
+                                                              AND ISNULL(Z.TaxIDCD,
+                                                              '') = ISNULL(A.TaxIDCD,
+                                                              '')
+                                                              AND ISNULL(Z.IDNUM,
+                                                              '') = ISNULL(A.IDNUM,
+                                                              '')
+                                                              AND ISNULL(Z.IssBy,
+                                                              '') = ISNULL(A.IssBy,
+                                                              '')
+                                                              AND ISNULL(Z.ADDRESS,
+                                                              '') = ISNULL(A.ADDRESS,
+                                                              '')
+                                                              AND ISNULL(Z.STATE,
+                                                              '') = ISNULL(A.STATE,
+                                                              '')
+                                                              AND ISNULL(Z.COUNTRY,
+                                                              '') = ISNULL(A.COUNTRY,
+                                                              '')
+                                                              AND ISNULL(Z.ISSBY_STATE,
+                                                              '') = ISNULL(A.ISSBY_STATE,
+                                                              '')
+                                                              AND ISNULL(Z.DOB,
+                                                              '') = ISNULL(A.DOB,
+                                                              '')
+                                                              AND ISNULL(Z.GoodsCodes_1,
+                                                              '') = ISNULL(A.GoodsCodes_1,
+                                                              '')
+                                                              AND ISNULL(Z.remark,
+                                                              '') = ISNULL(A.remark,
+                                                              '')
+                                                              AND ISNULL(Z.SOURCE,
+                                                              '') = ISNULL(A.SOURCE,
+                                                              '')
+                                                              AND ISNULL(Z.Gender,
+                                                              '') = ISNULL(A.Gender,
+                                                              '') )
+                                                            AND B.specType NOT IN (
+                                                            2, 6, 7 ); -- only names
+              
+                                        INSERT  INTO dbo.OFAC_SPEC_RestrictedCountry
+                                                ( Ent_Num ,
+                                                  GroupID ,
+                                                  BatchID ,
+                                                  CountryCode ,
+                                                  CountryDescription ,
+                                                  EnterFlag ,
+                                                  UpdatedDate ,
+                                                  UpdatedDate_UTC ,
+                                                  CreatedBy ,
+                                                  CreatedDate ,
+                                                  CreatedDate_UTC ,
+                                                  ApprovedBy ,
+                                                  ApprovedDate ,
+                                                  ApprovedDate_UTC ,
+                                                  DeletedBy ,
+                                                  DeletedDate ,
+                                                  DeletedDate_UTC ,
+                                                  ApproveDeletedRecordBy ,
+                                                  ApproveDeletedRecordDate ,
+                                                  ApproveDeletedRecordDate_UTC ,
+                                                  DInd ,
+                                                  Remark ,
+                                                  ApproveEditUserID ,
+                                                  ApproveEditDate ,
+                                                  ApproveEditDate_UTC
+                                                )
+                                                SELECT  A.ent_num ,
+                                                        B.NewGroupID ,
+                                                        A.BatchID ,
+                                                        A.COUNTRY ,
+                                                        A.spec_name ,
+                                                        A.EnterFlag ,
+                                                        TRY_CONVERT(DATETIME, A.updated_date, 120) ,
+                                                        TRY_CONVERT(DATETIME, A.updated_date_UTC, 120) ,
+                                                        CASE WHEN ISNULL(A.creUserID,'') <> '' THEN @UserId ELSE '' END ,
+                                                        TRY_CONVERT(DATETIME, A.creDate, 120) ,
+                                                        TRY_CONVERT(DATETIME, A.creDate_UTC, 120) ,
+                                                        CASE WHEN ISNULL(A.ApprovedBy,'') <> '' THEN @UserId ELSE '' END ,
+                                                        TRY_CONVERT(DATETIME, A.ApprovedDate, 120) ,
+                                                        TRY_CONVERT(DATETIME, A.ApprovedDate_UTC, 120) ,
+                                                        CASE WHEN ISNULL(A.DelUserID,'') <> '' THEN @UserId ELSE '' END ,
+                                                        TRY_CONVERT(DATETIME, A.DelDate, 120) ,
+                                                        TRY_CONVERT(DATETIME, A.DelDate_UTC, 120) ,
+                                                        CASE WHEN ISNULL(A.ApproveDelUserID,'') <> '' THEN @UserId ELSE '' END ,
+                                                        TRY_CONVERT(DATETIME, A.ApproveDelDate, 120) ,
+                                                        TRY_CONVERT(DATETIME, A.ApproveDelDate_UTC, 120) ,
+                                                        A.DInd ,
+                                                        A.remark ,
+                                                        CASE WHEN ISNULL(A.ApproveEditUserID,'') <> '' THEN @UserId ELSE '' END ,
+                                                        TRY_CONVERT(DATETIME, A.ApproveEditDate, 120) ,
+                                                        TRY_CONVERT(DATETIME, A.ApproveEditDate_UTC, 120)
+                                                FROM    dbo.OFAC_SPEC_Migrate_buffer A
+                                                        JOIN lowrisklistgroups_Migrate_Mapping_TEMP B ON A.GROUPID = B.OldGroupID
+                                                WHERE   NOT EXISTS ( SELECT 1 FROM dbo.OFAC_SPEC_RestrictedCountry Z
+                                                        WHERE Z.GroupID = B.NewGroupID
+                                                          AND Z.CountryCode = A.COUNTRY
+                                                          AND ISNULL(Z.Remark,'') = ISNULL(A.remark,''))
+                                                        AND B.specType = 2 -- Country
+              
+                                        INSERT  INTO dbo.OFAC_SPEC_BankBIC
+                                                ( Ent_Num ,
+                                                  BatchID ,
+                                                  GroupID ,
+                                                  BIC ,
+                                                  BANK_NAME ,
+                                                  BANK_CODE ,
+                                                  CTRY_CODE ,
+                                                  LOCATION_CODE ,
+                                                  BRANCH_CODE ,
+                                                  SOURCE ,
+                                                  EnterFlag ,
+                                                  DInd ,
+                                                  UpdatedDate ,
+                                                  UpdatedDate_UTC ,
+                                                  CreatedBy ,
+                                                  CreatedDate ,
+                                                  CreatedDate_UTC ,
+                                                  ApprovedBy ,
+                                                  ApprovedDate ,
+                                                  ApprovedDate_UTC ,
+                                                  DeletedBy ,
+                                                  DeletedDate ,
+                                                  DeletedDate_UTC ,
+                                                  ApproveDeletedRecordBy ,
+                                                  ApproveDeletedRecordDate ,
+                                                  ApproveDeletedRecordDate_UTC ,
+                                                  Remark ,
+                                                  ApproveEditUserID ,
+                                                  ApproveEditDate ,
+                                                  ApproveEditDate_UTC
+                                                )
+                                                SELECT  A.ent_num ,
+                                                        A.BatchID ,
+                                                        b.NewGroupID ,
+                                                        A.TaxID ,
+                                                        A.spec_name ,
+                                                        A.IDENTO ,
+                                                        A.STATE ,
+                                                        A.ADDRESS ,
+                                                        A.COUNTRY ,
+                                                        A.SOURCE ,
+                                                        A.EnterFlag ,
+                                                        A.DInd ,
+                                                        TRY_CONVERT(DATETIME, A.updated_date, 120) ,
+                                                        TRY_CONVERT(DATETIME, A.updated_date_UTC, 120) ,
+                                                        CASE WHEN ISNULL(A.creUserID,'') <> '' THEN @UserId ELSE '' END ,
+                                                        TRY_CONVERT(DATETIME, A.creDate, 120) ,
+                                                        TRY_CONVERT(DATETIME, A.creDate_UTC, 120) ,
+                                                        CASE WHEN ISNULL(A.ApprovedBy,'') <> '' THEN @UserId ELSE '' END ,
+                                                        TRY_CONVERT(DATETIME, A.ApprovedDate, 120) ,
+                                                        TRY_CONVERT(DATETIME, A.ApprovedDate_UTC, 120) ,
+                                                        CASE WHEN ISNULL(A.DelUserID,'') <> '' THEN @UserId ELSE '' END ,
+                                                        TRY_CONVERT(DATETIME, A.DelDate, 120) ,
+                                                        TRY_CONVERT(DATETIME, A.DelDate_UTC, 120) ,
+                                                        CASE WHEN ISNULL(A.ApproveDelUserID,'') <> '' THEN @UserId ELSE '' END ,
+                                                        TRY_CONVERT(DATETIME, A.ApproveDelDate, 120) ,
+                                                        TRY_CONVERT(DATETIME, A.ApproveDelDate_UTC, 120) ,
+                                                        remark ,
+                                                        CASE WHEN ISNULL(A.ApproveEditUserID,'') <> '' THEN @UserId ELSE '' END ,
+                                                        TRY_CONVERT(DATETIME, A.ApproveEditDate, 120) ,
+                                                        TRY_CONVERT(DATETIME, A.ApproveEditDate_UTC, 120)
+                                                FROM    dbo.OFAC_SPEC_Migrate_buffer A
+                                                        JOIN lowrisklistgroups_Migrate_Mapping_TEMP B ON A.GROUPID = B.OldGroupID
+                                                WHERE   NOT EXISTS ( SELECT
+                                                              1
+                                                              FROM
+                                                              dbo.OFAC_SPEC Z
+                                                              WHERE
+                                                              ISNULL(Z.spec_name,
+                                                              '') = ISNULL(A.spec_name,
+                                                              '')
+                                                              AND ISNULL(Z.spec_name_cn,
+                                                              '') = ISNULL(A.spec_name_cn,
+                                                              '')
+                                                              AND ISNULL(Z.TaxID,
+                                                              '') = ISNULL(A.TaxID,
+                                                              '')
+                                                              AND ISNULL(Z.IDENT,
+                                                              '') = ISNULL(A.IDENT,
+                                                              '')
+                                                              AND ISNULL(Z.IDENTO,
+                                                              '') = ISNULL(A.IDENTO,
+                                                              '')
+                                                              AND ISNULL(Z.TaxIDCD,
+                                                              '') = ISNULL(A.TaxIDCD,
+                                                              '')
+                                                              AND ISNULL(Z.IDNUM,
+                                                              '') = ISNULL(A.IDNUM,
+                                                              '')
+                                                              AND ISNULL(Z.IssBy,
+                                                              '') = ISNULL(A.IssBy,
+                                                              '')
+                                                              AND ISNULL(Z.ADDRESS,
+                                                              '') = ISNULL(A.ADDRESS,
+                                                              '')
+                                                              AND ISNULL(Z.STATE,
+                                                              '') = ISNULL(A.STATE,
+                                                              '')
+                                                              AND ISNULL(Z.COUNTRY,
+                                                              '') = ISNULL(A.COUNTRY,
+                                                              '')
+                                                              AND ISNULL(Z.ISSBY_STATE,
+                                                              '') = ISNULL(A.ISSBY_STATE,
+                                                              '')
+                                                              AND ISNULL(Z.DOB,
+                                                              '') = ISNULL(A.DOB,
+                                                              '')
+                                                              AND ISNULL(Z.GoodsCodes_1,
+                                                              '') = ISNULL(A.GoodsCodes_1,
+                                                              '')
+                                                              AND ISNULL(Z.remark,
+                                                              '') = ISNULL(A.remark,
+                                                              '')
+                                                              AND ISNULL(Z.SOURCE,
+                                                              '') = ISNULL(A.SOURCE,
+                                                              '')
+                                                              AND ISNULL(Z.Gender,
+                                                              '') = ISNULL(A.Gender,
+                                                              '') )
+                                                        AND B.specType = 7; -- BIC                                        
+                                              
+              
+                                        SELECT TOP 1
+                                                @ShortName_Len = CtrlVal
+                                        FROM    dbo.POCTRL WITH ( NOLOCK )
+                                        WHERE   CtrlKey = 'SHORTNAME_LEN'; 
+                                        SELECT TOP 1
+                                                @ALT_STR = CtrlVal
+                                        FROM    dbo.POCTRL WITH ( NOLOCK )
+                                        WHERE   CtrlKey = 'ALT_STR'; 
+                                        SELECT TOP 1
+                                                @Unicode_SHORTNAME_LEN = CtrlVal
+                                        FROM    dbo.POCTRL
+                                        WHERE   CtrlKey = 'Unicode_SHORTNAME_LEN';      
 
-                  --Remove data without changes
-                                UPDATE  A
-                                SET     A.IsComplexStructure_After = CASE
-                                                              WHEN ISNULL(IsComplexStructure_Before,
-                                                              '') = ISNULL(IsComplexStructure_After,
-                                                              '') THEN NULL
-                                                              ELSE A.IsComplexStructure_After
-                                                              END ,
-                                        A.IsBearerShares_After = CASE
-                                                              WHEN ISNULL(IsBearerShares_Before,
-                                                              '') = ISNULL(IsBearerShares_After,
-                                                              '') THEN NULL
-                                                              ELSE A.IsBearerShares_After
-                                                              END ,
-                                        A.PEPBitwiseCode_After = CASE
-                                                              WHEN PEPBitwiseCode_Before = PEPBitwiseCode_After
-                                                              THEN NULL
-                                                              ELSE A.PEPBitwiseCode_After
-                                                              END ,
-                                        A.Warn_Restrict_Account_After = CASE
-                                                              WHEN ISNULL(Warn_Restrict_Account_Before,
-                                                              '') = ISNULL(Warn_Restrict_Account_After,
-                                                              '') THEN NULL
-                                                              ELSE A.Warn_Restrict_Account_After
-                                                              END ,
-                                        A.SDST2400001_After = CASE
-                                                              WHEN ISNULL(SDST2400001_Before,
-                                                              '') = ISNULL(SDST2400001_After,
-                                                              '') THEN NULL
-                                                              ELSE SDST2400001_After
-                                                              END
-                                FROM    #AffectedCif A;
+                                        INSERT  INTO dbo.BlackList_Setting_Pending
+                                                ( MODULE ,
+                                                  TBLNAME ,
+                                                  LIST ,
+                                                  LIST_ID ,
+                                                  ALT_STR ,
+                                                  SHORTNAME_LEN ,
+                                                  FLAG ,
+                                                  DEL_IND ,
+                                                  Show_Flag ,
+                                                  [ChineseCommercialCodeEnabled] ,
+                                                  Unicode_SHORTNAME_LEN
+                                                  )
+                                        OUTPUT  Inserted.ID ,
+                                                Inserted.MODULE ,
+                                                Inserted.TBLNAME ,
+                                                Inserted.LIST ,
+                                                Inserted.LIST_ID ,
+                                                Inserted.ALT_STR ,
+                                                Inserted.SHORTNAME_LEN ,
+                                                Inserted.FLAG ,
+                                                Inserted.DEL_IND ,
+                                                Inserted.Show_Flag ,
+                                                Inserted.[ChineseCommercialCodeEnabled] ,
+                                                Inserted.Unicode_SHORTNAME_LEN
+                                                INTO @tempTable ( ID, MODULE,
+                                                              TBLNAME, LIST,
+                                                              LIST_ID, ALT_STR,
+                                                              SHORTNAME_LEN,
+                                                              FLAG, DEL_IND,
+                                                              Show_Flag,
+                                                              [ChineseCommercialCodeEnabled],
+                                                              Unicode_SHORTNAME_LEN )
+                                                SELECT  s.MODULE ,
+                                                        s.TBLNAME ,
+                                                        'SPEC' ,
+                                                        m.NewGroupID ,
+                                                        @ALT_STR ,
+                                                        @ShortName_Len ,
+                                                        'N' ,
+                                                        'N' ,
+                                                        'Y' ,
+                                                        'TRUE' ,
+                                                        @Unicode_SHORTNAME_LEN
+                                                FROM    dbo.BlackList_Setting_Pending s
+                                                        WITH ( NOLOCK )
+                                                        CROSS JOIN lowrisklistgroups_Migrate_Mapping_TEMP m
+                                                WHERE   NOT EXISTS ( SELECT
+                                                              1
+                                                              FROM
+                                                              dbo.BlackList_Setting_Pending z
+                                                              WHERE
+                                                              z.MODULE = s.MODULE
+                                                              AND z.TBLNAME = s.TBLNAME
+                                                              AND z.LIST = 'SPEC'
+                                                              AND z.LIST_ID = m.NewGroupID )
+                                                GROUP BY s.MODULE ,
+                                                        s.TBLNAME ,
+                                                        m.NewGroupID;
 
-                                IF OBJECT_ID(N'tempdb..#AffectedPendingCaseUpdate',
-                                             'U') IS NOT NULL
-                                    DROP TABLE #AffectedPendingCaseUpdate;
+                                        INSERT  INTO dbo.BlackList_Setting
+                                                ( ID ,
+                                                  MODULE ,
+                                                  TBLNAME ,
+                                                  LIST ,
+                                                  LIST_ID ,
+                                                  ALT_STR ,
+                                                  SHORTNAME_LEN ,
+                                                  FLAG ,
+                                                  DEL_IND ,
+                                                  Show_Flag ,
+                                                  [ChineseCommercialCodeEnabled] ,
+                                                  Unicode_SHORTNAME_LEN
+                                                  )
+                                                SELECT  A.ID ,
+                                                        MODULE ,
+                                                        TBLNAME ,
+                                                       LIST ,
+                                                        LIST_ID ,
+                                                        ALT_STR ,
+                                                        SHORTNAME_LEN ,
+                                                        FLAG ,
+                                                        DEL_IND ,
+                                                        Show_Flag ,
+                                                        [ChineseCommercialCodeEnabled] ,
+                                                        Unicode_SHORTNAME_LEN
+                                                FROM    @tempTable A
+                                                WHERE   NOT EXISTS ( SELECT
+                                                              1
+                                                              FROM
+                                                              dbo.BlackList_Setting Z
+                                                              WHERE
+                                                              Z.MODULE = A.MODULE
+                                                              AND Z.TBLNAME = A.TBLNAME
+                                                              AND Z.LIST = A.LIST
+                                                              AND Z.LIST_ID = A.LIST_ID );
 
-                                CREATE TABLE #AffectedPendingCaseUpdate
-                                    (
-                                      BatchId BIGINT NULL ,
-                                      CIF_KEY UNIQUEIDENTIFIER ,
-                                      IsComplexStructure BIT NULL ,
-                                      IsBearerShares BIT NULL ,
-                                      PEPBitwiseCode INT NULL ,
-                                      Warn_Restrict_Account BIT NULL ,
-                                      SDST2400001 BIT NULL
-                                    );
+                                        INSERT  INTO dbo.BlackList_Setting_History
+                                                ( ID ,
+                                                  MODULE ,
+                                                  TBLNAME ,
+                                                  LIST ,
+                                                  LIST_ID ,
+                                                  FLAG ,
+                                                  DEL_IND ,
+                                                  ACTIONBY ,
+                                                  ACTIONCD ,
+                                                  ACTIONDT ,
+                                                  ACTIONDT_UTC ,
+                                                  ALT_STR ,
+                                                  SHORTNAME_LEN ,
+                                                  Show_Flag ,
+                                                  ChineseCommercialCodeEnabled ,
+                                                  Unicode_SHORTNAME_LEN
+                                                )
+                                                SELECT  ID ,
+                                                        MODULE ,
+                                                        TBLNAME ,
+                                                        LIST ,
+                                                       LIST_ID ,
+                                                        FLAG ,
+                                                        DEL_IND ,
+                                                        @UserId ,
+                                                        '01' ,
+                                                        GETDATE() ,
+                                                        GETUTCDATE() ,
+                                                        ALT_STR ,
+                                                        SHORTNAME_LEN ,
+                                                        Show_Flag ,
+                                                        ChineseCommercialCodeEnabled ,
+                                                        Unicode_SHORTNAME_LEN
+                                                FROM    @tempTable;
+                           
+              --Domestic Wire
+              
+                                        SELECT  @CurrentSettingId = MAX(SettingID)
+                                        FROM    dbo.DWire_BlackListSetting;
+                       
+                                        IF @CurrentSettingId IS NULL
+                                            SET @NewSettingId = 1;
+                                        ELSE
+                                            SET @NewSettingId = @CurrentSettingId
+                                                + 1;
 
-                                INSERT  INTO #AffectedPendingCaseUpdate
-                                        ( CIF_KEY ,
-                                          IsComplexStructure ,
-                                          IsBearerShares ,
-                                          PEPBitwiseCode ,
-                                          Warn_Restrict_Account ,
-                                          SDST2400001
-                                        )
-                                        SELECT  A.CIF_KEY ,
-                                                MAX(CAST(B.IsComplexStructure_After AS INT)) ,
-                                                MAX(CAST(B.IsBearerShares_After AS INT)) ,
-                                                MAX(B.PEPBitwiseCode_After) ,
-                                                MAX(CASE B.Warn_Restrict_Account_After WHEN 'Y' THEN 1 WHEN 'N' THEN 0 ELSE NULL END) ,
-                                                MAX(B.SDST2400001_After)
-                                        FROM    dbo.CIP_CUST_RISK_MGMT A
-                                                INNER JOIN #AffectedCif B ON B.CIF_KEY = A.CIF_KEY
-                                        WHERE   STATUS <> 3
-                                        GROUP BY A.CIF_KEY;
+                                        UPDATE  DWire_BlackListSetting
+                                        SET     SettingID = @NewSettingId
+                                        OUTPUT  Inserted.SettingID ,
+                                                Inserted.List ,
+                                                Inserted.ListID ,
+                                                Inserted.ALTStrength ,
+                                                Inserted.ShortNameLength ,
+                                                Inserted.Enabled ,
+                                                Inserted.ShowFlag ,
+                                                GETUTCDATE()
+                                                INTO dbo.DWire_BlackListSetting_History ( SettingID,
+                                                              List, ListID,
+                                                              ALTStrength,
+                                                              ShortNameLength,
+                                                              Enabled,
+                                                              ShowFlag,
+                                                              LastUpdatedDate_UTC );
+                  
+                                        INSERT  INTO dbo.DWire_BlackListSetting
+                                                ( SettingID ,
+                                                  List ,
+                                                  ListID ,
+                                                  ALTStrength ,
+                                                  ShortNameLength ,
+                                                  Enabled ,
+                                                  ShowFlag
+                                                )
+                                        OUTPUT  Inserted.SettingID ,
+                                                Inserted.List ,
+                                                Inserted.ListID ,
+                                                Inserted.ALTStrength ,
+                                                Inserted.ShortNameLength ,
+                                                Inserted.Enabled ,
+                                                Inserted.ShowFlag ,
+                                                GETUTCDATE()
+                                                INTO dbo.DWire_BlackListSetting_History ( SettingID,
+                                                              List, ListID,
+                                                              ALTStrength,
+                                                              ShortNameLength,
+                                                              Enabled,
+                                                              ShowFlag,
+                                                              LastUpdatedDate_UTC )
+                                                SELECT  @NewSettingId ,
+                                                        'SPEC' ,
+                                                        LIST_ID ,
+                                                        ALT_STR ,
+                                                        SHORTNAME_LEN ,
+                                                        0 ,
+                                                        1
+                                                FROM    @tempTable
+                                                GROUP BY LIST_ID ,
+                                                        ALT_STR ,
+                                                        LIST ,
+                                                        SHORTNAME_LEN;
+                  
+                                        INSERT  INTO dbo.DWire_BlackListSetting_Pending
+                                                ( List ,
+                                                  ListID ,
+                                                  ALTStrength ,
+                                                  ShortNameLength ,
+                                                  Enabled ,
+                                                  ShowFlag
+                                                )
+                                                SELECT  LIST ,
+                                                        LIST_ID ,
+                                                        ALT_STR ,
+                                                        SHORTNAME_LEN ,
+                                                        0 ,
+                                                        1
+                                                FROM    @tempTable
+                                                GROUP BY LIST_ID ,
+                                                        ALT_STR ,
+                                                        LIST ,
+                                                        SHORTNAME_LEN;
+                  
+                                        INSERT  INTO dbo.DWire_RC
+                                                ( SettingId ,
+                                                  RC
+                                                )
+                                                SELECT  @NewSettingId ,
+                                                        RC
+                                                FROM    dbo.DWire_RC
+                                                WHERE   SettingId = @CurrentSettingId;
+                                              
+                  --Trade Finance              
+                                        INSERT  INTO dbo.TradeFin_BlackListSetting_Pending
+                                                ( ColumnName ,
+                                                  List ,
+                                                  ListID ,
+                                                  Enabled ,
+                                                  ShowFlag
+                                                )
+                                        OUTPUT  Inserted.ColumnName ,
+                                                Inserted.List ,
+                                                Inserted.ListID ,
+                                                Inserted.Enabled ,
+                                                Inserted.ShowFlag
+                                                INTO dbo.TradeFin_BlackListSetting ( ColumnName,
+                                                              List, ListID,
+                                                              Enabled,
+                                                              ShowFlag )
+                                                SELECT  ColumnName ,
+                                                        'SPEC' ,
+                                                        m.NewGroupID ,
+                                                        'N' ,
+                                                        'Y'
+                                                FROM    TradeFin_BlackListSetting_Pending A
+                                                        CROSS JOIN lowrisklistgroups_Migrate_Mapping_TEMP m
+                                                WHERE   NOT EXISTS ( SELECT
+                                                              1
+                                                              FROM
+                                                              dbo.TradeFin_BlackListSetting_Pending z
+                                                              WHERE
+                                                              z.ColumnName = A.ColumnName
+                                                              AND z.List = 'SPEC'
+                                                              AND z.ListID = m.NewGroupID )
+                                                GROUP BY A.ColumnName ,
+                                                        m.NewGroupID
+                                                ORDER BY CONVERT(INT, m.NewGroupID) ,
+                                                        A.ColumnName;
+                  --SWiftMX                   
+                                        INSERT  INTO dbo.SWIFTMX_BlackList_Setting_Pending
+                                               ( CHANNEL ,
+                                                  DIRECTION ,
+                                                  TBLNAME ,
+                                                  LIST ,
+                                                  LIST_ID ,
+                                                  FLAG ,
+                                                  DEL_IND ,
+                                                  ALT_STR ,
+                                                  SHORTNAME_LEN ,
+                                                  Show_Flag ,
+                                                  ChineseCommercialCodeEnabled
+                                                )
+                                        OUTPUT  Inserted.ID ,
+                                                Inserted.CHANNEL ,
+                                                Inserted.DIRECTION ,
+                                                Inserted.TBLNAME ,
+                                                Inserted.LIST ,
+                                                Inserted.LIST_ID ,
+                                                Inserted.FLAG ,
+                                                Inserted.DEL_IND ,
+                                                Inserted.ALT_STR ,
+                                                Inserted.SHORTNAME_LEN ,
+                                                Inserted.Show_Flag ,
+                                                Inserted.ChineseCommercialCodeEnabled
+                                                INTO dbo.SWIFTMX_BlackList_Setting ( ID,
+                                                              CHANNEL,
+                                                              DIRECTION,
+                                                              TBLNAME, LIST,
+                                                              LIST_ID, FLAG,
+                                                              DEL_IND, ALT_STR,
+                                                              SHORTNAME_LEN,
+                                                              Show_Flag,
+                                                              ChineseCommercialCodeEnabled )
+                                                SELECT  CHANNEL ,
+                                                        DIRECTION ,
+                                                        A.TBLNAME ,
+                                                        'SPEC' ,
+                                                        m.NewGroupID ,
+                                                        'N' ,
+                                                        'N' ,
+                                                        @ALT_STR ,
+                                                        @ShortName_Len ,
+                                                        'Y' ,
+                                                        'TRUE'
+                                                FROM    dbo.SWIFTMX_BlackList_Setting_Pending A
+                                                        WITH ( NOLOCK )
+                                                        CROSS JOIN lowrisklistgroups_Migrate_Mapping_TEMP m
+                                                WHERE   NOT EXISTS ( SELECT
+                                                              1
+                                                              FROM
+                                                              dbo.SWIFTMX_BlackList_Setting_Pending z
+                                                              WHERE
+                                                              ISNULL(z.CHANNEL,
+                                                              '') = ISNULL(A.CHANNEL,
+                                                              '')
+                                                              AND ISNULL(z.DIRECTION,
+                                                              '') = ISNULL(A.DIRECTION,
+                                                              '')
+                                                              AND A.TBLNAME
+                                                               = z.TBLNAME
+                                                              AND z.LIST_ID = m.NewGroupID )
+                                                GROUP BY CHANNEL ,
+                                                        DIRECTION ,
+                                                        TBLNAME ,
+                                                        m.NewGroupID
+                                                ORDER BY CONVERT(INT, m.NewGroupID) ,
+                                                        A.CHANNEL ,
+                                                        A.DIRECTION;
+                  
+                                        INSERT  INTO dbo.SWIFTMX_BlackList_Setting_History
+                                                ( ID ,
+                                                  CHANNEL ,
+                                                  DIRECTION ,
+                                                  TBLNAME ,
+                                                  LIST ,
+                                                  LIST_ID ,
+                                                  ALT_STR ,
+                                                  SHORTNAME_LEN ,
+                                                  FLAG ,
+                                                  DEL_IND ,
+                                                  ACTIONBY ,
+                                                  ACTIONCD ,
+                                                  ACTIONDT ,
+                                                  ACTIONDT_UTC ,
+                                                  Show_Flag ,
+                                                  [ChineseCommercialCodeEnabled]
+                                                )
+                                                SELECT  ID ,
+                                                        CHANNEL ,
+                                                        DIRECTION ,
+                                                        TBLNAME ,
+                                                        'SPEC' ,
+                                                        ISNULL(A.LIST_ID, '') ,
+                                                        @ALT_STR ,
+                                                        @ShortName_Len ,
+                                                        'N' ,
+                                                        'N' ,
+                                                        '' ,
+                                                        '01' ,
+                                                        GETDATE() ,
+                                                        GETUTCDATE() ,
+                                                        'Y' ,
+                                                        'TRUE'
+                                                FROM    dbo.SWIFTMX_BlackList_Setting A
+                                                        WITH ( NOLOCK )
+                                                WHERE   NOT EXISTS ( SELECT
+                                                              1
+                                                              FROM
+                                                              dbo.SWIFTMX_BlackList_Setting_History B
+                                                              WHERE
+                                                              ISNULL(B.CHANNEL,
+                                                              '') = ISNULL(A.CHANNEL,
+                                                              '')
+                                                              AND ISNULL(B.DIRECTION,
+                                                              '') = ISNULL(A.DIRECTION,
+                                                              '')
+                                                              AND A.TBLNAME = B.TBLNAME
+                                                              AND A.LIST_ID = B.LIST_ID )
+                                                        AND LIST = 'SPEC'
+                                                GROUP BY ID ,
+                                                        CHANNEL ,
+                                                        DIRECTION ,
+                                                        TBLNAME ,
+                                                        ISNULL(A.LIST_ID, '');           
+                  
+                                              INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG) 
+                                              SELECT @Time, @ModuleName + ' migrate completed -------> '  , 'N';
+                                    END;
 
-                                UPDATE  A
-                                SET     A.IsComplexStructure = CASE 
-																WHEN A.IsComplexStructure = 1 OR B.IsComplexStructure = 1  THEN 1
-																WHEN A.IsComplexStructure IS NULL AND B.IsComplexStructure IS NULL THEN NULL
-																ELSE 0
-																END,
-                                        A.isCalculated = 'C' --force recalculate score
-                                FROM    dbo.CIP_CUST_RISK_MGMT A
-                                        INNER JOIN #AffectedPendingCaseUpdate B ON B.CIF_KEY = A.CIF_KEY;
+                                ELSE
+                                    BEGIN
+                                        INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG) 
+                                              SELECT @Time, 'Invalid module -------> Module not found', 'Y';
+                                    END;
+        END TRY
 
-                                UPDATE  A
-                                SET     A.IsBearerShares = CASE 
-																	WHEN A.IsBearerShares = 1 OR B.IsBearerShares = 1 THEN 1
-																	WHEN A.IsBearerShares IS NULL AND B.IsBearerShares IS NULL THEN NULL 
-																	ELSE 0
-																END  ,
-                                        A.WarnRestrictAccount = COALESCE(CASE
-                                                              WHEN B.Warn_Restrict_Account = 1
-                                                              THEN 'Y'
-                                                              ELSE NULL
-                                                              END,
-                                                              A.WarnRestrictAccount) ,
-                                        A.PEPBitwiseCode = A.PEPBitwiseCode
-                                        | B.PEPBitwiseCode
-                                FROM    dbo.CIP_CUST_RISK_MGMT_Extension A
-                                        INNER JOIN #AffectedPendingCaseUpdate B ON B.CIF_KEY = A.CIF_KEY
-                                WHERE   B.IsBearerShares IS NOT NULL
-                                        OR B.Warn_Restrict_Account IS NOT NULL
-                                        OR B.PEPBitwiseCode IS NOT NULL;
-
-                                MERGE dbo.CIP_QuestionaireOptionalAnswers T
-                                USING
-                                    ( SELECT    CIF_KEY ,
-                                                SDST2400001
-                                      FROM      #AffectedPendingCaseUpdate
-                                      WHERE     SDST2400001 IS NOT NULL
-                                    ) S
-                                ON ( T.CIF_KEY = S.CIF_KEY )
-                                WHEN MATCHED THEN
-                                    UPDATE SET
-                                             T.AnswerCode = S.SDST2400001
-                                WHEN NOT MATCHED BY TARGET THEN
-                                    INSERT ( CIF_KEY ,
-                                             TemplateId ,
-                                             AnswerCode ,
-                                             Remarks
-                                           )
-                                    VALUES ( S.CIF_KEY ,
-                                             @SDSTemplateId ,
-                                             S.SDST2400001 ,
-                                             'Data Migration'
-                                          );  --ask what remark they wanted to mark as
-
-              -- Sync data to CIP pending case
-                                TRUNCATE TABLE #AffectedPendingCaseUpdate;
-
-                                INSERT  INTO #AffectedPendingCaseUpdate
-                                        ( BatchId ,
-                                          CIF_KEY ,
-                                          IsComplexStructure ,
-                                          IsBearerShares ,
-                                          PEPBitwiseCode ,
-                                          Warn_Restrict_Account ,
-                                          SDST2400001
-                                        )
-                                        SELECT  A.BatchId ,
-                                                A.CIF_KEY ,
-                                                MAX(CAST(B.IsComplexStructure_After AS INT)) ,
-                                                MAX(CAST(B.IsBearerShares_After AS INT)) ,
-                                                MAX(B.PEPBitwiseCode_After) ,
-                                                MAX(CASE B.Warn_Restrict_Account_After WHEN 'Y' THEN 1 WHEN 'N' THEN 0 ELSE NULL END) ,
-                                                MAX(B.SDST2400001_After)
-                                        FROM    dbo.HRS_CUST_RISK_MGMT A
-                                                INNER JOIN #AffectedCif B ON B.CIF_KEY = A.CIF_KEY
-                                        WHERE   STATUS <> 3
-                                        GROUP BY A.BatchId ,
-                                                A.CIF_KEY;
-
-                                UPDATE  A
-                                SET     A.IsComplexStructure = COALESCE(B.IsComplexStructure,
-                                                              A.IsComplexStructure)
-                                FROM    dbo.HRS_Customer_Fact A
-                                        INNER JOIN #AffectedPendingCaseUpdate B ON B.BatchId = A.BatchId
-                                                              AND B.CIF_KEY = A.CifKey
-                                WHERE   B.IsComplexStructure IS NOT NULL;
-
-                                UPDATE  A
-                                SET     A.IsBearerShares = CASE 
-																	WHEN A.IsBearerShares = 1 OR B.IsBearerShares = 1 THEN 1
-																	WHEN A.IsBearerShares IS NULL AND B.IsBearerShares IS NULL THEN NULL 
-																	ELSE 0
-																END  ,
-                                        A.PEPBitwiseCode = A.PEPBitwiseCode
-                                        | B.PEPBitwiseCode ,
-                                        A.WarnRestrictAccount = CASE
-																	WHEN A.WarnRestrictAccount = 1 OR B.Warn_Restrict_Account = 1 THEN 1
-																	WHEN a.WarnRestrictAccount IS NULL OR b.Warn_Restrict_Account IS NULL THEN NULL
-																	ELSE 0
-																end
-                                FROM    dbo.HRS_Customer_Fact_Extension A
-                                        INNER JOIN #AffectedPendingCaseUpdate B ON B.BatchId = A.BatchId
-                                                              AND B.CIF_KEY = A.CifKey
-                                WHERE   B.IsBearerShares IS NOT NULL
-                                        OR B.Warn_Restrict_Account IS NOT NULL;
-
-                                MERGE dbo.HRS_QuestionaireOptionalAnswers T
-                                USING
-                                    ( SELECT    BatchId ,
-                                                CIF_KEY ,
-                                                SDST2400001
-                                      FROM      #AffectedPendingCaseUpdate
-                                      WHERE     SDST2400001 IS NOT NULL
-                                    ) S
-                                ON ( T.BatchId = S.BatchId
-                                     AND T.CifKey = S.CIF_KEY
-                                   )
-                                WHEN MATCHED THEN
-                                    UPDATE SET
-                                            T.AnswerCode = S.SDST2400001
-                                WHEN NOT MATCHED BY TARGET THEN
-                                    INSERT ( BatchId ,
-                                             CifKey ,
-                                             TemplateId ,
-                                             AnswerCode ,
-                                             Remarks
-                                           )
-                                    VALUES ( S.BatchId ,
-                                             S.CIF_KEY ,
-                                             CAST(@SDSTemplateId AS INT) ,
-                                             S.SDST2400001 ,
-                                             'Data Migration'
-                                           );  --ask what remark they wanted to mark as
-
-                                UPDATE  A
-                                SET     A.IsCalculated = 'C' --force recalculate score
-                                FROM    dbo.HRS_CUST_RISK_MGMT A
-                                        INNER JOIN #AffectedPendingCaseUpdate B ON B.BatchId = A.BatchId
-                                                              AND B.CIF_KEY = A.CIF_KEY;
-
-                                     INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG) 
-                                     SELECT @Time, @ModuleName + ' migrate completed -------> '  , 'N';
-                            END;
-
-幫我看一下 下面哪一些是CUST_NP 會用到的TABLE
+幫我看一下 下面哪一些是RP_NP 會用到的TABLE
 
 
 -----------------------------CIF
