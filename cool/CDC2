@@ -1,27 +1,24 @@
--- 1. 總覽：看有效筆數 (N) 與已刪除筆數 (Y)
-SELECT 
-    DInd,
-    COUNT(1) AS TotalCount,
-    MIN(creDate) AS Earliest_CreateDate,
-    MAX(updated_date) AS Latest_UpdatedDate
-FROM BSADB.dbo.OFAC_GLSpec
-WHERE GROUPID = 10
-GROUP BY DInd;
+-- ============================================================
+-- 步驟 1：清空目標表與 Log 表中 GROUPID = 10 的資料
+-- ============================================================
 
--- 2. 明細：隨機抓 10 筆目前有效 (DInd = 'N') 的資料結構與欄位內容
-SELECT TOP 10
-    ent_num,
-    spec_name          AS IdentificationNumber,
-    remark             AS EntNum,
-    ADDRESS            AS StoredAddress,
-    REPLACE(ADDRESS, '; Please go to Dowjones website for more detail', '') AS IdentificationType,
-    updated_date,
-    DInd,
-    EnterFlag,
-    SOURCE,
-    creUserID,
-    creDate
-FROM BSADB.dbo.OFAC_GLSpec
+-- 刪除目標主要資料表
+DELETE FROM BSADB.dbo.OFAC_GLSpec
+WHERE GROUPID = 10;
+
+-- 刪除歷史 Log 資料表（若需要一併重置歷程）
+DELETE FROM BSADB.dbo.OFAC_GLSpec_Log
+WHERE GROUPID = 10;
+
+
+-- ============================================================
+-- 步驟 2：確認目前已完全清空（預期 Count 均為 0）
+-- ============================================================
+
+SELECT 'OFAC_GLSpec' AS TableName, COUNT(1) AS RecordCount 
+FROM BSADB.dbo.OFAC_GLSpec 
 WHERE GROUPID = 10
-  AND DInd = 'N'
-ORDER BY creDate DESC;
+UNION ALL
+SELECT 'OFAC_GLSpec_Log' AS TableName, COUNT(1) AS RecordCount 
+FROM BSADB.dbo.OFAC_GLSpec_Log 
+WHERE GROUPID = 10;
