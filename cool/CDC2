@@ -1,88 +1,40 @@
-USE [BSADBTW]
-GO
 
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
+---------------------------------RP_NP 
+-- 1. 委任人 (Appointer)
+DELETE A FROM PB_Appointer_Fact A 
+JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
+WHERE B.ACTION = 'INSERT'
 
-ALTER PROCEDURE [dbo].[usp_Rollback_CUST_NP_Module]
-AS
-BEGIN
-    SET NOCOUNT ON;
-    SET XACT_ABORT ON;
+-- 2. 董監事 (Board of Director)
+DELETE A FROM PB_BoardOfDirector_Fact A 
+JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
+WHERE B.ACTION = 'INSERT'
 
-    BEGIN TRY
-        BEGIN TRANSACTION;
+-- 3. 法定代理人 (Legal Agent)
+DELETE A FROM PB_LegalAgent_Fact A 
+JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
+WHERE B.ACTION = 'INSERT'
 
-        -- ==========================================
-        -- 1. 清理客戶擴充資訊表 (無記名股票、PEP Bitwise 等)
-        -- ==========================================
-        IF OBJECT_ID('dbo.BSA_SUB_CUST_FACT_Extension', 'U') IS NOT NULL
-            DELETE A 
-            FROM dbo.BSA_SUB_CUST_FACT_Extension A 
-            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B 
-                ON A.CIF_KEY = B.NEW_CIF_KEY
-            WHERE B.ACTION = 'INSERT';
+-- 4. 主要客戶 (Main Client)
+DELETE A FROM PB_MainClient_Fact A 
+JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
+WHERE B.ACTION = 'INSERT'
 
+-- 5. 主要股東 (Main Shareholder)
+DELETE A FROM PB_MainShareHolder_Fact A 
+JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
+WHERE B.ACTION = 'INSERT'
 
-        -- ==========================================
-        -- 2. 清理客戶問卷/自訂答案表
-        -- ==========================================
-        IF OBJECT_ID('dbo.PB_CustomerOptionalAnswers', 'U') IS NOT NULL
-            DELETE A 
-            FROM dbo.PB_CustomerOptionalAnswers A 
-            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B 
-                ON A.CIFKEY = B.NEW_CIF_KEY
-            WHERE B.ACTION = 'INSERT';
+-- 6. 其他實質受益人 (Other Related Party)
+DELETE A FROM PB_OtherRelatedParty_Fact A 
+JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
+WHERE B.ACTION = 'INSERT'
 
-
-        -- ==========================================
-        -- 3. 清理 EDD 審查排程表
-        -- ==========================================
-        IF OBJECT_ID('dbo.EDD_ReviewSchedule', 'U') IS NOT NULL
-            DELETE A 
-            FROM dbo.EDD_ReviewSchedule A 
-            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B 
-                ON A.CIFKey = B.NEW_CIF_KEY
-            WHERE B.ACTION = 'INSERT';
+-- 7. 其他實質受益人子類別代碼 (Other Related Party SubTypeCodes)
+DELETE A FROM PB_OtherRelatedParty_SubTypeCodes A 
+JOIN CIF_Migrate_Mapping_TEMP B ON A.CIFKEY = B.NEW_CIF_KEY
+WHERE B.ACTION = 'INSERT'
 
 
-        -- ==========================================
-        -- 4. 清理 CIP / HRS Pending Case 自訂答案表 (防護補齊)
-        -- ==========================================
-        IF OBJECT_ID('dbo.CIP_QuestionaireOptionalAnswers', 'U') IS NOT NULL
-            DELETE A 
-            FROM dbo.CIP_QuestionaireOptionalAnswers A 
-            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B 
-                ON A.CIF_KEY = B.NEW_CIF_KEY
-            WHERE B.ACTION = 'INSERT';
 
-        IF OBJECT_ID('dbo.HRS_QuestionaireOptionalAnswers', 'U') IS NOT NULL
-            DELETE A 
-            FROM dbo.HRS_QuestionaireOptionalAnswers A 
-            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B 
-                ON A.CifKey = B.NEW_CIF_KEY
-            WHERE B.ACTION = 'INSERT';
-
-
-        -- 記錄 Rollback 成功日誌
-        IF OBJECT_ID('dbo.Migrator_LOG', 'U') IS NOT NULL
-            INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG)
-            SELECT GETDATE(), 'CUST_NP module rollback completed -------> ', 'N';
-
-        COMMIT TRANSACTION;
-    END TRY
-    BEGIN CATCH
-        IF @@TRANCOUNT > 0
-            ROLLBACK TRANSACTION;
-
-        -- 記錄 Rollback 失敗日誌並拋出錯誤
-        IF OBJECT_ID('dbo.Migrator_LOG', 'U') IS NOT NULL
-            INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG)
-            SELECT GETDATE(), 'CUST_NP module rollback FAILED: ' + ERROR_MESSAGE(), 'Y';
-
-        THROW;
-    END CATCH;
-END
-GO
+這也幫我包
