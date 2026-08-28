@@ -1,131 +1,47 @@
-將整個測試與比對邏輯拆為 三個獨立步驟，依序執行即可分段驗證資料：
-步驟 1：建立暫存表並抓取來源資料（標記名單來源類型）
-IF OBJECT_ID('tempdb..#tempDJBlacklistJP_Preview') IS NOT NULL
-    DROP TABLE #tempDJBlacklistJP_Preview;
-
-CREATE TABLE #tempDJBlacklistJP_Preview
-(
-    EntNum          INT NOT NULL,
-    SdnName         NVARCHAR(350) NOT NULL,
-    UpdatedDate     VARCHAR(8) NOT NULL,
-    SourceCategory  VARCHAR(20) NOT NULL
-);
-
--- (1) 寫入一般日本金融制裁名單
-INSERT INTO #tempDJBlacklistJP_Preview (EntNum, SdnName, UpdatedDate, SourceCategory)
-SELECT 
-    A.EntNum, 
-    A.SdnName, 
-    MAX(A.UpdatedDate) AS UpdatedDate,
-    'General_Sanction' AS SourceCategory
-FROM BSADB.dbo.DJ_List_Data_A A
-JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
-WHERE A.NamePropertyBitCode & 1 > 0
-  AND B.SanctionListReference LIKE '%Japanese Finance%'
-GROUP BY A.EntNum, A.SdnName;
-
--- (2) 寫入死亡名單 (排除已在一般名單者)
-INSERT INTO #tempDJBlacklistJP_Preview (EntNum, SdnName, UpdatedDate, SourceCategory)
+單純撈出符合死亡名單條件的資料：
 SELECT 
     A.EntityId, 
-    A.FullName, 
+    A.FullName AS SdnName, 
     MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate,
-    'Deceased_Only' AS SourceCategory
+    A.Deceased,
+    B.SanctionListReference
 FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+JOIN BSADB.dbo.DJ_SanctionListReference B 
+  ON A.EntityId = B.EntityId
 WHERE A.Deceased = 1
   AND B.SanctionListReference LIKE '%Japanese Finance%'
-  AND NOT EXISTS (SELECT 1 FROM #tempDJBlacklistJP_Preview X WHERE X.EntNum = A.EntityId)
-GROUP BY A.EntityId, A.FullName;
+  -- 排除已經符合一般名單條件的人
+  AND NOT EXISTS (
+      SELECT 1 
+      FROM BSADB.dbo.DJ_List_Data_A X
+      JOIN BSADB.dbo.DJ_SanctionListReference Y 
+        ON X.EntNum = Y.EntityId
+      WHERE X.NamePropertyBitCode & 1 > 0
+        AND Y.SanctionListReference LIKE '%Japanese Finance%'
+        AND X.EntNum = A.EntityId
+  )
+GROUP BY 
+    A.EntityId, 
+    A.FullName, 
+    A.Deceased, 
+    B.SanctionListReference;
 
--- 查看抓到的來源筆數與分布
-SELECT SourceCategory, COUNT(*) AS TotalCount 
-FROM #tempDJBlacklistJP_Preview 
-GROUP BY SourceCategory;
-
-步驟 2：關聯地址、身分證件與生日詳細資訊
-IF OBJECT_ID('tempdb..#tempSourceDetails') IS NOT NULL
-    DROP TABLE #tempSourceDetails;
-
-;WITH TempAddress AS
-(
-    SELECT A.EntityId, A.Address, A.City, A.AddressCountry,
-           ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
-    FROM BSADB.dbo.DJ_Address A WITH (NOLOCK)
-    WHERE A.Deleted = 0
-      AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP_Preview X WHERE A.EntityId = X.EntNum)
-),
-TempIdent AS
-(
-    SELECT A.EntityId,
-           A.IdentificationNumber,
-           ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
-    FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH (NOLOCK)
-    WHERE A.Deleted = 0
-      AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP_Preview X WHERE A.EntityId = X.EntNum)
-),
-TempDOB AS
-(
-    SELECT A.EntityId, A.InfoDay, A.InfoMonth, A.InfoYear,
-           ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
-    FROM BSADB.dbo.DJ_DateTypeInfo A WITH (NOLOCK)
-    WHERE A.DateType = 'Date of Birth'
-      AND A.Deleted = 0
-      AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP_Preview X WHERE A.EntityId = X.EntNum)
-)
+如果你想單獨查指定的那位 Tagro, Desire，直接在 WHERE 加上姓名即可：
 SELECT 
-    A.EntNum,
-    A.SdnName,
-    A.UpdatedDate,
-    A.SourceCategory,
-    B.Address,
-    LEFT(B.City, 100) AS City,
-    LEFT(B.AddressCountry, 100) AS Country,
-    LEFT(C.IdentificationNumber, 44) AS IdentNumber,
-    CASE WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL 
-         THEN D.InfoYear 
-         ELSE CONVERT(VARCHAR(8), dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) 
-    END AS DOB
-INTO #tempSourceDetails
-FROM #tempDJBlacklistJP_Preview A
-LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1
-LEFT JOIN TempIdent   C ON A.EntNum = C.EntityId AND C.RowId = 1
-LEFT JOIN TempDOB     D ON A.EntNum = D.EntityId AND D.RowId = 1;
-
-步驟 3：比對目標表並產出預覽結果（含括號修復與指定條件篩選）
-> 註：已將原查詢中 WHERE 條件的 AND / OR 運算子優先順序加上括號修正。
-> 
-SELECT 
-    CASE 
-        WHEN T.spec_name IS NULL THEN 'INSERT (全新寫入)'
-        WHEN T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date THEN 'UPDATE (更新覆蓋)'
-    END AS [預計動作(Action)],
-    S.SourceCategory AS [名單來源類型],
-    S.EntNum AS [EntityId(remark)],
-    S.SdnName AS [Name(spec_name)],
-    S.UpdatedDate AS [來源更新日],
-    T.updated_date AS [目標表現有更新日],
-    T.DInd AS [目標表現有DInd],
-    S.Address,
-    S.City,
-    S.Country,
-    S.IdentNumber,
-    S.DOB
-FROM #tempSourceDetails S
-LEFT JOIN BSADBJP..OFAC_SPEC T 
-       ON T.spec_name = S.SdnName 
-      AND T.remark = CAST(S.EntNum AS VARCHAR(100))
-      AND T.GROUPID = '11'
-WHERE (
-        T.spec_name IS NULL 
-        OR T.DInd = 'Y' 
-        OR S.UpdatedDate <> T.updated_date
-      )
-  AND S.SourceCategory = 'Deceased_Only'
-  AND S.SdnName = 'Tagro, Desire'
-ORDER BY S.SourceCategory DESC, S.EntNum;
-
-測試完畢清理暫存表：
-DROP TABLE #tempDJBlacklistJP_Preview;
-DROP TABLE #tempSourceDetails;
+    A.EntityId, 
+    A.FullName AS SdnName, 
+    MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate,
+    A.Deceased,
+    B.SanctionListReference
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B 
+  ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND A.FullName = 'Tagro, Desire'
+GROUP BY 
+    A.EntityId, 
+    A.FullName, 
+    A.Deceased, 
+    B.SanctionListReference;
 
