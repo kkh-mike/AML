@@ -1,15 +1,33 @@
-SELECT * FROM BSADBTW..GM_NotificationMailOutboX WHERE CreatedDate>'2026-07-20 19:45:14.363' AND Status='PENDING   ' --AND Subject LIKE '【AML案件%'
+-- ======================================================================================
+-- 目的：將特定時間後非【AML案件%】的待發送通知信件狀態更新為 'Completed'（排除AML通知）
+-- 流程：1. 異動前檢查 -> 2. 執行狀態更新 -> 3. 異動後驗證確認
+-- ======================================================================================
 
+-- 【步驟 1：異動前檢查】
+-- 查詢 2026/07/20 19:45:14 之後建立且狀態為 'PENDING   ' 的所有待發送信件
+-- （目前註解掉 Subject 條件，可檢視所有待處理信件筆數與清單）
+SELECT * 
+FROM BSADBTW..GM_NotificationMailOutboX 
+WHERE CreatedDate > '2026-07-20 19:45:14.363' 
+  AND Status = 'PENDING   ' 
+  --AND Subject LIKE '【AML案件%'
+;
 
-
+-- 【步驟 2：執行狀態更新】
+-- 將上述時間後、狀態為 'PENDING   '，且「主旨不是【AML案件%】」的信件狀態更新為 'Completed'
+-- （即：保留 AML 案件維持 PENDING，其餘信件標記為已完成/不重發）
 UPDATE BSADBTW..GM_NotificationMailOutboX 
-SET Status='Completed' 
-WHERE CreatedDate>'2026-07-20 19:45:14.363' AND Status='PENDING   ' AND Subject not LIKE '【AML案件%'
+SET Status = 'Completed' 
+WHERE CreatedDate > '2026-07-20 19:45:14.363' 
+  AND Status = 'PENDING   ' 
+  AND Subject NOT LIKE '【AML案件%'
+;
 
-
-
-SELECT * FROM BSADBTW..GM_NotificationMailOutboX WHERE CreatedDate>'2026-07-20 19:45:14.363' AND Status='PENDING   ' --AND Subject LIKE '【AML案件%'
-
-
-
-幫我註解一下
+-- 【步驟 3：異動後驗證】
+-- 再次查詢確認剩下的 'PENDING   ' 信件是否僅剩下【AML案件%】（或是確認筆數是否符合預期）
+SELECT * 
+FROM BSADBTW..GM_NotificationMailOutboX 
+WHERE CreatedDate > '2026-07-20 19:45:14.363' 
+  AND Status = 'PENDING   ' 
+  --AND Subject LIKE '【AML案件%'
+;
