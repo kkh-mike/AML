@@ -111,7 +111,10 @@ LEFT JOIN BSADBJP..OFAC_SPEC T
       AND T.GROUPID = '11'
 WHERE T.spec_name IS NULL -- 符合 NOT MATCHED (會執行 INSERT)
    OR (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) -- 符合 MATCHED (會執行 UPDATE)
+   AND S.SourceCategory = 'Deceased_only' AND S.SdnName = 'Tagro, Desire'
 ORDER BY S.SourceCategory DESC, S.EntNum;
 
 -- 清理暫存
 DROP TABLE #tempDJBlacklistJP_Preview;
+
+可以不要一次寫完? 分段給我
