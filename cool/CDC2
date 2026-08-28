@@ -1,27 +1,6 @@
+補充一下
+據我剛剛了解，如果IT協助起RM 需要你們提供客戶ID
+跟你說一下
+感謝
 
-
-
-
------  執行control M 批次 >> AMLHK_D_ETL_01C    ------------  抓HKWBS 給OBODS 的資料
-
-D:\PATRIOT_OFFICER_ETL_FILES\EXE\HK>TriggerDataLoad.exe HK
-DataLoad process has been started.
-Retreiving Latest Batch No.
-House Keeping old data.
-Connecting to FTP to get Transaction, Account, Customer, Customer Related Party, Daily Currency Rate and Rate Conversion files.
-Processing ETL files.
-Start Parsing ETL Files
-Back up Transaction files to backup folder path.
-Executing Preload Data.
-Executing Data Load.
-Sending statistic.
-DataLoad process has been completed
-
-
-
----------執行control M 批次   >>  AMLHK_M_RM_01C--------  計算風險等級
-
-D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\EXE>HRS_Detection.exe HK
-
-
-這是海外的 幫我整理一下資料
+英文表達
