@@ -1,22 +1,33 @@
---單純撈出符合死亡名單條件的資料：
+/********************************************************************************
+ * 專案名稱：日本財務省制裁名單 (Japanese Finance) - 死亡名單 (Deceased) 處理與核對
+ * 核心邏輯：
+ *   1. 撈取 BSADB 來源庫中符合 Deceased = 1 且受 Japanese Finance 監管的實體。
+ *   2. 區分「純死亡名單（需額外補入）」與「一般制裁重疊名單（NamePropertyBitCode & 1 > 0）」。
+ *   3. 透過 LEFT JOIN 比對目標表 (OFAC_SPEC, GROUPID='11')，模擬 Stored Procedure (SP) 的異動行為。
+ ********************************************************************************/
+
+-- ==============================================================================
+-- 模組 1：基礎查詢 - 單純撈出「純死亡名單」（排除已符合一般名單條件者）
+-- 目的：檢查哪些死亡人員是一般名單未涵蓋、需要獨立補入的資料
+-- ==============================================================================
 SELECT 
-    A.EntityId, 
-    A.FullName AS SdnName, 
-    MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate,
-    A.Deceased,
-    B.SanctionListReference
+    A.EntityId,                                              -- Dow Jones 實體唯一代碼
+    A.FullName AS SdnName,                                   -- 制裁對象姓名
+    MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate, -- 最新更新日期 (格式: YYYYMMDD)
+    A.Deceased,                                              -- 死亡註記 (1: 已故)
+    B.SanctionListReference                                  -- 制裁清單參照來源
 FROM BSADB.dbo.DJ_Entity A
 JOIN BSADB.dbo.DJ_SanctionListReference B 
   ON A.EntityId = B.EntityId
 WHERE A.Deceased = 1
   AND B.SanctionListReference LIKE '%Japanese Finance%'
-  -- 排除已經符合一般名單條件的人
+  -- 排除條件：若已符合一般制裁名單篩選標準 (NamePropertyBitCode Primary/AKA 條件)，則不重複撈取
   AND NOT EXISTS (
       SELECT 1 
       FROM BSADB.dbo.DJ_List_Data_A X
       JOIN BSADB.dbo.DJ_SanctionListReference Y 
         ON X.EntNum = Y.EntityId
-      WHERE X.NamePropertyBitCode & 1 > 0
+      WHERE (X.NamePropertyBitCode & 1) > 0                  -- 位元運算：符合一般主名/別名條件
         AND Y.SanctionListReference LIKE '%Japanese Finance%'
         AND X.EntNum = A.EntityId
   )
@@ -27,21 +38,22 @@ GROUP BY
     B.SanctionListReference;
 
 
-
-
---如果你想單獨查指定的那位 Tagro, Desire，直接在 WHERE 加上姓名即可：
+-- ==============================================================================
+-- 模組 2：個案查詢 - 單獨驗證指定對象（範例：Tagro, Desire）
+-- 目的：針對特定人員快速除錯與資料核對
+-- ==============================================================================
 SELECT 
     A.EntityId, 
     A.FullName AS SdnName, 
     MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate,
-    A.Deceased,
+    A.Deceased, 
     B.SanctionListReference
 FROM BSADB.dbo.DJ_Entity A
 JOIN BSADB.dbo.DJ_SanctionListReference B 
   ON A.EntityId = B.EntityId
 WHERE A.Deceased = 1
   AND B.SanctionListReference LIKE '%Japanese Finance%'
-  AND A.FullName = 'Tagro, Desire'
+  AND A.FullName = 'Tagro, Desire'                           -- 指定查詢對象
 GROUP BY 
     A.EntityId, 
     A.FullName, 
@@ -49,19 +61,11 @@ GROUP BY
     B.SanctionListReference;
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-	  WITH DeceasedList AS
+-- ==============================================================================
+-- 模組 3：同步影響評估 - 純死亡名單 vs 目標黑名單 (OFAC_SPEC)
+-- 目的：預覽「純死亡補入清單」在執行寫入/更新 SP 時的具體動作
+-- ==============================================================================
+WITH DeceasedList AS
 (
     SELECT 
         A.EntityId, 
@@ -73,24 +77,28 @@ GROUP BY
       ON A.EntityId = B.EntityId
     WHERE A.Deceased = 1
       AND B.SanctionListReference LIKE '%Japanese Finance%'
+      -- 僅保留一般名單未涵蓋之對象
       AND NOT EXISTS (
           SELECT 1 
           FROM BSADB.dbo.DJ_List_Data_A X
           JOIN BSADB.dbo.DJ_SanctionListReference Y 
             ON X.EntNum = Y.EntityId
-          WHERE X.NamePropertyBitCode & 1 > 0
+          WHERE (X.NamePropertyBitCode & 1) > 0
             AND Y.SanctionListReference LIKE '%Japanese Finance%'
             AND X.EntNum = A.EntityId
       )
-    GROUP BY A.EntityId, A.FullName
+    GROUP BY 
+        A.EntityId, 
+        A.FullName
 )
 SELECT 
     D.EntityId,
     D.SdnName,
     D.名單分類,
-    D.UpdatedDate AS 來源更新日,
-    T.updated_date AS 目標表現有更新日,
-    T.DInd AS 目標表現有DInd,
+    D.UpdatedDate             AS 來源更新日,
+    T.updated_date            AS 目標表現有更新日,
+    T.DInd                    AS 目標表現有DInd,            -- 刪除/停用標記 (Y: 停用中, N/NULL: 啟用中)
+    -- 比對來源與目標表狀態，預判 SP 執行行為
     CASE 
         WHEN T.spec_name IS NULL THEN '會執行 INSERT (全新寫入)'
         WHEN T.DInd = 'Y' THEN '會執行 UPDATE (重新啟用)'
@@ -100,31 +108,28 @@ SELECT
 FROM DeceasedList D
 LEFT JOIN BSADBJP..OFAC_SPEC T 
        ON T.spec_name = D.SdnName 
-      AND T.remark = CAST(D.EntityId AS VARCHAR(100))
-      AND T.GROUPID = '11';
+      AND T.remark = CAST(D.EntityId AS VARCHAR(100))        -- remark 欄位記錄來源 EntityId 作為 Key
+      AND T.GROUPID = '11';                                  -- 11: 日本財務省專用群組代碼
 
 
-
-
-
-
-
-	  ------------
-
-	  WITH DeceasedList AS
+-- ==============================================================================
+-- 模組 4：全量死亡名單分類與同步評估（包含重疊名單分析）
+-- 目的：完整檢視所有死亡實體（含重疊一般制裁者），精確監控資料分流與狀態
+-- ==============================================================================
+WITH DeceasedList AS
 (
     SELECT 
         A.EntityId, 
         A.FullName AS SdnName, 
         MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate,
-        -- 判斷是否重疊一般名單
+        -- 動態標註資料是「純死亡補入」還是「已重疊一般制裁名單」
         CASE 
             WHEN EXISTS (
                 SELECT 1 
                 FROM BSADB.dbo.DJ_List_Data_A X
                 JOIN BSADB.dbo.DJ_SanctionListReference Y 
                   ON X.EntNum = Y.EntityId
-                WHERE X.NamePropertyBitCode & 1 > 0
+                WHERE (X.NamePropertyBitCode & 1) > 0
                   AND Y.SanctionListReference LIKE '%Japanese Finance%'
                   AND X.EntNum = A.EntityId
             ) THEN '死亡名單 (重疊一般制裁)'
@@ -135,15 +140,18 @@ LEFT JOIN BSADBJP..OFAC_SPEC T
       ON A.EntityId = B.EntityId
     WHERE A.Deceased = 1
       AND B.SanctionListReference LIKE '%Japanese Finance%'
-    GROUP BY A.EntityId, A.FullName
+    GROUP BY 
+        A.EntityId, 
+        A.FullName
 )
 SELECT 
     D.EntityId,
     D.SdnName,
     D.名單分類,
-    D.UpdatedDate AS 來源更新日,
-    T.updated_date AS 目標表現有更新日,
-    T.DInd AS 目標表現有DInd,
+    D.UpdatedDate             AS 來源更新日,
+    T.updated_date            AS 目標表現有更新日,
+    T.DInd                    AS 目標表現有DInd,
+    -- 評估最終目標表的同步動作
     CASE 
         WHEN T.spec_name IS NULL THEN '會執行 INSERT (全新寫入)'
         WHEN T.DInd = 'Y' THEN '會執行 UPDATE (重新啟用)'
@@ -155,7 +163,3 @@ LEFT JOIN BSADBJP..OFAC_SPEC T
        ON T.spec_name = D.SdnName 
       AND T.remark = CAST(D.EntityId AS VARCHAR(100))
       AND T.GROUPID = '11';
-
-
-
-幫我整理註解一下
