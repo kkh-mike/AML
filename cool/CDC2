@@ -1,16 +1,4 @@
-WITH DeceasedList AS
-(
-    SELECT 
-        A.EntityId, 
-        A.FullName AS SdnName, 
-        MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate,
-        '死亡名單 (Deceased)' AS 名單分類
-    FROM BSADB.dbo.DJ_Entity A
-    JOIN BSADB.dbo.DJ_SanctionListReference B 
-      ON A.EntityId = B.EntityId
-    WHERE A.Deceased = 1
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-      AND NOT EXISTS (
+  AND NOT EXISTS (
           SELECT 1 
           FROM BSADB.dbo.DJ_List_Data_A X
           JOIN BSADB.dbo.DJ_SanctionListReference Y 
@@ -19,23 +7,6 @@ WITH DeceasedList AS
             AND Y.SanctionListReference LIKE '%Japanese Finance%'
             AND X.EntNum = A.EntityId
       )
-    GROUP BY A.EntityId, A.FullName
-)
-SELECT 
-    D.EntityId,
-    D.SdnName,
-    D.名單分類,
-    D.UpdatedDate AS 來源更新日,
-    T.updated_date AS 目標表現有更新日,
-    T.DInd AS 目標表現有DInd,
-    CASE 
-        WHEN T.spec_name IS NULL THEN '會執行 INSERT (全新寫入)'
-        WHEN T.DInd = 'Y' THEN '會執行 UPDATE (重新啟用)'
-        WHEN D.UpdatedDate <> T.updated_date THEN '會執行 UPDATE (更新異動日與明細)'
-        ELSE '略過 (資料已是最新且啟用中)'
-    END AS 執行SP後的動作
-FROM DeceasedList D
-LEFT JOIN BSADBJP..OFAC_SPEC T 
-       ON T.spec_name = D.SdnName 
-      AND T.remark = CAST(D.EntityId AS VARCHAR(100))
-      AND T.GROUPID = '11';
+
+
+但我想要也包刮 只是能用欄位來讓我們看的出來
