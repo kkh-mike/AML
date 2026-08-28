@@ -1,33 +1,528 @@
--- ======================================================================================
--- 目的：將特定時間後非【AML案件%】的待發送通知信件狀態更新為 'Completed'（排除AML通知）
--- 流程：1. 異動前檢查 -> 2. 執行狀態更新 -> 3. 異動後驗證確認
--- ======================================================================================
 
--- 【步驟 1：異動前檢查】
--- 查詢 2026/07/20 19:45:14 之後建立且狀態為 'PENDING   ' 的所有待發送信件
--- （目前註解掉 Subject 條件，可檢視所有待處理信件筆數與清單）
-SELECT * 
-FROM BSADBTW..GM_NotificationMailOutboX 
-WHERE CreatedDate > '2026-07-20 19:45:14.363' 
-  AND Status = 'PENDING   ' 
-  --AND Subject LIKE '【AML案件%'
-;
+sp_help OFAC_GLSpec
 
--- 【步驟 2：執行狀態更新】
--- 將上述時間後、狀態為 'PENDING   '，且「主旨不是【AML案件%】」的信件狀態更新為 'Completed'
--- （即：保留 AML 案件維持 PENDING，其餘信件標記為已完成/不重發）
-UPDATE BSADBTW..GM_NotificationMailOutboX 
-SET Status = 'Completed' 
-WHERE CreatedDate > '2026-07-20 19:45:14.363' 
-  AND Status = 'PENDING   ' 
-  AND Subject NOT LIKE '【AML案件%'
-;
 
--- 【步驟 3：異動後驗證】
--- 再次查詢確認剩下的 'PENDING   ' 信件是否僅剩下【AML案件%】（或是確認筆數是否符合預期）
-SELECT * 
-FROM BSADBTW..GM_NotificationMailOutboX 
-WHERE CreatedDate > '2026-07-20 19:45:14.363' 
-  AND Status = 'PENDING   ' 
-  --AND Subject LIKE '【AML案件%'
-;
+SELECT
+    COLUMN_NAME,
+    COLUMNPROPERTY(
+        OBJECT_ID(TABLE_NAME),
+        COLUMN_NAME,
+        'IsIdentity'
+    ) AS IsIdentity
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME='OFAC_GLSpec'
+
+
+SELECT HIGHRISK, HRScore,* FROM BSA_SUB_CUST_FACT WHERE customerno = '700103'
+
+
+SELECT * FROM SOURCEDBHK..Preload_customer
+
+
+SELECT HIGHRISK,* FROM BSADBHK..BSA_SUB_CUST_FACT WHERE CUSTOMERNO = '680013'
+SELECT * FROM PB_CUSTOMER_FACT
+
+
+SELECT * FROM BSADB..lowrisklistgroups
+select * from ofac_spec
+
+
+SELECT * FROM BSADB..OFAC_GLSpec
+
+
+select * from  GCMAINDB..Logs
+ORDER BY DateTime DESC;
+
+---------------------------------------------
+
+
+
+
+SELECT GROUPID, * FROM BSADBHK..OFAC_SPEC
+
+
+
+select * from  BSADB..lowrisklistgroups
+
+select * from  BSADBHK..lowrisklistgroups
+select * from  BSADB..lowrisklistgroups
+select * from   BSADB..OFAC_GLSPEC WHERE GROUPID = 8
+
+
+
+
+select * from  BSADBHK..lowrisklistgroups
+
+
+select * from  BSADB..lowrisklistgroups
+
+
+select * from  BSADB..OFAC_GLSpec
+
+select * from  BSADB..lowrisklistgroups
+
+select * from  GCMAINDB..Logs
+order by DateTime Desc
+ExceptionMessage
+違反 PRIMARY KEY 條件約束 'Country_PK'。無法在物件 'dbo.OFAC_GLSPEC_GroupCountry' 中插入重複的索引鍵。重複的索引鍵值是 (10, AU)。  違反 PRIMARY KEY 條件約束 'CountryLog_PK'。無法在物件 'dbo.OFAC_GLSPEC_GroupCountryLog' 中插入重複的索引鍵。重複的索引鍵值是 (10, AU)。  陳述式已經結束。  陳述式已經結束。
+
+DELETE FROM  BSADB..OFAC_GLSPEC_GroupCountry 
+WHERE groupID = '10'
+
+DELETE FROM   BSADB..OFAC_GLSPEC_GroupCountryLog
+WHERE groupID = '10'
+
+
+DELETE FROM  BSADBHK..OFAC_GLSPEC_GroupCountry 
+
+
+SELECT * FROM BSADBHK..OFAC_GLSPEC_GroupCountry 
+SELECT * FROM BSADBHK..OFAC_GLSPEC_GroupCountryLog 
+
+SELECT * FROM BSADB.dbo.OFAC_GLSpec  WHERE GROUPID = 10
+
+
+SELECT GROUPID, * FROM BSADB.dbo.OFAC_GLSpec   WHERE spec_name like 'slove'
+
+SELECT * FROM SwiftMX_DetectionResult WHERE SdnType 
+
+
+SELECT Top 2   a.SdnName, COUNT(*) AS cnt FROM SwiftMX_DetectionResult a
+join MESSAGEDATABASE..SwiftMX_Raw b on a.caseid = b.ID
+
+
+SELECT a.SdnName ,* FROM SwiftMX_DetectionResult a
+join MESSAGEDATABASE..SwiftMX_Raw b on a.caseid = b.ID
+WHERE a.LastUpdatedDate > '2025-10-20'
+
+
+SELECT SdnName,* FROM SwiftMX_DetectionResult
+WHERE SdnName like 'Tatiana Yaroslavovna Motyl'
+
+
+SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw
+SELECT * FROM MESSAGEDATABASE..SwiftMX_MessagePrioritySettings
+
+SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw WHERE LastUpdatedDate  >= '2025-07-25'
+AND  BankNo ='HK' AND ClientMessageTypeCode  = 'pacs.008.001.08'
+
+
+SELECT * FROM SwiftMX_Remark_Log
+SELECT * FROM SWIFTMX_FormatDim
+SELECT * FROM SwiftMX_MessageItemDetectionSettings
+SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw WHERE ClientReferenceNo = 'X202301100802586872_1'
+SELECT SdnName,* FROM SwiftMX_DetectionResult WHERE CaseId  ='B556D028-7A90-ED11-AE2F-0050568A471B'
+SELECT * FROM GCMAINDB..InstallationPackage_Log
+
+SELECT * FROM BSADB.dbo.OFAC_GLSpec  WHERE GROUPID = 3 AND spec_name = 'Hong Le'
+
+SELECT * FROM BSADB.dbo.OFAC_GLSpec WHERE GROUPID = 10 AND spec_name like '7 495%'
+
+SELECT * FROM BSADB.dbo.OFAC_GLSpec WHERE GROUPID = 10 AND ent_num = '61416'
+
+ent_num
+1220429
+
+SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw WHERE ClientReferenceNo = 'X202301100802586872_1'
+
+SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw 
+order by CreatedDate DESC
+
+SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw WHERE ClientReferenceNo = 'SID_202607210002'
+
+SELECT * FROM BSADB.dbo.OFAC_GLSpec_Log
+order by CreationDate DESC
+
+
+
+SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw WHERE ClientReferenceNo = 'X202301100802586872_1'
+SELECT * FROM BSADBHK..SwiftMX_DetectionResult WHERE CaseId = 'B556D028-7A90-ED11-AE2F-0050568A471B' 
+select * from  BSADB..lowrisklistgroups
+SELECT * FROM BSADB..OFAC_GLSpec WHERE GROUPID = '3'
+AND spec_name in
+(
+'Hong Le',
+'Hong Kong'
+)
+
+SELECT * FROM BSADB..OFAC_GLSpec WHERE GROUPID = '10'
+AND spec_name in
+(
+'249746000'
+)
+
+
+
+SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw a
+JOIN SwiftMX_DetectionResult b on a.ID = b.CaseID
+WHERE a.ClientReferenceNo = 'X202301100802586872_1'
+
+
+SELECT 
+    spec_name,
+    IDNUM,
+    IDENT,
+    IDENTO,
+    TaxID,
+    remark,
+    DInd,
+    STATE,
+    updated_date,
+    ADDRESS,
+    -- 把 ADDRESS 裡的 IdentificationType 解析出來
+    REPLACE(ADDRESS, '; Please go to Dowjones website for more detail', '') AS Parsed_IdentificationType,
+    GROUPID,
+    EnterFlag
+FROM BSADB.dbo.OFAC_GLSpec 
+WHERE GROUPID = 10 
+  AND spec_name = '249746000';
+
+
+
+
+SELECT
+    A.ent_num,
+    B.Description2,
+    B.Description3,
+    C.PersonStatus,
+    D.IdentificationType,
+    D.IdentificationNumber,
+	*
+FROM BSADB.dbo.OFAC_GLSpec A
+JOIN BSADB.dbo.DJ_Entity C
+    ON A.ent_num = C.EntityId
+JOIN BSADB.dbo.DJ_ListCategory B
+    ON A.ent_num = B.EntityId
+LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D
+    ON A.ent_num = D.EntityId
+WHERE C.PersonStatus <> 'Inactive'
+AND (
+        B.Description2 = 'Sanctions Lists'
+     OR B.Description3 IN (
+            'OFAC Related - Majority Owned',
+            'OFAC Related - Control',
+            'OFAC - Regional Sanctions Related - Majority Owned',
+            'OFAC - Regional Sanctions Related - Control',
+            'EU Related - Majority Owned',
+            'EU Related - Control',
+            'EU - Regional Sanctions Related - Majority Owned',
+            'EU - Regional Sanctions Related - Control'
+        )
+    )
+AND B.Deleted = 0
+AND D.IdentificationType IN (
+        'Aircraft Construction, Line, Fleet or Serial Number',
+        'Aircraft Manufacturer''s Serial Number (MSN)',
+        'Bank Identifier Code (BIC)',
+        'Central Registration Depository (CRD)',
+        'Company Identification No.',
+        'Driving Licence No.',
+        'DUNS Number',
+        'International Maritime Organization (IMO) Ship No.',
+        'International Securities Identification Number (ISIN)',
+        'Legal Entity Identifier (LEI)',
+        'National ID',
+        'National Provider Identifier (NPI)',
+        'National Tax No.',
+        'Others',
+        'Passport No.',
+        'Social Security No.',
+        'Email',
+        'Fax',
+        'Phone'
+    )
+AND D.Deleted = 0;
+
+
+SELECT 
+    spec_name, IDNUM, ADDRESS, DInd, updated_date, remark,GROUPID
+FROM BSADB.dbo.OFAC_GLSpec 
+
+SELECT ApprovedDate,*
+FROM BSADB.dbo.OFAC_GLSpec_Log
+WHERE ApprovedDate > '2026-07-13 13:00:50.707'
+  AND GROUPID = '10';
+
+
+SELECT 
+    spec_name, IDNUM, ADDRESS, DInd, updated_date, remark,GROUPID
+FROM BSADB.dbo.OFAC_GLSpec 
+WHERE spec_name = '9274616'
+
+
+
+SELECT 
+    spec_name, IDNUM, ADDRESS, DInd, updated_date, remark
+FROM BSADB.dbo.OFAC_GLSpec 
+WHERE GROUPID = 10 
+  AND DInd = 'N'
+  AND (spec_name LIKE '%0x931846D9%' OR spec_name LIKE '%MX%' OR IDNUM LIKE '%7 495 796 9310%')
+
+
+
+
+ SELECT 
+    A.EntityId,
+    B.Description2,
+    B.Description3,
+    D.IdentificationType,
+    D.IdentificationNumber,
+    A.PersonStatus
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_ListCategory B ON A.EntityId = B.EntityId
+LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D ON A.EntityId = D.EntityId
+WHERE D.IdentificationNumber LIKE '%0x931846D9%'   -- 或換成你那串關鍵字
+   OR A.EntityId = '1215703'
+
+
+SELECT * FROM BSADB.dbo.DJ_ListCategory WHERE Description2 = 'Sanctions Lists'
+
+SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw 
+order by CreatedDate DESC
+
+SELECT 
+    DATEADD(HOUR, 8, CreatedDate) AS CreatedDate_Plus8,
+    *
+FROM MESSAGEDATABASE..SwiftMX_Raw
+order by 1 DESC
+
+SELECT * FROM BSADB..OFAC_GLSpec WHERE GROUPID = 10 
+
+DELETE FROM MESSAGEDATABASE..SwiftMX_Raw
+WHERE CreatedDate >= '2026-07-21'
+  AND CreatedDate < '2026-07-22';
+
+
+SELECT updated_date_UTC,creDate_UTC,* 
+FROM BSADB..OFAC_GLSpec 
+WHERE GROUPID = 10 
+order by 1 DESC
+
+SELECT * FROM DJ_List_Data_A WHERE  EntNum = 'bank@'
+SELECT * FROM DJ_List_Data_A WHERE  SdnName = '249746000'
+
+SELECT GROUPID,updated_date_UTC,creDate_UTC,* 
+FROM BSADB..OFAC_GLSpec 
+WHERE spec_name = 'Abd-Al-Ghafur, Humam Abd Al-Khaliq'
+
+SELECT GROUPID,updated_date_UTC,creDate_UTC,* 
+FROM BSADB..OFAC_GLSpec 
+WHERE spec_name = 'Family'
+
+
+SELECT updated_date_UTC,creDate_UTC,* 
+FROM BSADB..OFAC_GLSpec 
+WHERE GROUPID = 10 
+
+
+SELECT * FROM BSADB..lowrisklistgroups
+
+ SELECT 
+        A.EntityId, D.IdentificationType, D.IdentificationNumber, MAX(C.UpdatedDate)
+    FROM BSADB.dbo.DJ_Entity A
+    JOIN BSADB.dbo.DJ_ListCategory B          ON A.EntityId = B.EntityId
+    JOIN BSADB.dbo.DJ_List_Data_A C           ON A.EntityId = C.EntNum
+    LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D ON A.EntityId = D.EntityId
+    WHERE A.PersonStatus <> 'Inactive'
+      AND (
+            B.Description2 = 'Sanctions Lists'
+         OR B.Description3 IN (
+                'OFAC Related - Majority Owned', 'OFAC Related - Control',
+                'OFAC - Regional Sanctions Related - Majority Owned', 'OFAC - Regional Sanctions Related - Control',
+                'EU Related - Majority Owned', 'EU Related - Control',
+                'EU - Regional Sanctions Related - Majority Owned', 'EU - Regional Sanctions Related - Control'
+            )
+          )
+      AND B.Deleted = 0
+      AND D.IdentificationType IN (
+            'Aircraft Construction, Line, Fleet or Serial Number',
+            'Aircraft Manufacturer''s Serial Number (MSN)',
+            'Bank Identifier Code (BIC)',
+            'Central Registration Depository (CRD)',
+            'Company Identification No.',
+            'Driving Licence No.',
+            'DUNS Number',
+            'International Maritime Organization (IMO) Ship No.',
+            'International Securities Identification Number (ISIN)',
+            'Legal Entity Identifier (LEI)',
+            'National ID',
+            'National Provider Identifier (NPI)',
+            'National Tax No.',
+            'Others',
+            'Passport No.',
+            'Social Security No.',
+            'Email', 'Fax', 'Phone'
+          )
+      AND D.Deleted = 0
+    GROUP BY A.EntityId, D.IdentificationType, D.IdentificationNumber;
+
+
+
+SdnName
+Tayag, Evangeline
+SOURCE
+Sanctions IDs
+SELECT updated_date_UTC,creDate_UTC,*  FROM BSADB..OFAC_GLSpec  WHERE SOURCE = ''
+
+DJ Blacklist - Automated
+
+
+SELECT UpdatedDate,* FROM DJ_List_Data_A A
+order by 1 DESC
+
+SELECT A.*, C.GroupID 
+FROM DJ_List_Data_A A
+JOIN DJ_ListCategory C ON A.ListCategoryID = C.ListCategoryID
+WHERE A.UpdatedDate = CONVERT(VARCHAR(10), GETDATE(), 120)
+  AND C.GroupID = 10
+
+
+SELECT * FROM BSADB.dbo.OFAC_GLSpec A
+JOIN BSADB.dbo.DJ_ListCategory B ON A.ent_num = B.ID
+WHERE GROUPID = 10 AND B.Description2 = 'Sanctions Lists'
+
+
+SELECT * FROM BSADB.dbo.DJ_Entity A
+
+SELECT * FROM BSADB.dbo.DJ_IdentificationTypeInfo
+
+
+
+
+
+SELECT
+    A.ent_num,
+    B.Description2,
+    B.Description3,
+    C.PersonStatus,
+    D.IdentificationType,
+    D.IdentificationNumber
+FROM BSADB.dbo.OFAC_GLSpec A
+JOIN BSADB.dbo.DJ_ListCategory B
+    ON A.ent_num = B.EntityId
+JOIN BSADB.dbo.DJ_Entity C
+    ON A.ent_num = C.EntityId
+LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D
+    ON A.ent_num = D.EntityId
+WHERE B.Deleted = 0
+
+
+
+
+
+spec_name
+Kulyashow, Anatol Nilavich
+
+SELECT *  FROM BSADB.dbo.OFAC_GLSpec 
+
+SELECT
+	A.spec_name,
+    A.ent_num,
+    B.Description2,
+    B.Description3,
+    C.PersonStatus,
+    D.IdentificationType,
+    D.IdentificationNumber
+FROM BSADB.dbo.OFAC_GLSpec A
+JOIN BSADB.dbo.DJ_Entity C
+    ON A.ent_num = C.EntityId
+JOIN BSADB.dbo.DJ_ListCategory B
+    ON A.ent_num = B.EntityId
+LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D
+    ON A.ent_num = D.EntityId
+WHERE C.PersonStatus <> 'Inactive'
+AND (
+        B.Description2 = 'Sanctions Lists'
+     OR B.Description3 IN (
+            'OFAC Related - Majority Owned',
+            'OFAC Related - Control',
+            'OFAC - Regional Sanctions Related - Majority Owned',
+            'OFAC - Regional Sanctions Related - Control',
+            'EU Related - Majority Owned',
+            'EU Related - Control',
+            'EU - Regional Sanctions Related - Majority Owned',
+            'EU - Regional Sanctions Related - Control'
+        )
+    )
+AND B.Deleted = 0
+AND D.IdentificationType IN (
+        'Aircraft Construction, Line, Fleet or Serial Number',
+        'Aircraft Manufacturer''s Serial Number (MSN)',
+        'Bank Identifier Code (BIC)',
+        'Central Registration Depository (CRD)',
+        'Company Identification No.',
+        'Driving Licence No.',
+        'DUNS Number',
+        'International Maritime Organization (IMO) Ship No.',
+        'International Securities Identification Number (ISIN)',
+        'Legal Entity Identifier (LEI)',
+        'National ID',
+        'National Provider Identifier (NPI)',
+        'National Tax No.',
+        'Others',
+        'Passport No.',
+        'Social Security No.',
+        'Email',
+        'Fax',
+        'Phone'
+    )
+AND D.Deleted = 0
+
+
+	Slovenia
+	SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw  WHERE BankNo ='HK'
+
+
+	CaseId
+836CB22C-C637-ED11-AE2D-0050568A471B
+	
+X202507251016427987_1
+
+
+SWIFTMXa58348ea78e54dec8289709ade3650a0	
+CreatedDate
+2022-08-01 12:28:14.7830000
+LastUpdatedDate
+2023-03-10 12:05:30.000
+
+RESTRICTED
+
+SELECT GROUPID , count(*) FROM BSADB.dbo.OFAC_GLSpec 
+GROUP BY GROUPID 
+
+SELECT *
+FROM BSADB.dbo.OFAC_Spec 
+
+
+select * from  BSADBHK..lowrisklistgroups
+
+--DELETE FROM BSADBHK..lowrisklistgroups
+--WHERE Created_Date_UTC = '2026-07-17 06:45:38.097';
+
+
+
+--DELETE FROM BSADB..lowrisklistgroups
+--WHERE Created_Date_UTC = '2026-07-17 01:17:31.960';
+
+
+
+
+SELECT *
+FROM BSADBHK.dbo.OFAC_GLSpec 
+
+
+
+
+select * from  BSADB..lowrisklistgroups
+
+
+
+
+
+select * from  BSADBHK..lowrisklistgroups
+
+
+
+
+
+幫我註解整理一下
