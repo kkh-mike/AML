@@ -1,4 +1,4 @@
-單純撈出符合死亡名單條件的資料：
+--單純撈出符合死亡名單條件的資料：
 SELECT 
     A.EntityId, 
     A.FullName AS SdnName, 
@@ -26,22 +26,6 @@ GROUP BY
     A.Deceased, 
     B.SanctionListReference;
 
-如果你想單獨查指定的那位 Tagro, Desire，直接在 WHERE 加上姓名即可：
-SELECT 
-    A.EntityId, 
-    A.FullName AS SdnName, 
-    MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate,
-    A.Deceased,
-    B.SanctionListReference
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_SanctionListReference B 
-  ON A.EntityId = B.EntityId
-WHERE A.Deceased = 1
-  AND B.SanctionListReference LIKE '%Japanese Finance%'
-  AND A.FullName = 'Tagro, Desire'
-GROUP BY 
-    A.EntityId, 
-    A.FullName, 
-    A.Deceased, 
-    B.SanctionListReference;
+
+這些名單會執行sp後會被寫入?
 
