@@ -1,72 +1,113 @@
-----------------------------------------------------------------------------------------------------
--- 模組名稱: SPEC (Special List / 名單掃描與交易過濾設定模組)
--- 用途說明: 清理 SPEC 模組寫入之「低風險/特有名單群組主檔」、「過濾名單事實表」以及「各交易管道黑名單掃描設定」
--- 執行時機: 1. SPEC 模組轉檔失敗需重跑 (Re-run / Rollback) 時
---          2. 重新初始化 SPEC 相關名單設定資料時
-----------------------------------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.usp_Rollback_SPEC_Module
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
 
--- ==========================================
--- 1. 清理名單群組與過濾名單主檔 (實體名單資料)
--- ==========================================
--- 清空低風險名單群組主檔 (lowrisklistgroups)
-TRUNCATE TABLE dbo.lowrisklistgroups;
+    BEGIN TRY
+        BEGIN TRANSACTION;
 
--- 清空特有名單/OFAC名單主檔 (姓名、證號、地址等基本特徵)
-TRUNCATE TABLE dbo.OFAC_SPEC;
+        -- ==========================================
+        -- 1. 清理名單群組與過濾名單主檔 (實體名單資料)
+        -- ==========================================
+        -- 清空低風險名單群組主檔 (lowrisklistgroups)
+        TRUNCATE TABLE dbo.lowrisklistgroups;
 
--- 清空受限國家/地區名單主檔 (SpecType = 2 國家過濾名單)
-TRUNCATE TABLE dbo.OFAC_SPEC_RestrictedCountry;
+        -- 清空特有名單/OFAC名單主檔 (姓名、證號、地址等基本特徵)
+        TRUNCATE TABLE dbo.OFAC_SPEC;
 
+        -- 清空受限國家/地區名單主檔 (SpecType = 2 國家過濾名單)
+        TRUNCATE TABLE dbo.OFAC_SPEC_RestrictedCountry;
 
+        -- 清空銀行 BIC 碼名單主檔 (SpecType = 7 銀行過濾名單)
+        IF OBJECT_ID('dbo.OFAC_SPEC_BankBIC', 'U') IS NOT NULL
+            TRUNCATE TABLE dbo.OFAC_SPEC_BankBIC;
 
--- ==========================================
--- 2. 清理通用核心黑名單掃描設定 (Core BlackList Settings)
--- ==========================================
--- 刪除通用黑名單待生效設定 (Pending)
-DELETE FROM dbo.BlackList_Setting_Pending
-WHERE LIST = 'SPEC';
-
--- 刪除通用黑名單正式生效設定
-DELETE FROM dbo.BlackList_Setting
-WHERE LIST = 'SPEC';
- 
-                
-
--- ==========================================
--- 3. 清理境內匯款黑名單掃描設定 (Domestic Wire Settings)
--- ==========================================
--- 刪除境內匯款黑名單正式生效設定
-DELETE FROM dbo.DWire_BlackListSetting
-WHERE List = 'SPEC';
-
--- 刪除境內匯款黑名單待生效設定 (Pending)
-DELETE FROM dbo.DWire_BlackListSetting_Pending
-WHERE List = 'SPEC';
+        -- 清空轉檔對照暫存表
+        IF OBJECT_ID('dbo.lowrisklistgroups_Migrate_Mapping_TEMP', 'U') IS NOT NULL
+            TRUNCATE TABLE dbo.lowrisklistgroups_Migrate_Mapping_TEMP;
 
 
--- ==========================================
--- 4. 清理貿易融資黑名單掃描設定 (Trade Finance Settings)
--- ==========================================
--- 刪除貿易融資黑名單待生效設定 (Pending)
-DELETE FROM TradeFin_BlackListSetting_Pending
-WHERE List = 'SPEC';
+        -- ==========================================
+        -- 2. 清理通用核心黑名單掃描設定 (Core BlackList Settings)
+        -- ==========================================
+        -- 刪除通用黑名單待生效設定 (Pending)
+        DELETE FROM dbo.BlackList_Setting_Pending
+        WHERE LIST = 'SPEC';
 
--- 刪除貿易融資黑名單正式生效設定
-DELETE FROM TradeFin_BlackListSetting
-WHERE List = 'SPEC';
+        -- 刪除通用黑名單正式生效設定
+        DELETE FROM dbo.BlackList_Setting
+        WHERE LIST = 'SPEC';
 
-
--- ==========================================
--- 5. 清理 SWIFT MX 電文黑名單掃描設定 (SWIFT MX Message Settings)
--- ==========================================
--- 刪除 SWIFT MX 黑名單待生效設定 (Pending)
-DELETE FROM dbo.SWIFTMX_BlackList_Setting_Pending
-WHERE LIST = 'SPEC';
-
--- 刪除 SWIFT MX 黑名單正式生效設定
-DELETE FROM dbo.SWIFTMX_BlackList_Setting
-WHERE LIST = 'SPEC';
+        -- 刪除通用黑名單歷史紀錄
+        IF OBJECT_ID('dbo.BlackList_Setting_History', 'U') IS NOT NULL
+            DELETE FROM dbo.BlackList_Setting_History
+            WHERE LIST = 'SPEC';
 
 
+        -- ==========================================
+        -- 3. 清理境內匯款黑名單掃描設定 (Domestic Wire Settings)
+        -- ==========================================
+        -- 刪除境內匯款黑名單正式生效設定
+        DELETE FROM dbo.DWire_BlackListSetting
+        WHERE List = 'SPEC';
 
-幫我包成一個sp 
+        -- 刪除境內匯款黑名單待生效設定 (Pending)
+        DELETE FROM dbo.DWire_BlackListSetting_Pending
+        WHERE List = 'SPEC';
+
+        -- 刪除境內匯款黑名單歷史紀錄
+        IF OBJECT_ID('dbo.DWire_BlackListSetting_History', 'U') IS NOT NULL
+            DELETE FROM dbo.DWire_BlackListSetting_History
+            WHERE List = 'SPEC';
+
+
+        -- ==========================================
+        -- 4. 清理貿易融資黑名單掃描設定 (Trade Finance Settings)
+        -- ==========================================
+        -- 刪除貿易融資黑名單待生效設定 (Pending)
+        DELETE FROM dbo.TradeFin_BlackListSetting_Pending
+        WHERE List = 'SPEC';
+
+        -- 刪除貿易融資黑名單正式生效設定
+        DELETE FROM dbo.TradeFin_BlackListSetting
+        WHERE List = 'SPEC';
+
+
+        -- ==========================================
+        -- 5. 清理 SWIFT MX 電文黑名單掃描設定 (SWIFT MX Message Settings)
+        -- ==========================================
+        -- 刪除 SWIFT MX 黑名單待生效設定 (Pending)
+        DELETE FROM dbo.SWIFTMX_BlackList_Setting_Pending
+        WHERE LIST = 'SPEC';
+
+        -- 刪除 SWIFT MX 黑名單正式生效設定
+        DELETE FROM dbo.SWIFTMX_BlackList_Setting
+        WHERE LIST = 'SPEC';
+
+        -- 刪除 SWIFT MX 黑名單歷史紀錄
+        IF OBJECT_ID('dbo.SWIFTMX_BlackList_Setting_History', 'U') IS NOT NULL
+            DELETE FROM dbo.SWIFTMX_BlackList_Setting_History
+            WHERE LIST = 'SPEC';
+
+
+        -- 記錄 Rollback 執行日誌
+        IF OBJECT_ID('dbo.Migrator_LOG', 'U') IS NOT NULL
+            INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG)
+            SELECT GETDATE(), 'SPEC module rollback/cleanup completed -------> ', 'N';
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+
+        -- 記錄失敗日誌並拋出錯誤
+        IF OBJECT_ID('dbo.Migrator_LOG', 'U') IS NOT NULL
+            INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG)
+            SELECT GETDATE(), 'SPEC module rollback FAILED: ' + ERROR_MESSAGE(), 'Y';
+
+        THROW;
+    END CATCH;
+END;
+GO
