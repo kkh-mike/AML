@@ -1,2 +1,34 @@
-如果我還有一個這個要歸類在哪
-truncate table Customer_Migrate_Exception_Table
+TRUNCATE TABLE  dbo.lowrisklistgroups
+
+TRUNCATE TABLE  dbo.OFAC_SPEC
+TRUNCATE TABLE  dbo.OFAC_SPEC_RestrictedCountry
+
+                
+DELETE FROM dbo.BlackList_Setting_Pending
+WHERE list = 'SPEC' 
+
+DELETE FROM dbo.BlackList_Setting
+WHERE list = 'SPEC'         
+                
+DELETE FROM dbo.DWire_BlackListSetting
+WHERE list = 'SPEC'         
+
+DELETE FROM dbo.DWire_BlackListSetting_Pending
+WHERE list = 'SPEC'         
+
+DELETE FROM TradeFin_BlackListSetting_Pending
+WHERE list = 'SPEC'         
+
+DELETE FROM TradeFin_BlackListSetting
+WHERE list = 'SPEC'         
+
+DELETE FROM dbo.SWIFTMX_BlackList_Setting_Pending
+WHERE list = 'SPEC' 
+
+DELETE FROM dbo.SWIFTMX_BlackList_Setting
+WHERE list = 'SPEC' 
+
+
+
+
+這個也能幫我註解一下?
