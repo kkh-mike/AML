@@ -1,44 +1,117 @@
-/* 1. 建立並收集需要測試比對的清單（包含一般清單與死亡清單） */
-IF OBJECT_ID('tempdb..#tempTestCleanupJP') IS NOT NULL
-    DROP TABLE #tempTestCleanupJP;
+/* ============================================================
+   預覽即將寫入 / 更新至 BSADBJP..OFAC_SPEC 的資料
+   ============================================================ */
 
-CREATE TABLE #tempTestCleanupJP
+IF OBJECT_ID('tempdb..#tempDJBlacklistJP_Preview') IS NOT NULL
+    DROP TABLE #tempDJBlacklistJP_Preview;
+
+CREATE TABLE #tempDJBlacklistJP_Preview
 (
-    EntNum  INT NOT NULL,
-    SdnName NVARCHAR(350) NOT NULL
+    EntNum          INT NOT NULL,
+    SdnName         NVARCHAR(350) NOT NULL,
+    UpdatedDate     VARCHAR(8) NOT NULL,
+    SourceCategory  VARCHAR(20) NOT NULL -- 標記來源 (一般名單 / 死亡名單)
 );
 
--- (1) 一般日本金融制裁名單
-INSERT INTO #tempTestCleanupJP (EntNum, SdnName)
+-- 1. 一般日本金融制裁名單
+INSERT INTO #tempDJBlacklistJP_Preview (EntNum, SdnName, UpdatedDate, SourceCategory)
 SELECT 
     A.EntNum, 
-    A.SdnName
+    A.SdnName, 
+    MAX(A.UpdatedDate) AS UpdatedDate,
+    'General_Sanction' AS SourceCategory
 FROM BSADB.dbo.DJ_List_Data_A A
 JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
 WHERE A.NamePropertyBitCode & 1 > 0
   AND B.SanctionListReference LIKE '%Japanese Finance%'
 GROUP BY A.EntNum, A.SdnName;
 
--- (2) 死亡名單（排除已在上述清單的資料）
-INSERT INTO #tempTestCleanupJP (EntNum, SdnName)
+-- 2. 死亡名單 (排除已在一般名單者)
+INSERT INTO #tempDJBlacklistJP_Preview (EntNum, SdnName, UpdatedDate, SourceCategory)
 SELECT 
     A.EntityId, 
-    A.FullName
+    A.FullName, 
+    MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate,
+    'Deceased_Only' AS SourceCategory
 FROM BSADB.dbo.DJ_Entity A
 JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
 WHERE A.Deceased = 1
   AND B.SanctionListReference LIKE '%Japanese Finance%'
-  AND NOT EXISTS (SELECT 1 FROM #tempTestCleanupJP X WHERE X.EntNum = A.EntityId)
+  AND NOT EXISTS (SELECT 1 FROM #tempDJBlacklistJP_Preview X WHERE X.EntNum = A.EntityId)
 GROUP BY A.EntityId, A.FullName;
 
 
-/* 2. 刪除 BSADBJP.dbo.OFAC_SPEC 中符合條件的資料 (限定 GROUPID = '11') */
-DELETE T
-FROM BSADBJP.dbo.OFAC_SPEC T
-JOIN #tempTestCleanupJP S 
-  ON T.spec_name = S.SdnName 
- AND T.remark = CAST(S.EntNum AS VARCHAR(100))
-WHERE T.GROUPID = '11';
+-- 3. 比對目標表，產出即將被寫入的明細
+;WITH TempAddress AS
+(
+    SELECT A.EntityId, A.Address, A.City, A.AddressCountry,
+           ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
+    FROM BSADB.dbo.DJ_Address A WITH (NOLOCK)
+    WHERE A.Deleted = 0
+      AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP_Preview X WHERE A.EntityId = X.EntNum)
+),
+TempIdent AS
+(
+    SELECT A.EntityId,
+           A.IdentificationNumber,
+           ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
+    FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH (NOLOCK)
+    WHERE A.Deleted = 0
+      AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP_Preview X WHERE A.EntityId = X.EntNum)
+),
+TempDOB AS
+(
+    SELECT A.EntityId, A.InfoDay, A.InfoMonth, A.InfoYear,
+           ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
+    FROM BSADB.dbo.DJ_DateTypeInfo A WITH (NOLOCK)
+    WHERE A.DateType = 'Date of Birth'
+      AND A.Deleted = 0
+      AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP_Preview X WHERE A.EntityId = X.EntNum)
+),
+SourceDetails AS
+(
+    SELECT 
+        A.EntNum,
+        A.SdnName,
+        A.UpdatedDate,
+        A.SourceCategory,
+        B.Address,
+        LEFT(B.City, 100) AS City,
+        LEFT(B.AddressCountry, 100) AS Country,
+        LEFT(C.IdentificationNumber, 44) AS IdentNumber,
+        CASE WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL 
+             THEN D.InfoYear 
+             ELSE CONVERT(VARCHAR(8), dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) 
+        END AS DOB
+    FROM #tempDJBlacklistJP_Preview A
+    LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1
+    LEFT JOIN TempIdent   C ON A.EntNum = C.EntityId AND C.RowId = 1
+    LEFT JOIN TempDOB     D ON A.EntNum = D.EntityId AND D.RowId = 1
+)
+SELECT 
+    CASE 
+        WHEN T.spec_name IS NULL THEN 'INSERT (全新寫入)'
+        WHEN T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date THEN 'UPDATE (更新覆蓋)'
+    END AS [預計動作(Action)],
+    S.SourceCategory AS [名單來源類型],
+    S.EntNum AS [EntityId(remark)],
+    S.SdnName AS [Name(spec_name)],
+    S.UpdatedDate AS [來源更新日],
+    T.updated_date AS [目標表現有更新日],
+    T.DInd AS [目標表現有DInd],
+    S.Address,
+    S.City,
+    S.Country,
+    S.IdentNumber,
+    S.DOB
+FROM SourceDetails S
+LEFT JOIN BSADBJP..OFAC_SPEC T 
+       ON T.spec_name = S.SdnName 
+      AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+      AND T.GROUPID = '11'
+WHERE T.spec_name IS NULL -- 符合 NOT MATCHED (會執行 INSERT)
+   OR (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) -- 符合 MATCHED (會執行 UPDATE)
+ORDER BY S.SourceCategory DESC, S.EntNum;
 
-/* 3. 清理暫存表 */
-DROP TABLE #tempTestCleanupJP;
+-- 清理暫存
+DROP TABLE #tempDJBlacklistJP_Preview;
