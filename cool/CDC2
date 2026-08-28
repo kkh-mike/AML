@@ -1,68 +1,27 @@
--- 1. 建立有效的來源名單暫存（Active 資料）
-DROP TABLE IF EXISTS #ValidDJSource;
+-- 1. 總覽：看有效筆數 (N) 與已刪除筆數 (Y)
+SELECT 
+    DInd,
+    COUNT(1) AS TotalCount,
+    MIN(creDate) AS Earliest_CreateDate,
+    MAX(updated_date) AS Latest_UpdatedDate
+FROM BSADB.dbo.OFAC_GLSpec
+WHERE GROUPID = 10
+GROUP BY DInd;
 
-SELECT DISTINCT
-    A.EntityId AS EntNum,
-    D.IdentificationNumber,
-    D.IdentificationType + '; Please go to Dowjones website for more detail' AS TargetAddress
-INTO #ValidDJSource
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_ListCategory B          ON A.EntityId = B.EntityId
-JOIN BSADB.dbo.DJ_List_Data_A C           ON A.EntityId = C.EntNum
-JOIN BSADB.dbo.DJ_IdentificationTypeInfo D ON A.EntityId = D.EntityId
-WHERE A.PersonStatus <> 'Inactive'
-  AND (
-        B.Description2 = 'Sanctions Lists'
-     OR B.Description3 IN (
-            'OFAC Related - Majority Owned',
-            'OFAC Related - Control',
-            'OFAC - Regional Sanctions Related - Majority Owned',
-            'OFAC - Regional Sanctions Related - Control',
-            'EU Related - Majority Owned',
-            'EU Related - Control',
-            'EU - Regional Sanctions Related - Majority Owned',
-            'EU - Regional Sanctions Related - Control'
-        )
-      )
-  AND B.Deleted = 0
-  AND D.IdentificationType IN (
-        'Aircraft Construction, Line, Fleet or Serial Number',
-        'Aircraft Manufacturer''s Serial Number (MSN)',
-        'Bank Identifier Code (BIC)',
-        'Central Registration Depository (CRD)',
-        'Company Identification No.',
-        'Driving Licence No.',
-        'DUNS Number',
-        'International Maritime Organization (IMO) Ship No.',
-        'International Securities Identification Number (ISIN)',
-        'Legal Entity Identifier (LEI)',
-        'National ID',
-        'National Provider Identifier (NPI)',
-        'National Tax No.',
-        'Others',
-        'Passport No.',
-        'Social Security No.',
-        'Email',
-        'Fax',
-        'Phone'
-      )
-  AND D.Deleted = 0;
-
--- 2. 挑出死亡名單（Target 仍是有效 N，但 Source 已不存在或已失效）
-SELECT TOP 5
-    T.ent_num,
-    T.spec_name          AS IdentificationNumber,
-    T.remark             AS EntNum,
-    T.ADDRESS,
-    T.updated_date,
-    T.DInd               AS Current_DInd,
-    T.DelDate,
-    T.DelUserID
-FROM BSADB.dbo.OFAC_GLSpec T
-LEFT JOIN #ValidDJSource S
-  ON T.spec_name = S.IdentificationNumber
- AND T.remark = CAST(S.EntNum AS VARCHAR(100))
- AND T.ADDRESS = S.TargetAddress
-WHERE T.GROUPID = 10
-  AND T.DInd = 'N'
-  AND S.EntNum IS NULL;
+-- 2. 明細：隨機抓 10 筆目前有效 (DInd = 'N') 的資料結構與欄位內容
+SELECT TOP 10
+    ent_num,
+    spec_name          AS IdentificationNumber,
+    remark             AS EntNum,
+    ADDRESS            AS StoredAddress,
+    REPLACE(ADDRESS, '; Please go to Dowjones website for more detail', '') AS IdentificationType,
+    updated_date,
+    DInd,
+    EnterFlag,
+    SOURCE,
+    creUserID,
+    creDate
+FROM BSADB.dbo.OFAC_GLSpec
+WHERE GROUPID = 10
+  AND DInd = 'N'
+ORDER BY creDate DESC;
