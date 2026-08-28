@@ -1,359 +1,352 @@
- BEGIN TRY                
-            IF @ModuleName = 'CIF'
-                BEGIN															                     
-                    TRUNCATE TABLE dbo.CIF_Migrate_Mapping_TEMP;
+    IF @ModuleName = 'ACCT'
+                    BEGIN
 
-                    IF @CIFMappingTable IS NOT NULL
-                       BEGIN                                                                       
-                    
-                            SET @sql = N'
-								        INSERT INTO dbo.CIF_Migrate_Mapping_TEMP (ACTION, SOURCE_CIF_KEY, NEW_CIF_KEY)
-								        SELECT ''UPDATE'' AS Action, B.CIF_KEY, F.CIF_KEY
-								        FROM ' + QUOTENAME(@CIFMappingTable) + ' A 
-								        JOIN Customer_Migrate_buffer B ON A.' + QUOTENAME(@CIFMappingSourceColumn) + ' = B.CustomerNo
-								        JOIN BSA_SUB_CUST_FACT F ON F.CustomerNo = A.' + QUOTENAME(@CIFMappingTargetColumn) + '
-								        WHERE A.' + QUOTENAME(@CIFMappingFlagColumn) + ' = 1
-								        ';
-                         
-                                   EXEC sp_executesql @sql;  
+                        IF OBJECT_ID('tempdb..#AcctFinalMapping') IS NOT NULL
+                            DROP TABLE #AcctFinalMapping;
 
-                       SET @sql = CAST(N'' AS NVARCHAR(MAX)) + N'
-                           -- Check if table exists
-                           IF OBJECT_ID(''dbo.Customer_Migrate_Exception_Table'', ''U'') IS NULL
-                           BEGIN       
-                                SELECT                                    
-                                     Y.' + QUOTENAME(@CIFMappingSourceColumn) + ',
-                                     Y.' + QUOTENAME(@CIFMappingTargetColumn) + ',                                
-                                     ''Excluded in merging'' AS Reason,
-                                     A.* 
-                                INTO dbo.Customer_Migrate_Exception_Table
-                                FROM dbo.Customer_Migrate_buffer A
-                                LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' Y -- 靽格迤嚗���寧�� LEFT JOIN嚗���������� Mapping �����湔�亥����交��
-                                    ON Y.' + QUOTENAME(@CIFMappingSourceColumn) + ' = A.CustomerNo 
-                                WHERE 
-                                     -- ���瘜� A: ��格�� ID 撌脩��摮���冽�� DB
-                                     EXISTS (
-                                         SELECT 1 
-                                         FROM dbo.BSA_SUB_CUST_FACT Z
-                                         WHERE Z.CustomerNo = COALESCE(Y.' + QUOTENAME(@CIFMappingTargetColumn) + ', A.CustomerNo)
-                                     )
-                                     OR
-                                     -- ���瘜� B: ��寞活��扯��蝒� (Mapping 閬����撠���� ID 鋡急�嗡��)
-                                     EXISTS (
-                                         SELECT 1
-                                         FROM dbo.Customer_Migrate_buffer X
-                                         INNER JOIN ' + QUOTENAME(@CIFMappingTable) + ' MapX 
-                                            ON MapX.' + QUOTENAME(@CIFMappingSourceColumn) + ' = X.CustomerNo
-                                         WHERE MapX.' + QUOTENAME(@CIFMappingTargetColumn) + ' = A.CustomerNo -- ��乩犖�����格�� = ������靘�皞� (靘�憒� 38162428 1 �����格����� 38162428)
-                                         AND X.CustomerNo <> A.CustomerNo -- ���敺���芸楛
-                                                                                AND ISNULL(Y.'+QUOTENAME(@CIFMappingFlagColumn) + ', 0) <> 1
-                                                                                AND (ISNULL(Y.'+QUOTENAME(@CIFMappingSourceColumn) + ', '''') ='''' OR ISNULL(Y.'+QUOTENAME(@CIFMappingTargetColumn) + ', '''') ='''')
-                                     );
-                           END
-                           ELSE
-                           BEGIN       
-                                INSERT INTO dbo.Customer_Migrate_Exception_Table (                                
-                                     ' + QUOTENAME(@CIFMappingSourceColumn) + ',
-                                     ' + QUOTENAME(@CIFMappingTargetColumn) + ',
-                                     Reason,
-                                     time_key,
-                                     CIF_KEY,
-                                     CustomerNo,
-                                     CUST_NME,
-                                     NATIVE_CUST_NME,
-                                     Alias_Name,
-                                     C_CTRYCD,
-                                     NATIONALITY_1,
-                                     NATIONALITY_2,
-                                     Cust_Method_Of_Opening,
-                                     Cust_Product_Service,                                     
-                                     OPEN_DTE,
-                                     CustProdAndServicesUsed,
-                                     CustPurposeOfAcc,
-                                     RecordStatus,
-                                     Customer_Segment,
-                                     CUST_TYPE_CDE,
-                                     Cust_With_Bearer_Shares
-                                )
-                                SELECT 
-                                     Y.' + QUOTENAME(@CIFMappingSourceColumn) + ',
-                                     Y.' + QUOTENAME(@CIFMappingTargetColumn) + ',
-                                     ''Excluded in merging'' AS Reason ,
-                                     A.time_key,
-                                     A.CIF_KEY,
-                                     A.CustomerNo,
-                                     A.CUST_NME,
-                                     A.NATIVE_CUST_NME,
-                                     A.Alias_Name,
-                                     A.C_CTRYCD,
-                                     A.NATIONALITY_1,
-                                     A.NATIONALITY_2,
-                                     A.Cust_Method_Of_Opening,
-                                     A.Cust_Product_Service,                                     
-                                     A.OPEN_DTE,
-                                     A.CustProdAndServicesUsed,
-                                     A.CustPurposeOfAcc,
-                                     A.RecordStatus,
-                                     A.Customer_Segment,
-                                     A.CUST_TYPE_CDE,
-                                     A.Cust_With_Bearer_Shares
-                                FROM dbo.Customer_Migrate_buffer A
-                                LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' Y -- 靽格迤嚗���寧�� LEFT JOIN
-                                     ON Y.' + QUOTENAME(@CIFMappingSourceColumn) + ' = A.CustomerNo 
-                                WHERE 
-                                     -- ���瘜� A: ��格�� ID 撌脩��摮���冽�� DB
-                                     EXISTS (SELECT 1 FROM dbo.BSA_SUB_CUST_FACT Z WHERE Z.CustomerNo = COALESCE(Y.' + QUOTENAME(@CIFMappingTargetColumn) + ', A.CustomerNo))
-                                     OR
-                                     -- ���瘜� B: ��寞活��扯��蝒�
-                                     EXISTS (
-                                         SELECT 1
-                                         FROM dbo.Customer_Migrate_buffer X
-                                         INNER JOIN ' + QUOTENAME(@CIFMappingTable) + ' MapX 
-                                            ON MapX.' + QUOTENAME(@CIFMappingSourceColumn) + ' = X.CustomerNo
-                                         WHERE MapX.' + QUOTENAME(@CIFMappingTargetColumn) + ' = A.CustomerNo
-                                         AND X.CustomerNo <> A.CustomerNo
-                                                                                AND ISNULL(Y.'+QUOTENAME(@CIFMappingFlagColumn) + ', 0) <> 1
-                                                                                AND (ISNULL(Y.'+QUOTENAME(@CIFMappingSourceColumn) + ', '''') ='''' OR ISNULL(Y.'+QUOTENAME(@CIFMappingTargetColumn) + ', '''') ='''')
-                                     );
-                           END;'
-                                                   EXEC sp_executesql @sql;
-              
-                    SET @sql = CAST(N'' AS NVARCHAR(MAX)) + N'
-                    MERGE dbo.BSA_SUB_CUST_FACT AS TARGET
-                       USING (
-                           SELECT 
-                                A.CIF_KEY,
-                                --take from mapping table if TS null then SK
-                                COALESCE(B.' + QUOTENAME(@CIFMappingTargetColumn) + ', A.CustomerNo) AS CustomerNo,
-                                A.CUST_NME,
-                                A.NATIVE_CUST_NME,
-                                A.Alias_Name,
-                                A.C_CTRYCD,
-                                A.NATIONALITY_1,
-                                A.NATIONALITY_2,
-                                A.Cust_Method_Of_Opening,
-                                A.Cust_Product_Service,                                
-                                A.OPEN_DTE,
-                                A.time_key,
-                                A.CUST_TYPE_CDE,
-                                A.Cust_With_Bearer_Shares
-                           FROM dbo.Customer_Migrate_buffer A WITH (NOLOCK)
-                           LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' B WITH (NOLOCK) ON B.' + QUOTENAME(@CIFMappingSourceColumn) + ' = A.CustomerNo                    
-                           WHERE ISNULL(B.' + QUOTENAME(@CIFMappingFlagColumn) + ', 0) <> 1 AND 
-                           NOT EXISTS(
-                                                                                        SELECT 1 FROM dbo.Customer_Migrate_Exception_Table Z WHere Z.CIF_KEY = A.CIF_KEY
-                           ) AND
-                           NOT EXISTS (
-                                              SELECT 1
-                                              FROM dbo.Customer_Migrate_buffer X WITH (NOLOCK)
-                                              INNER JOIN ' + QUOTENAME(@CIFMappingTable) + ' Y WITH (NOLOCK)
-                                                  ON X.CustomerNo = Y.' + QUOTENAME(@CIFMappingSourceColumn) + '
-                                              WHERE Y.' + QUOTENAME(@CIFMappingTargetColumn) + ' = A.CustomerNo
-                                                                                          AND X.CustomerNo <> A.CustomerNo
-                                                                                          AND ISNULL(Y.'+QUOTENAME(@CIFMappingFlagColumn) + ', 0) <> 1
-                                         )
-                                                        UNION 
-                                         
-                                                        SELECT 
-                                                                 B.CIF_KEY,                                                              
-                                                                COALESCE(s.TS_CUST_ID, B.CustomerNo) AS CustomerNo,
-                                                                B.CUST_NME,
-                                                                B.NATIVE_CUST_NME,
-                                                                B.Alias_Name,
-                                                                B.C_CTRYCD,
-                                                                B.NATIONALITY_1,
-                                                                B.NATIONALITY_2,
-                                                                B.Cust_Method_Of_Opening,
-                                                                B.Cust_Product_Service,                                                                
-                                                                B.OPEN_DTE,
-                                                                B.time_key,
-                                                                B.CUST_TYPE_CDE,
-                                                                B.Cust_With_Bearer_Shares
-                                                        FROM dbo.BANCS_SK_CUST_INFO s
-                                                        INNER JOIN dbo.Customer_Migrate_buffer b 
-                                                                ON s.SK_CUST_ID = b.CustomerNo
-                                                        LEFT JOIN dbo.CIF_Migrate_Mapping_TEMP m 
-                                                                ON b.CIF_KEY = m.SOURCE_CIF_KEY
-                                                        LEFT JOIN dbo.Customer_Migrate_Exception_Table e 
-                                                                ON b.CIF_KEY = e.CIF_KEY
-                                                        WHERE s.CUST_RE_NO_FLG <> ''1''
-                                                          AND m.SOURCE_CIF_KEY IS NULL  
-                                                          AND e.CIF_KEY IS NULL 
-                       ) AS SOURCE
-                       ON TARGET.CustomerNo = SOURCE.CustomerNo
-
-                       WHEN MATCHED THEN
-                           -- Dummy update to ensure OUTPUT is triggered
-                           UPDATE SET CustomerNo = TARGET.CustomerNo                                                  
-
-                       WHEN NOT MATCHED BY TARGET THEN
-                           INSERT (
-                                CIF_KEY, CustomerNo, Alias_Name, Cust_Method_Of_Opening, 
-                                Cust_Product_Service,time_key, CUST_TYPE_CDE,Cust_With_Bearer_Shares
-                           )
-                           VALUES (
-                                NEWID(),
-                                SOURCE.CustomerNo,
-                                SOURCE.Alias_Name,
-                                SOURCE.Cust_Method_Of_Opening,
-                                SOURCE.Cust_Product_Service,                                
-                                SOURCE.time_key,
-                                SOURCE.CUST_TYPE_CDE,
-                                SOURCE.Cust_With_Bearer_Shares
-                           )
-
-                       OUTPUT 
-                           $action, 
-                           SOURCE.CIF_KEY, 
-                           INSERTED.CIF_KEY
-                       INTO dbo.CIF_Migrate_Mapping_TEMP (ACTION, SOURCE_CIF_KEY, NEW_CIF_KEY);';                                                
-                       
-                       EXEC sp_executesql @sql;
-                       END
-                       ELSE
-                       BEGIN
-                           MERGE dbo.BSA_SUB_CUST_FACT AS TARGET
-                    USING
-                        ( SELECT    CIF_KEY ,
-                                    CustomerNo ,
-                                    CUST_NME ,
-                                    NATIVE_CUST_NME ,
-                                    Alias_Name ,
-                                    C_CTRYCD ,
-                                    NATIONALITY_1 ,
-                                    NATIONALITY_2 ,
-                                    Cust_Method_Of_Opening ,
-                                    Cust_Product_Service ,                                    
-                                    OPEN_DTE,
-                                         time_key,
-                                         CUST_TYPE_CDE,
-                                         Cust_With_Bearer_Shares
-                          FROM      dbo.Customer_Migrate_buffer
-                        ) AS SOURCE
-                    ON TARGET.CustomerNo = SOURCE.CustomerNo
-                    WHEN MATCHED THEN
-              -- No update, just output mapping
-                        UPDATE SET CustomerNo = TARGET.CustomerNo
-                    WHEN NOT MATCHED BY TARGET THEN
-                        INSERT ( CIF_KEY, CustomerNo, Alias_Name, Cust_Method_Of_Opening, 
-                                Cust_Product_Service,time_key, CUST_TYPE_CDE,Cust_With_Bearer_Shares
-                               )
-                        VALUES ( NEWID() ,
-                                 SOURCE.CustomerNo,
-                                     SOURCE.Alias_Name,
-                                     SOURCE.Cust_Method_Of_Opening,
-                                     SOURCE.Cust_Product_Service,                                     
-                                     SOURCE.time_key,
-                                     SOURCE.CUST_TYPE_CDE,
-                                     SOURCE.Cust_With_Bearer_Shares
-                               )
-                    OUTPUT
-                        $action ,
-                        SOURCE.CIF_KEY ,
-                        INSERTED.CIF_KEY
-                        INTO dbo.CIF_Migrate_Mapping_TEMP ( ACTION,
-                                                            SOURCE_CIF_KEY,
-                                                            NEW_CIF_KEY ); 
-                       END
-                       
-                       
-                    SET @sql = N'INSERT INTO WAREHOUSE' + @BNK_NBR
-                        + '.dbo.PB_CUSTOMER_FACT(time_key, CIF_KEY,cust_type_cde, CUST_NME, NATIVE_CUST_NME, C_CTRYCD, NATIONALITY_1, NATIONALITY_2, OPEN_DTE, RecordStatus, Customer_Segment)
-              SELECT B.time_key, A.NEW_CIF_KEY,cust_type_cde, B.CUST_NME, B.NATIVE_CUST_NME, B.C_CTRYCD, B.NATIONALITY_1, B.NATIONALITY_2, B.OPEN_DTE, B.RecordStatus, B.Customer_Segment
-              FROM dbo.CIF_Migrate_Mapping_TEMP A JOIN dbo.Customer_Migrate_buffer B ON A.SOURCE_CIF_KEY = B.CIF_KEY
-              WHERE A.ACTION = ''INSERT''
-              AND NOT EXISTS(SELECT 1 FROM WAREHOUSE' + @BNK_NBR
-                        + '.dbo.PB_CUSTOMER_FACT Z WHERE Z.CIF_KEY = A.NEW_CIF_KEY)';                            
-              
+                        CREATE TABLE #AcctFinalMapping
+                            (
+                              SourceAcctKey NVARCHAR(100) ,
+                              FinalAcctKey NVARCHAR(100)
+                            );
+             
+                        IF ISNULL(@AcctMappingTable, '') <> ''
+                            BEGIN
+                                SET @sql = '
+                       WITH MappedAccounts AS (
+                           SELECT
+                                A.ACCT_KEY AS SourceAcctKey,
+                                -- Use mapped key, or default to prefix + original key
+                                COALESCE(M.' + QUOTENAME(@AcctMappingTargetColumn)
+                                    + ', ''' + ISNULL(@Prefix, '') + ''' + A.ACCT_KEY) AS FinalAcctKey,
+                                -- Assign a rank to handle duplicate ACCT_KEYs from the source or mapping
+                                ROW_NUMBER() OVER (PARTITION BY A.ACCT_KEY ORDER BY (SELECT 1)) as rn
+                           FROM dbo.Acct_Migrate_buffer A
+                           LEFT JOIN ' + QUOTENAME(@AcctMappingTable) + ' M
+                                ON M.' + QUOTENAME(@AcctMappingSourceColumn) + '= (CASE 
+							WHEN LEN(A.ACCT_KEY) < 25 
+							THEN RIGHT(REPLICATE(''0'', 25) + A.ACCT_KEY, 25) 
+							ELSE A.ACCT_KEY 
+							  END)									
+								   )
+								   INSERT INTO #AcctFinalMapping (SourceAcctKey, FinalAcctKey)
+								   SELECT
+									   SourceAcctKey,
+									   FinalAcctKey
+								   FROM MappedAccounts
+								   WHERE rn = 1 -- Keep only the first unique mapping
+								   AND ISNULL(SourceAcctKey,'''') <> ''''
+                  ';
                     EXEC sp_executesql @sql;
-              
-                    INSERT  INTO dbo.PB_CustProdAndServicesUsed
-                            ( CIF_KEY ,
-                              CODE ,
-                              LastUpdatedBy ,
-                              LastUpdatedDate_UTC
-                            )
-                            SELECT  NEW_CIF_KEY ,
-                                    F.Value ,
-                                    @UserId ,
-                                    @DateUTC
-                            FROM    dbo.Customer_Migrate_buffer A
-                                    INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY AND B.ACTION = 'INSERT'
-                                    CROSS APPLY dbo.fnStringSplitter(A.CustProdAndServicesUsed,
-                                                              '|') F
-                            WHERE   NOT EXISTS ( SELECT 1
-                                                 FROM   dbo.PB_CustProdAndServicesUsed Z
-                                                 WHERE  Z.CIF_KEY = B.NEW_CIF_KEY
-                                                        AND Z.CODE = F.Value )
-                                    AND ISNULL(A.CustProdAndServicesUsed, '') <> '';
-              
-                    INSERT  INTO dbo.PB_CustPurposeOfAcc
-                            ( CIF_KEY ,
-                              CODE ,
-                              LastUpdatedBy ,
-                              LastUpdatedDate_UTC
-                            )
-                            SELECT  NEW_CIF_KEY ,
-                                    F.Value ,
-                                    @UserId ,
-                                    @DateUTC
-                            FROM    dbo.Customer_Migrate_buffer A
-                                    INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY AND B.ACTION = 'INSERT'
-                                    CROSS APPLY dbo.fnStringSplitter(A.CustPurposeOfAcc,
-                                                              '|') F
-                            WHERE   NOT EXISTS ( SELECT 1
-                                                 FROM   dbo.PB_CustPurposeOfAcc Z
-                                                 WHERE  Z.CIF_KEY = B.NEW_CIF_KEY
-                                                        AND Z.CODE = F.Value )
-                                    AND ISNULL(A.CustPurposeOfAcc, '') <> '';
-                                    
-					IF @CIFMappingTable IS NOT NULL
-                       BEGIN                                       
-						   SET @sql = N'INSERT INTO SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source(Cif_key, Internal_Cif_Key, LoadTimeKey)
-										 SELECT COALESCE(C.' + QUOTENAME(@CIFMappingTargetColumn) + ', B.CustomerNo) AS CustomerNo, A.NEW_CIF_KEY, B.time_key
-										 FROM dbo.CIF_Migrate_Mapping_TEMP A JOIN dbo.Customer_Migrate_buffer B ON A.SOURCE_CIF_KEY = B.CIF_KEY
-										 LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' C WITH (NOLOCK) ON C.' + QUOTENAME(@CIFMappingSourceColumn) + ' = B.CustomerNo   
-										 WHERE A.ACTION = ''INSERT''
-										 AND NOT EXISTS(SELECT 1 FROM SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source Z WHERE Z.Cif_key = COALESCE(C.' + QUOTENAME(@CIFMappingTargetColumn) + ', B.CustomerNo))';                               
-	              
-							EXEC sp_executesql @sql;   
-						END     
-					ELSE					
-						BEGIN
-							SET @sql = N'INSERT INTO SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source(Cif_key, Internal_Cif_Key, LoadTimeKey)
-										 SELECT B.CustomerNo, A.NEW_CIF_KEY, B.time_key
-										 FROM dbo.CIF_Migrate_Mapping_TEMP A JOIN dbo.Customer_Migrate_buffer B ON A.SOURCE_CIF_KEY = B.CIF_KEY
-										 WHERE A.ACTION = ''INSERT''
-										 AND NOT EXISTS(SELECT 1 FROM SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source Z WHERE Z.Cif_key = B.CustomerNo)';                               
-	              
-							EXEC sp_executesql @sql;  
-						END 
-                        
-                     IF @CIFMappingTable IS NOT NULL
-                        BEGIN
-                            SET @sql = N'
-                                INSERT INTO dbo.CIF_Migrate_Mapping_TEMP (ACTION, SOURCE_CIF_KEY, NEW_CIF_KEY)
-                                SELECT ''UPDATE2'' AS Action, B.CIF_KEY, F.CIF_KEY
-                                FROM ' + QUOTENAME(@CIFMappingTable) + ' A 
-                                JOIN dbo.Customer_Migrate_buffer B ON A.' + QUOTENAME(@CIFMappingSourceColumn) + ' = B.CustomerNo
-                                JOIN dbo.BSA_SUB_CUST_FACT F ON F.CustomerNo = A.' + QUOTENAME(@CIFMappingTargetColumn) + '
-                                WHERE A.' + QUOTENAME(@CIFMappingFlagColumn) + ' = 1
-                                AND NOT EXISTS (
-                                    SELECT 1 FROM dbo.Customer_Migrate_Exception_Table e
-                                    WHERE b.CIF_KEY = e.CIF_KEY
-                                )
-                                ';
-                         
-                            EXEC sp_executesql @sql;
-                        END
-	                              
-                       INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG) 
-                       SELECT @Time, @ModuleName + ' migrate completed -------> '  , 'N';
-                END;
+                            END;    
+                        ELSE
+                            BEGIN
+                                WITH    PrefixedAccounts
+                                          AS ( SELECT   ACCT_KEY AS SourceAcctKey ,
+                                                        ISNULL(@Prefix, '')
+                                                        + ACCT_KEY AS FinalAcctKey ,
+                                                        ROW_NUMBER() OVER ( PARTITION BY ACCT_KEY ORDER BY ( SELECT
+                                                              1
+                                                              ) ) AS rn
+                                               FROM     dbo.Acct_Migrate_buffer
+                                             )
+                                    INSERT  INTO #AcctFinalMapping
+                                            ( SourceAcctKey ,
+                                              FinalAcctKey
+                                            )
+                                            SELECT  SourceAcctKey ,
+                                                    FinalAcctKey
+                                            FROM    PrefixedAccounts
+                                            WHERE   rn = 1 -- Keep only the first unique account
+                                                    AND ISNULL(SourceAcctKey,
+                                                              '') <> '';
+                            END;
+                        CREATE CLUSTERED INDEX IX_SourceAcctKey ON #AcctFinalMapping(SourceAcctKey);
+             
+                        MERGE dbo.ACCT_XREF_DIM AS TARGET
+                        USING
+                            ( SELECT    C.NEW_CIF_KEY AS CIF_KEY ,
+                                        A.ACCT_KEY AS SourceAcctKey ,
+                                        B.FinalAcctKey AS Final_ACCT_KEY ,
+                                        APPL ,
+                                        Banking_Acc_Type_Code ,
+                                        ATAXIDCD ,
+                                        ATAXID ,
+                                        ISNULL(BRNCH_NBR, '') BRNCH_NBR ,
+                                        ASTATCD ,
+                                        PRMY_OFFCR_NBR ,
+                                        BNK_NBR ,
+                                        ADTOPN ,
+                                        HHOLD_KEY ,
+                                        EXPECTEDTrans_Amt ,
+                                        EXPECTEDTRANS_AMT_WIRE ,
+                                        EXPECTEDTRANS_AMT_MOI ,
+                                        EXPECTEDTRANS_AMT_CHK ,
+                                       EXPECTEDTRANS_AMT_ACH ,
+                                        EXPECTEDTRANS_AMT_ATM ,
+                                        EXPECTEDTRANS_AMT_OTH ,
+                                        EXPECTEDTRANS_AMT_TRF ,
+                                       EXPECTEDTRANS_AMT_OUT ,
+                                        EXPECTEDTRANS_AMT_WIRE_OUT ,
+                                        EXPECTEDTRANS_AMT_MOI_OUT ,
+                                        EXPECTEDTRANS_AMT_CHK_OUT ,
+                                        EXPECTEDTRANS_AMT_ACH_OUT ,
+                                        EXPECTEDTRANS_AMT_ATM_OUT ,
+                                        EXPECTEDTRANS_AMT_OTH_OUT ,
+                                        EXPECTEDTRANS_AMT_TRF_OUT ,
+                                        EXPECTED_MTH_TRANAMT ,
+                                        EXPECTED_MTH_TRANAMT_WIRE ,
+                                        EXPECTED_MTH_TRANAMT_MOI ,
+                                        EXPECTED_MTH_TRANAMT_CHK ,
+                                        EXPECTED_MTH_TRANAMT_ACH ,
+                                        EXPECTED_MTH_TRANAMT_ATM ,
+                                        EXPECTED_MTH_TRANAMT_OTH ,
+                                        EXPECTED_MTH_TRANAMT_TRF ,
+                                        EXPECTED_MTH_TRANAMT_OUT ,
+                                        EXPECTED_MTH_TRANAMT_WIRE_OUT ,
+                                        EXPECTED_MTH_TRANAMT_MOI_OUT ,
+                                        EXPECTED_MTH_TRANAMT_CHK_OUT ,
+                                        EXPECTED_MTH_TRANAMT_ACH_OUT ,
+                                        EXPECTED_MTH_TRANAMT_ATM_OUT ,
+                                        EXPECTED_MTH_TRANAMT_OTH_OUT ,
+                                        EXPECTED_MTH_TRANAMT_TRF_OUT ,
+                                        EXPECTED_MTH_COUNT ,
+                                        EXPECTED_MTH_COUNT_WIRE ,
+                                        EXPECTED_MTH_COUNT_MOI ,
+                                        EXPECTED_MTH_COUNT_CHK ,
+                                        EXPECTED_MTH_COUNT_ACH ,
+                                        EXPECTED_MTH_COUNT_ATM ,
+                                        EXPECTED_MTH_COUNT_OTH ,
+                                        EXPECTED_MTH_COUNT_TRF ,
+                                        EXPECTED_MTH_COUNT_OUT ,
+                                        EXPECTED_MTH_COUNT_WIRE_OUT ,
+                                        EXPECTED_MTH_COUNT_MOI_OUT ,
+                                        EXPECTED_MTH_COUNT_CHK_OUT ,
+                                        EXPECTED_MTH_COUNT_ACH_OUT ,
+                                        EXPECTED_MTH_COUNT_ATM_OUT ,
+                                        EXPECTED_MTH_COUNT_OTH_OUT ,
+                                        EXPECTED_MTH_COUNT_TRF_OUT ,
+                                        EXPECTEDTRANS_AMT_CCD_OUT ,
+                                        EXPECTEDTRANS_AMT_DCD_OUT ,
+                                        EXPECTED_MTH_TRANAMT_CCD_OUT ,
+                                        EXPECTED_MTH_TRANAMT_DCD_OUT ,
+                                        EXPECTED_MTH_COUNT_CCD_OUT ,
+                                        EXPECTED_MTH_COUNT_DCD_OUT ,
+                                        EXPECTEDTRANS_AMT_ATMC ,
+                                        EXPECTEDTRANS_AMT_ATMC_OUT ,
+                                        EXPECTED_MTH_TRANAMT_ATMC ,
+                                        EXPECTED_MTH_TRANAMT_ATMC_OUT ,
+                                        EXPECTED_MTH_COUNT_ATMC ,
+                                        EXPECTED_MTH_COUNT_ATMC_OUT ,
+                                        ACCT_TYP_CDE ,
+                                        MULTI_CCY_ACCNO ,
+                                        AcctBalance ,
+                                        AccountFlag ,
+                                        EXPECTEDTRANS_AMT_WIRE_F ,
+                                        EXPECTEDTRANS_AMT_WIRE_F_OUT ,
+                                        EXPECTED_MTH_TRANAMT_WIRE_F ,
+                                        EXPECTED_MTH_TRANAMT_WIRE_F_OUT ,
+                                        EXPECTED_MTH_COUNT_WIRE_F ,
+                                        EXPECTED_MTH_COUNT_WIRE_F_OUT ,
+                                        EXPECTEDTRANS_AMT_TTL ,
+                                        EXPECTEDTRANS_AMT_TTL_OUT ,
+                                        EXPECTED_MTH_COUNT_TTL ,
+                                        EXPECTED_MTH_COUNT_TTL_OUT ,
+                                        EXPECTED_MTH_TRANAMT_TTL ,
+                                        EXPECTED_MTH_TRANAMT_TTL_OUT
+                              FROM      dbo.Acct_Migrate_buffer A
+                                        LEFT JOIN #AcctFinalMapping B ON A.ACCT_KEY = B.SourceAcctKey
+                                        LEFT JOIN dbo.CIF_Migrate_Mapping_TEMP C ON A.CIF_KEY = C.SOURCE_CIF_KEY
+                              WHERE     C.ACTION = 'INSERT'
+                                        AND NOT EXISTS(SELECT 1 FROM dbo.Acct_Migrate_buffer X WHERE x.ACCT_KEY = b.FinalAcctKey )
+                                              AND FinalAcctKey IS NOT NULL
+                            ) AS SOURCE
+                        ON TARGET.ACCT_KEY = SOURCE.Final_ACCT_KEY
+                            AND TARGET.APPL = SOURCE.APPL
+                        WHEN NOT MATCHED BY TARGET THEN
+                            INSERT ( CIF_KEY ,
+                                     ACCT_KEY ,
+                                     APPL ,
+                                     Banking_Acc_Type_Code ,
+                                     ATAXIDCD ,
+                                     ATAXID ,
+                                     BRNCH_NBR ,
+                                     ASTATCD ,
+                                     PRMY_OFFCR_NBR ,
+                                     BNK_NBR ,
+                                     ADTOPN ,
+                                     HHOLD_KEY ,
+                                     ACCT_TYP_CDE ,
+                                     MULTI_CCY_ACCNO ,
+                                     AcctBalance ,
+                                     AccountFlag
+                                   )
+                            VALUES ( SOURCE.CIF_KEY ,
+                                     SOURCE.Final_ACCT_KEY ,
+                                     SOURCE.APPL ,
+                                     SOURCE.Banking_Acc_Type_Code ,
+                                     SOURCE.ATAXIDCD ,
+                                     SOURCE.ATAXID ,
+                                     SOURCE.BRNCH_NBR ,
+                                     SOURCE.ASTATCD ,
+                                     SOURCE.PRMY_OFFCR_NBR ,
+                                     SOURCE.BNK_NBR ,
+                                     SOURCE.ADTOPN ,
+                                     SOURCE.HHOLD_KEY ,
+                                     SOURCE.ACCT_TYP_CDE ,
+                                     SOURCE.MULTI_CCY_ACCNO ,
+                                     SOURCE.AcctBalance ,
+                                     SOURCE.AccountFlag
+                                   )
+                        OUTPUT
+                            Inserted.CIF_KEY ,
+                            Inserted.ACCT_KEY ,
+                            Inserted.APPL ,
+                            SOURCE.EXPECTEDTrans_Amt ,
+                            SOURCE.EXPECTEDTRANS_AMT_WIRE ,
+                            SOURCE.EXPECTEDTRANS_AMT_MOI ,
+                            SOURCE.EXPECTEDTRANS_AMT_CHK ,
+                            SOURCE.EXPECTEDTRANS_AMT_ACH ,
+                            SOURCE.EXPECTEDTRANS_AMT_ATM ,
+                            SOURCE.EXPECTEDTRANS_AMT_OTH ,
+                            SOURCE.EXPECTEDTRANS_AMT_TRF ,
+                            SOURCE.EXPECTEDTRANS_AMT_OUT ,
+                            SOURCE.EXPECTEDTRANS_AMT_WIRE_OUT ,
+                            SOURCE.EXPECTEDTRANS_AMT_MOI_OUT ,
+                            SOURCE.EXPECTEDTRANS_AMT_CHK_OUT ,
+                            SOURCE.EXPECTEDTRANS_AMT_ACH_OUT ,
+                            SOURCE.EXPECTEDTRANS_AMT_ATM_OUT ,
+                            SOURCE.EXPECTEDTRANS_AMT_OTH_OUT ,
+                            SOURCE.EXPECTEDTRANS_AMT_TRF_OUT ,
+                            SOURCE.EXPECTED_MTH_TRANAMT ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_WIRE ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_MOI ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_CHK ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_ACH ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_ATM ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_OTH ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_TRF ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_OUT ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_WIRE_OUT ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_MOI_OUT ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_CHK_OUT ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_ACH_OUT ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_ATM_OUT ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_OTH_OUT ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_TRF_OUT ,
+                            SOURCE.EXPECTED_MTH_COUNT ,
+                           SOURCE.EXPECTED_MTH_COUNT_WIRE ,
+                            SOURCE.EXPECTED_MTH_COUNT_MOI ,
+                            SOURCE.EXPECTED_MTH_COUNT_CHK ,
+                            SOURCE.EXPECTED_MTH_COUNT_ACH ,
+                            SOURCE.EXPECTED_MTH_COUNT_ATM ,
+                            SOURCE.EXPECTED_MTH_COUNT_OTH ,
+                            SOURCE.EXPECTED_MTH_COUNT_TRF ,
+                            SOURCE.EXPECTED_MTH_COUNT_OUT ,
+                            SOURCE.EXPECTED_MTH_COUNT_WIRE_OUT ,
+                            SOURCE.EXPECTED_MTH_COUNT_MOI_OUT ,
+                            SOURCE.EXPECTED_MTH_COUNT_CHK_OUT ,
+                            SOURCE.EXPECTED_MTH_COUNT_ACH_OUT ,
+                            SOURCE.EXPECTED_MTH_COUNT_ATM_OUT ,
+                            SOURCE.EXPECTED_MTH_COUNT_OTH_OUT ,
+                            SOURCE.EXPECTED_MTH_COUNT_TRF_OUT ,
+                            SOURCE.EXPECTEDTRANS_AMT_CCD_OUT ,
+                            SOURCE.EXPECTEDTRANS_AMT_DCD_OUT ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_CCD_OUT ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_DCD_OUT ,
+                            SOURCE.EXPECTED_MTH_COUNT_CCD_OUT ,
+                            SOURCE.EXPECTED_MTH_COUNT_DCD_OUT ,
+                            SOURCE.EXPECTEDTRANS_AMT_ATMC ,
+                            SOURCE.EXPECTEDTRANS_AMT_ATMC_OUT ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_ATMC ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_ATMC_OUT ,
+                            SOURCE.EXPECTED_MTH_COUNT_ATMC ,
+                            SOURCE.EXPECTED_MTH_COUNT_ATMC_OUT ,
+                            SOURCE.EXPECTEDTRANS_AMT_WIRE_F ,
+                            SOURCE.EXPECTEDTRANS_AMT_WIRE_F_OUT ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_WIRE_F ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_WIRE_F_OUT ,
+                            SOURCE.EXPECTED_MTH_COUNT_WIRE_F ,
+                            SOURCE.EXPECTED_MTH_COUNT_WIRE_F_OUT ,
+                            SOURCE.EXPECTEDTRANS_AMT_TTL ,
+                            SOURCE.EXPECTEDTRANS_AMT_TTL_OUT ,
+                            SOURCE.EXPECTED_MTH_COUNT_TTL ,
+                            SOURCE.EXPECTED_MTH_COUNT_TTL_OUT ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_TTL ,
+                            SOURCE.EXPECTED_MTH_TRANAMT_TTL_OUT
+                            INTO
+                  ACCT_XREF_EXT ( CIF_KEY, ACCT_KEY, APPL, EXPECTEDTrans_Amt,
+                                EXPECTEDTRANS_AMT_WIRE, EXPECTEDTRANS_AMT_MOI,
+                                EXPECTEDTRANS_AMT_CHK, EXPECTEDTRANS_AMT_ACH,
+                                EXPECTEDTRANS_AMT_ATM, EXPECTEDTRANS_AMT_OTH,
+                                EXPECTEDTRANS_AMT_TRF, EXPECTEDTRANS_AMT_OUT,
+                                EXPECTEDTRANS_AMT_WIRE_OUT,
+                                EXPECTEDTRANS_AMT_MOI_OUT,
+                                EXPECTEDTRANS_AMT_CHK_OUT,
+                                EXPECTEDTRANS_AMT_ACH_OUT,
+                                EXPECTEDTRANS_AMT_ATM_OUT,
+                                EXPECTEDTRANS_AMT_OTH_OUT,
+                                EXPECTEDTRANS_AMT_TRF_OUT,
+                                EXPECTED_MTH_TRANAMT,
+                                EXPECTED_MTH_TRANAMT_WIRE,
+                                EXPECTED_MTH_TRANAMT_MOI,
+                                EXPECTED_MTH_TRANAMT_CHK,
+                                EXPECTED_MTH_TRANAMT_ACH,
+                                EXPECTED_MTH_TRANAMT_ATM,
+                                EXPECTED_MTH_TRANAMT_OTH,
+                                EXPECTED_MTH_TRANAMT_TRF,
+                                EXPECTED_MTH_TRANAMT_OUT,
+                                EXPECTED_MTH_TRANAMT_WIRE_OUT,
+                                EXPECTED_MTH_TRANAMT_MOI_OUT,
+                                EXPECTED_MTH_TRANAMT_CHK_OUT,
+                                EXPECTED_MTH_TRANAMT_ACH_OUT,
+                                EXPECTED_MTH_TRANAMT_ATM_OUT,
+                                EXPECTED_MTH_TRANAMT_OTH_OUT,
+                                EXPECTED_MTH_TRANAMT_TRF_OUT,
+                                EXPECTED_MTH_COUNT, EXPECTED_MTH_COUNT_WIRE,
+                                EXPECTED_MTH_COUNT_MOI, EXPECTED_MTH_COUNT_CHK,
+                                EXPECTED_MTH_COUNT_ACH, EXPECTED_MTH_COUNT_ATM,
+                                EXPECTED_MTH_COUNT_OTH, EXPECTED_MTH_COUNT_TRF,
+                                EXPECTED_MTH_COUNT_OUT,
+                                EXPECTED_MTH_COUNT_WIRE_OUT,
+                                EXPECTED_MTH_COUNT_MOI_OUT,
+                                EXPECTED_MTH_COUNT_CHK_OUT,
+                                EXPECTED_MTH_COUNT_ACH_OUT,
+                                EXPECTED_MTH_COUNT_ATM_OUT,
+                                EXPECTED_MTH_COUNT_OTH_OUT,
+                                EXPECTED_MTH_COUNT_TRF_OUT,
+                                EXPECTEDTRANS_AMT_CCD_OUT,
+                                EXPECTEDTRANS_AMT_DCD_OUT,
+                                EXPECTED_MTH_TRANAMT_CCD_OUT,
+                                EXPECTED_MTH_TRANAMT_DCD_OUT,
+                                EXPECTED_MTH_COUNT_CCD_OUT,
+                                EXPECTED_MTH_COUNT_DCD_OUT,
+                                EXPECTEDTRANS_AMT_ATMC,
+                                EXPECTEDTRANS_AMT_ATMC_OUT,
+                                EXPECTED_MTH_TRANAMT_ATMC,
+                                EXPECTED_MTH_TRANAMT_ATMC_OUT,
+                                EXPECTED_MTH_COUNT_ATMC,
+                                EXPECTED_MTH_COUNT_ATMC_OUT,
+                                EXPECTEDTRANS_AMT_WIRE_F,
+                                EXPECTEDTRANS_AMT_WIRE_F_OUT,
+                                EXPECTED_MTH_TRANAMT_WIRE_F,
+                                EXPECTED_MTH_TRANAMT_WIRE_F_OUT,
+                                EXPECTED_MTH_COUNT_WIRE_F,
+                                EXPECTED_MTH_COUNT_WIRE_F_OUT,
+                                EXPECTEDTRANS_AMT_TTL,
+                                EXPECTEDTRANS_AMT_TTL_OUT,
+                                EXPECTED_MTH_COUNT_TTL,
+                                EXPECTED_MTH_COUNT_TTL_OUT,
+                                EXPECTED_MTH_TRANAMT_TTL,
+                                EXPECTED_MTH_TRANAMT_TTL_OUT );
+                                
+                                     INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG) 
+                                     SELECT @Time, @ModuleName + ' migrate completed -------> '  , 'N';
+                    END;                                              
+                ELSE
 
 
-
-幫我看一下 下面哪一些是CIF 會用到的TABLE
+幫我看一下 下面哪一些是ACCT 會用到的TABLE
 
 
 -----------------------------CIF
