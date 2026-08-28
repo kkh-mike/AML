@@ -1,24 +1,17 @@
--- ============================================================
--- 步驟 1：清空目標表與 Log 表中 GROUPID = 10 的資料
--- ============================================================
-
--- 刪除目標主要資料表
-DELETE FROM BSADB.dbo.OFAC_GLSpec
-WHERE GROUPID = 10;
-
--- 刪除歷史 Log 資料表（若需要一併重置歷程）
-DELETE FROM BSADB.dbo.OFAC_GLSpec_Log
-WHERE GROUPID = 10;
-
-
--- ============================================================
--- 步驟 2：確認目前已完全清空（預期 Count 均為 0）
--- ============================================================
-
-SELECT 'OFAC_GLSpec' AS TableName, COUNT(1) AS RecordCount 
-FROM BSADB.dbo.OFAC_GLSpec 
+-- 1. 檢查寫入總筆數與狀態（預期全為 DInd = 'N'）
+SELECT 
+    DInd, 
+    COUNT(1) AS TotalCount, 
+    MIN(creDate) AS Min_CreDate, 
+    MAX(creDate) AS Max_CreDate
+FROM BSADB.dbo.OFAC_GLSpec
 WHERE GROUPID = 10
-UNION ALL
-SELECT 'OFAC_GLSpec_Log' AS TableName, COUNT(1) AS RecordCount 
-FROM BSADB.dbo.OFAC_GLSpec_Log 
-WHERE GROUPID = 10;
+GROUP BY DInd;
+
+-- 2. 檢查 Log 表是否全數正確寫入 ActionCD = '01' (新增)
+SELECT 
+    ActionCD, 
+    COUNT(1) AS LogCount
+FROM BSADB.dbo.OFAC_GLSpec_Log
+WHERE GROUPID = 10
+GROUP BY ActionCD;
