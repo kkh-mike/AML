@@ -3,7 +3,14 @@ WITH DeceasedList AS
     SELECT 
         A.EntityId, 
         A.FullName AS SdnName, 
-        MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate
+        MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate,
+        -- 判斷 DJ 的業務分類類型 (PEP / BL / NN)
+        CASE 
+            WHEN MAX(CASE WHEN A.ProfileNotes LIKE '%PEP%' OR A.OccupationTitle LIKE '%PEP%' THEN 1 ELSE 0 END) = 1 THEN 'PEP (政要名單)'
+            WHEN MAX(CASE WHEN A.ProfileNotes LIKE '%Sanction%' THEN 1 ELSE 0 END) = 1 THEN 'BL (黑名單/制裁)'
+            ELSE 'NN / 其他實體'
+        END AS 名單原始類型,
+        '是 (Deceased)' AS 死亡名單標記
     FROM BSADB.dbo.DJ_Entity A
     JOIN BSADB.dbo.DJ_SanctionListReference B 
       ON A.EntityId = B.EntityId
@@ -23,6 +30,8 @@ WITH DeceasedList AS
 SELECT 
     D.EntityId,
     D.SdnName,
+    D.名單原始類型,
+    D.死亡名單標記,
     D.UpdatedDate AS 來源更新日,
     T.updated_date AS 目標表現有更新日,
     T.DInd AS 目標表現有DInd,
@@ -37,7 +46,3 @@ LEFT JOIN BSADBJP..OFAC_SPEC T
        ON T.spec_name = D.SdnName 
       AND T.remark = CAST(D.EntityId AS VARCHAR(100))
       AND T.GROUPID = '11';
-
-
-
-這個表可以再多一欄位來分類?
