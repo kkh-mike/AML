@@ -18,6 +18,7 @@ TRUNCATE TABLE dbo.OFAC_SPEC;
 TRUNCATE TABLE dbo.OFAC_SPEC_RestrictedCountry;
 
 
+
 -- ==========================================
 -- 2. 清理通用核心黑名單掃描設定 (Core BlackList Settings)
 -- ==========================================
@@ -28,7 +29,8 @@ WHERE LIST = 'SPEC';
 -- 刪除通用黑名單正式生效設定
 DELETE FROM dbo.BlackList_Setting
 WHERE LIST = 'SPEC';
-
+ 
+                
 
 -- ==========================================
 -- 3. 清理境內匯款黑名單掃描設定 (Domestic Wire Settings)
@@ -64,3 +66,7 @@ WHERE LIST = 'SPEC';
 -- 刪除 SWIFT MX 黑名單正式生效設定
 DELETE FROM dbo.SWIFTMX_BlackList_Setting
 WHERE LIST = 'SPEC';
+
+
+
+幫我包成一個sp 
