@@ -1,14 +1,59 @@
+USE [BSADBTW]
+GO
 
-----------------------------ACCT 
--- 1. 帳戶擴充表資料
-DELETE A FROM ACCT_XREF_DIM A 
-JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
 
--- 2. 帳戶維度表資料
-DELETE A FROM ACCT_XREF_EXT A 
-JOIN CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.NEW_CIF_KEY
-WHERE B.ACTION = 'INSERT'
+ALTER PROCEDURE [dbo].[usp_Rollback_ACCT_Module]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- ==========================================
+        -- 1. 清理帳戶擴充表資料 (建議先刪子表 EXT)
+        -- ==========================================
+        IF OBJECT_ID('dbo.ACCT_XREF_EXT', 'U') IS NOT NULL
+            DELETE A 
+            FROM dbo.ACCT_XREF_EXT A 
+            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B 
+                ON A.CIF_KEY = B.NEW_CIF_KEY
+            WHERE B.ACTION = 'INSERT';
 
 
-這也幫我包
+        -- ==========================================
+        -- 2. 清理帳戶維度/主檔表資料 (再刪主表 DIM)
+        -- ==========================================
+        IF OBJECT_ID('dbo.ACCT_XREF_DIM', 'U') IS NOT NULL
+            DELETE A 
+            FROM dbo.ACCT_XREF_DIM A 
+            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B 
+                ON A.CIF_KEY = B.NEW_CIF_KEY
+            WHERE B.ACTION = 'INSERT';
+
+
+        -- 記錄 Rollback 成功日誌
+        IF OBJECT_ID('dbo.Migrator_LOG', 'U') IS NOT NULL
+            INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG)
+            SELECT GETDATE(), 'ACCT module rollback completed -------> ', 'N';
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+
+        -- 記錄 Rollback 失敗日誌並拋出錯誤
+        IF OBJECT_ID('dbo.Migrator_LOG', 'U') IS NOT NULL
+            INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG)
+            SELECT GETDATE(), 'ACCT module rollback FAILED: ' + ERROR_MESSAGE(), 'Y';
+
+        THROW;
+    END CATCH;
+END
+GO
