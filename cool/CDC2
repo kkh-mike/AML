@@ -37,3 +37,7 @@ LEFT JOIN BSADBJP..OFAC_SPEC T
        ON T.spec_name = D.SdnName 
       AND T.remark = CAST(D.EntityId AS VARCHAR(100))
       AND T.GROUPID = '11';
+
+
+
+這個表可以再多一欄位來分類?
