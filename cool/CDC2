@@ -1,14 +1,17 @@
-
-	-- 2. 撈出 4 種測試情境的名單
--- 【情境 A：全新新增 (Insert)】來源有，但 Target (OFAC_GLSpec) 完全沒有
-SELECT TOP 3 'Case A: Insert (全新)' AS TestCase, S.*
-FROM #SrcList S
-LEFT JOIN BSADB.dbo.OFAC_GLSpec T
-  ON T.GROUPID = 10
- AND T.spec_name = S.IdentificationNumber
- AND T.remark = CAST(S.EntNum AS VARCHAR(100))
- AND T.ADDRESS = S.TargetAddress
-WHERE T.spec_name IS NULL;
-
-
-我這邊查完沒東西噎
+-- 查最新的 20 筆資料
+SELECT TOP 20
+    ent_num,
+    spec_name          AS IdentificationNumber,
+    remark             AS EntNum,
+    ADDRESS            AS FullAddress,
+    -- 反解出 IdentificationType
+    REPLACE(ADDRESS, '; Please go to Dowjones website for more detail', '') AS IdentificationType,
+    updated_date,
+    DInd,              -- N: 有效, Y: 已停用/軟刪除
+    EnterFlag,
+    ApprovedBy,
+    DelDate,
+    creDate
+FROM BSADB.dbo.OFAC_GLSpec
+WHERE GROUPID = 10
+ORDER BY creDate DESC;
