@@ -1,1 +1,85 @@
-go
+OFAC 名單同步引擎：[dbo].[GLSPEC_SyncDJToInternalList]
+
+核心功能：Dow Jones (DJ) 制裁名單同步核心預存程序，負責將外部 DJ 資料清洗後分流寫入內部核心黑名單主表，並透過 MERGE OUTPUT 自動記錄異動歷程至 Log 表。
+
+一、 4 大分流同步架構
+
+第 1 段：主要制裁名單 (Primary Sanctions)
+
+目標主表：BSADB.dbo.OFAC_GLSpec
+
+群組編號：傳入參數 @GroupId
+
+比對鍵值：spec_name = DJ 姓名 且 remark = DJ 實體編號
+
+核心規則：NamePropertyBitCode & 1 > 0（僅納入主要受制裁人名）
+
+第 2 段：制裁控制與實質所有權 (SCO)
+
+目標主表：BSADB.dbo.OFAC_GLSpec
+
+群組編號：固定 27
+
+比對鍵值：spec_name = DJ 姓名 且 remark = DJ 實體編號
+
+核心規則：
+
+篩選 OFAC/EU 股權大於 50% (Majority Owned) 或具實質控制力 (Control)
+
+排除 NameSubType = 'OSN' 的別名
+
+ADDRESS 欄位改放制裁參考代碼清單 (超過 400 字則填通用提示)
+
+第 3 段：制裁證件與識別號碼 (Sanctions IDs)
+
+目標主表：BSADB.dbo.OFAC_GLSpec
+
+群組編號：固定 10
+
+比對鍵值：spec_name = 證件號碼 且 remark = DJ 實體編號 且 ADDRESS 還原之證件類型
+
+核心規則：
+
+spec_name 欄位改存證件號碼 (非姓名)
+
+僅納入 Passport、National ID、BIC、Email 等 19 種指定類型
+
+第 4 段：日本金融制裁名單 (Japanese Finance)
+
+目標主表：BSADBJP..OFAC_SPEC (跨日本庫)
+
+群組編號：固定 5
+
+比對鍵值：spec_name = DJ 姓名 且 remark = DJ 實體編號
+
+核心規則：
+
+參考資訊需包含 Japanese Finance 關鍵字
+
+雙軌納入死亡名單 (Deceased = 1)
+
+自動重新編配自增流水號 ent_num
+
+二、 MERGE 同步狀態與 Log 代碼對照
+
+新增 (Insert)：DJ 存在但主表不存在 -> 寫入資料並標記有效 (DInd = 'N')，記錄 ActionCD = '01'
+
+軟刪除 (Soft Delete)：主表有效 (DInd = 'N') 但 DJ 已除名 -> 標記停用 (DInd = 'Y')，記錄 ActionCD = '03'
+
+重新啟用 (Reactivate)：主表已停用 (DInd = 'Y') 再次於 DJ 出現 -> 恢復有效 (DInd = 'N')，記錄 ActionCD = '01'
+
+資料更新 (Update)：更新日期變更 (UpdatedDate <> updated_date) -> 覆蓋明細資料，記錄 ActionCD = '02'
+
+三、 維運與問題排查速查 (FAQ)
+
+Q1：DJ 有此人，為什麼一般黑名單 (Sec 1) 查不到？
+檢查是否為別名 (非 Primary Name，BitCode & 1 = 0)，或主表已被標記軟刪除 (DInd = 'Y')。
+
+Q2：受制裁控股公司為什麼沒進 SCO (Sec 2 / GroupId 27)？
+檢查實體狀態是否為 Inactive、分類是否缺少 OFAC/EU 股權控制關聯、或屬於 OSN 別名。
+
+Q3：護照號/稅號/Email 為什麼沒進 Sanctions IDs (Sec 3 / GroupId 10)？
+檢查該識別碼是否在允許的 19 種證件類型內，且 Deleted = 0。
+
+Q4：身故人員為什麼沒進日本名單 (Sec 4 / GroupId 5)？
+檢查 SanctionListReference 是否包含 Japanese Finance 關鍵字。
