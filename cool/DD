@@ -1,209 +1,105 @@
-已為你將 6 個欄位（INST_NO, EXTN_REF_NO, INTN_REF_NO, TYPE, STATUS, LST_MTN_DT） 全數納入讀取與寫入，並加入資料筆數檢查與前幾筆資料預覽功能。
-完整修改後的腳本如下：
-# ==========================================
-# 自動抓取 LDAP 連線資訊 + 切換至 BSADBTW + 透過 SqlBulkCopy 匯入 XREF.csv 全欄位
-# ==========================================
+USE [BSADB]
+GO
+/****** Object:  StoredProcedure [dbo].[NMCHK_InitiateNewAcctTables]    Script Date: 2026/8/31 下午 12:38:12 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER PROC [dbo].[NMCHK_InitiateNewAcctTables]
+@RANDNUM				NVARCHAR(20),
+@NAME					NVARCHAR(350),
+@DOB					NVARCHAR(10) = '',
+@Nationality			NVARCHAR(50) = '',
+@RELATIONSHIP			NVARCHAR(50),
+@TaxID					NVARCHAR(50) = '', 
+@UserID					NVARCHAR(50),
+@Address		NVARCHAR(160) = '',
+@City			NVARCHAR(50) = '',
+@Country		NVARCHAR(50) = '',
+@CombineKey     INTEGER,
+@Gender			NVARCHAR(2) = '',
+@IdentificationNumber NVARCHAR(MAX) = '',
+@NameCategory INTEGER, 
+@VesselIMONo NVARCHAR(MAX) = ''
 
-$hasError = $false
-$TargetDB = "BSADBTW"  # 指定目標資料庫
+AS 
+BEGIN
 
-# 1. 資料夾準備與全域 Log 初始化
-$LogFolder = Join-Path -Path $PSScriptRoot -ChildPath "Log"
-if (!(Test-Path $LogFolder)) {
-    New-Item -ItemType Directory -Path $LogFolder | Out-Null
-}
+DECLARE
+@OFAC_NEW_ACCT_NAMES_TABLE	NVARCHAR(50),
+@EXTRA_NAME					NVARCHAR(350),
+@RELATIONSHIP2				NVARCHAR(100),
+@NSTRSQL NVARCHAR(MAX)
 
-$Timestamp   = Get-Date -Format "yyyyMMdd_HHmmss"
-$MainLogFile = Join-Path -Path $LogFolder -ChildPath "Execution_$Timestamp.log"
 
-function Write-Log {
-    param (
-        [string]$Message,
-        [ConsoleColor]$ForegroundColor = [ConsoleColor]::White,
-        [switch]$IsError
-    )
-    $timePrefix = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $formattedMsg = "[$timePrefix] $Message"
-    
-    Write-Host $Message -ForegroundColor $ForegroundColor
-    Add-Content -Path $MainLogFile -Value $formattedMsg -Encoding UTF8
-    
-    if ($IsError) {
-        $global:hasError = $true
-    }
-}
+SET NOCOUNT ON
 
-Write-Log "=== 開始執行 CSV 讀取與 SQL 匯入作業 ===" -ForegroundColor Cyan
-Write-Log "主執行紀錄檔: $MainLogFile" -ForegroundColor DarkGray
+SELECT @OFAC_NEW_ACCT_NAMES_TABLE = 'OFAC_NEW_ACCT_NAMES_' + @RANDNUM, 
+		@DOB = CASE ISNULL(@DOB,'') WHEN '' THEN NULL ELSE CONVERT(VARCHAR, CONVERT(DATETIME,@DOB),112) END,
+		@Nationality = ISNULL(@Nationality,''), 
+		@TaxID = ISNULL(@TaxID, '') , 
+		@IdentificationNumber = ISNULL(LTRIM(RTRIM(@IdentificationNumber)), '')
 
-# ==========================================
-# 2. 載入 LDAP DLL 並取得連線字串
-# ==========================================
-$dllPath = Join-Path -Path $PSScriptRoot -ChildPath "Tsbldapdbc.dll"
+IF OBJECT_ID(@OFAC_NEW_ACCT_NAMES_TABLE, 'U') IS NOT NULL
+	EXEC('DROP TABLE ' + @OFAC_NEW_ACCT_NAMES_TABLE + ' ')
 
-if (-not (Test-Path -Path $dllPath)) {
-    Write-Log "錯誤：找不到 DLL 檔案: $dllPath" -ForegroundColor Red -IsError
-    exit 1
-}
+EXEC('
+CREATE TABLE [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(
+	[new_acct_key]  [int] NULL,
+	[new_acct_name] [NVARCHAR] (350) COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS NULL , 
+	[relationship]  [NVARCHAR] (50) NULL , 
+	[NameSource] [NVARCHAR] (20) NULL, 
+	[Nationality] NVARCHAR(50),
+	[DOB] NVARCHAR(10), 
+	[TAXID] NVARCHAR(50),
+	[Address] NVARCHAR(160),
+	[City]	NVARCHAR(50),
+	[Country] NVARCHAR(50),
+	[CombineKey] INTEGER, 
+	[Gender] NVARCHAR(2),
+	[IdentificationNumber] NVARCHAR(MAX), 
+	[NameCategory] INTEGER,
+	[VesselIMONo] NVARCHAR(MAX))')
+	
+/*Added Name Source table to determine the source of the name is from English Name Column or Non English Name column*/
+SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
+																	Address, City, Country, CombineKey, 
+																	Gender, IdentificationNumber, NameCategory, VesselIMONo)
+	VALUES(''1'', @NAME , @RELATIONSHIP, ''EnglishName'', @Nationality, @DOB, @TaxID, @Address, @City, @Country, @CombineKey, 
+			@Gender, @IdentificationNumber, @NameCategory, @VesselIMONo)'
 
-try {
-    if (-not ([System.Management.Automation.PSTypeName]'Tsbldapdbc.RunBat').Type) {
-        Add-Type -Path $dllPath
-    }
+EXEC SP_EXECUTESQL @NSTRSQL, N'@NAME NVARCHAR(350), @RELATIONSHIP NVARCHAR(100), @Nationality NVARCHAR(50), @DOB NVARCHAR(16), @TaxID NVARCHAR(50),
+								@Address NVARCHAR(160), @City NVARCHAR(50), @Country NVARCHAR(50), @CombineKey INTEGER, 
+								@Gender NVARCHAR(2), @IdentificationNumber NVARCHAR(MAX), @NameCategory INTEGER, @VesselIMONo NVARCHAR(MAX)', 
+								@NAME, @RELATIONSHIP, @Nationality, @DOB, @TaxID, @Address, @City, @Country, @CombineKey, 
+								@Gender, @IdentificationNumber, @NameCategory, @VesselIMONo
 
-    $App = New-Object Tsbldapdbc.RunBat
-    $App.SSL = $false
-    $App.ldapHost = "10.6.95.91"
-    $App.searchBase = "o=tsbank"
-    $sApp = "AML"
-    $iCStr = 7
+SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
+																	Address, City, Country, CombineKey, 
+																	Gender, IdentificationNumber, NameCategory, VesselIMONo)
+				SELECT 1 + ROW_NUMBER() OVER(ORDER BY Id), EXTRA_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
+					   Address, City, Country, CombineKey, Gender, IdentificationNumber, NameCategory, VesselIMONo
+				FROM dbo.NMCHK_MultipleList_TMP WITH(NOLOCK) 
+				WHERE USERID = @UserID '
+EXEC SP_EXECUTESQL @NSTRSQL, N'@UserID NVARCHAR(50)', @UserID 
 
-    $connStr = $App.GetRunBat($sApp, $iCStr)
-}
-catch {
-    Write-Log "錯誤：讀取 LDAP 連線資訊時發生例外: $($_.Exception.Message)" -ForegroundColor Red -IsError
-    exit 1
-}
+END
 
-# 3. 自動解析連線字串參數
-$Server   = if ($connStr -match '(?:Data Source|Server)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
-$Database = if ($connStr -match '(?:Initial Catalog|Database)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
-$User     = if ($connStr -match '(?:User ID|UID)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
-$Password = if ($connStr -match '(?:Password|PWD)\s*=\s*([^;]+)') { $matches[1].Trim() } else { "" }
+我輸入了 
 
-Write-Log "解析連線資訊 -> Server: $Server | 預設 DB: $Database | User: $User" -ForegroundColor DarkCyan
+SELECT 
+    ent_num,
+    spec_name,
+    GROUPID,
+    SOURCE,
+    DInd,        -- 是否有效/未刪除（正常應為 'N'）
+    EnterFlag,   -- 狀態標記（若是 'D' 可能是草稿或刪除）
+    ApprovedBy,  -- 是否已放行審核
+    DelUserID,    -- 刪除人員（若有值代表被軟刪除）
+	updated_date_UTC
+FROM BSADBJP.dbo.OFAC_SPEC
+裡面的spec_name
 
-if ([string]::IsNullOrWhiteSpace($Server)) {
-    Write-Log "錯誤：無法正確解析 Server 連線資訊！" -ForegroundColor Red -IsError
-    exit 1
-}
+但name_check 沒有命中 為什麼
 
-# ==========================================
-# 4. 定義 CSV 檔案路徑與對應 Table
-# ==========================================
-$tasks = @(
-    @{
-        TableName = "XREF"
-        FilePath  = Join-Path -Path $PSScriptRoot -ChildPath "XREF.csv"
-    }
-)
-
-# ==========================================
-# 5. 連線資料庫、切換至 BSADBTW 並執行寫入
-# ==========================================
-$sqlConn = New-Object System.Data.SqlClient.SqlConnection($connStr)
-
-try {
-    $sqlConn.Open()
-    Write-Log "成功連線至伺服器: $Server" -ForegroundColor Green
-
-    # 切換至 BSADBTW 資料庫
-    $sqlConn.ChangeDatabase($TargetDB)
-    Write-Log "已切換資料庫至: $TargetDB" -ForegroundColor Cyan
-
-    foreach ($task in $tasks) {
-        $table   = $task.TableName
-        $csvPath = $task.FilePath
-
-        Write-Log "--- 開始處理: $TargetDB.dbo.$table ---" -ForegroundColor Yellow
-
-        if (-not (Test-Path -Path $csvPath)) {
-            Write-Log "錯誤：找不到檔案 $csvPath" -ForegroundColor Red -IsError
-            continue
-        }
-
-        # 清空舊資料
-        $initTableSql = @"
-USE [$TargetDB];
-TRUNCATE TABLE [dbo].[$table];
-"@
-        $initCmd = $sqlConn.CreateCommand()
-        $initCmd.CommandText = $initTableSql
-        $initCmd.ExecuteNonQuery() | Out-Null
-
-        # 讀取 CSV 資料（若 CSV 編碼為 UTF-8，可將 Default 改為 UTF8）
-        $csvData = Import-Csv -Path $csvPath -Encoding Default
-        $csvCount = @($csvData).Count
-        Write-Log "已讀取 CSV 檔案，總筆數: $csvCount 筆" -ForegroundColor Cyan
-
-        if ($csvCount -eq 0) {
-            Write-Log "警告：CSV 檔案內無任何資料列（或僅有表頭），跳過匯入。" -ForegroundColor Yellow
-            continue
-        }
-
-        # 預覽前 3 筆讀取結果確認欄位解析正確
-        $sampleCount = [Math]::Min(3, $csvCount)
-        Write-Log "預覽前 $sampleCount 筆資料：" -ForegroundColor DarkYellow
-        for ($i = 0; $i -lt $sampleCount; $i++) {
-            $r = @($csvData)[$i]
-            Write-Log "  [#$($i+1)] INST_NO: '$($r.INST_NO)' | EXTN: '$($r.EXTN_REF_NO)' | INTN: '$($r.INTN_REF_NO)' | TYPE: '$($r.TYPE)' | STATUS: '$($r.STATUS)' | LST_MTN_DT: '$($r.LST_MTN_DT)'" -ForegroundColor DarkYellow
-        }
-
-        # 建立 6 個欄位的 DataTable
-        $dt = New-Object System.Data.DataTable
-        $columns = @("INST_NO", "EXTN_REF_NO", "INTN_REF_NO", "TYPE", "STATUS", "LST_MTN_DT")
-        foreach ($col in $columns) {
-            $null = $dt.Columns.Add($col, [string])
-        }
-
-        # 裝填資料至 DataTable
-        foreach ($row in $csvData) {
-            $newRow = $dt.NewRow()
-            $hasValue = $false
-
-            foreach ($col in $columns) {
-                $val = if ($row.$col) { $row.$col.Trim() } else { $null }
-                if (-not [string]::IsNullOrEmpty($val)) {
-                    $newRow[$col] = $val
-                    $hasValue = $true
-                } else {
-                    $newRow[$col] = [DBNull]::Value
-                }
-            }
-
-            # 排除整列全空的無效資料
-            if ($hasValue) {
-                $dt.Rows.Add($newRow)
-            }
-        }
-
-        Write-Log "過濾空列後，準備寫入 $($dt.Rows.Count) 筆資料..." -ForegroundColor Cyan
-
-        # 寫入 BSADBTW 資料庫
-        $bulkCopy = New-Object System.Data.SqlClient.SqlBulkCopy($sqlConn)
-        $bulkCopy.DestinationTableName = "[$TargetDB].[dbo].[$table]"
-        $bulkCopy.BulkCopyTimeout = 300
-        $bulkCopy.BatchSize = 10000
-
-        # 設定全部 6 個欄位的 Column Mapping
-        foreach ($col in $columns) {
-            $bulkCopy.ColumnMappings.Add($col, $col) | Out-Null
-        }
-
-        $bulkCopy.WriteToServer($dt)
-        $bulkCopy.Close()
-
-        Write-Log "[$table] 匯入成功！共寫入 $($dt.Rows.Count) 筆資料至 $TargetDB。" -ForegroundColor Green
-    }
-}
-catch {
-    Write-Log "執行作業時發生錯誤: $($_.Exception.Message)" -ForegroundColor Red -IsError
-}
-finally {
-    if ($sqlConn.State -eq [System.Data.ConnectionState]::Open) {
-        $sqlConn.Close()
-        Write-Log "已關閉資料庫連線。" -ForegroundColor DarkGray
-    }
-}
-
-# ==========================================
-# 6. 狀態判定與 Exit Code 回傳
-# ==========================================
-if ($hasError) {
-    Write-Log "=== 作業失敗，退出代碼: 1 ===" -ForegroundColor Red
-    exit 1
-} else {
-    Write-Log "=== 作業成功完成，退出代碼: 0 ===" -ForegroundColor Green
-    exit 0
-}
 
