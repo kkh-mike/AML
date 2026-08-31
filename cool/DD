@@ -1,3 +1,12 @@
+
+SELECT ent_num, spec_name, GROUPID, SOURCE, DInd, ApprovedBy
+FROM BSADB.dbo.OFAC_GLSPEC WITH(NOLOCK)
+WHERE spec_name LIKE N'%Rahmani, Arsalan%' 
+   OR ent_num IN (721314, 681276);
+
+
+
+
 不對阿 
 這樣說name check 不會來
 BSADBJP.dbo.OFAC_SPEC 這邊的名單看?
