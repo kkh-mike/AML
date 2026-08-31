@@ -1,0 +1,64 @@
+針對這次的 SP 異動，以下提供具體的 實作情境設計、測試步驟 與 驗證 SQL 腳本，直接依照下列 3 個情境操作即可完成測試紀錄：
+情境一：日本名單新增 Deceased (已故) 驗證
+ * Before (準備測試資料)：
+   建立一筆 DJ_Entity.Deceased = 1 且具備 Japanese Finance 標籤的資料，確認目前 BSADBJP..OFAC_SPEC 尚無此人。
+ * After (執行 SP 後預期)：
+   BSADBJP..OFAC_SPEC 成功新增該筆資料（GROUPID = 5, DInd = 'N'），且 OFAC_SPEC_LOG 產生 ActionCD = '01'。
+ * 反向驗證 (Negative Test)：
+   準備另一筆 DJ_Entity.Deceased = 0（未死亡）且在 DJ_List_Data_A 屬於別名（BitCode & 1 = 0），執行 SP 後，確認 BSADBJP..OFAC_SPEC 不會 產生該筆資料。
+-- 【情境一 驗證 SQL】
+-- 正向 (After)：確認 Deceased = 1 有進來
+SELECT ent_num, spec_name, remark, GROUPID, DInd 
+FROM BSADBJP..OFAC_SPEC 
+WHERE GROUPID = 5 AND remark = '<測試的EntityId>';
+
+-- 反向 (Negative)：確認未死亡的別名沒有進來
+SELECT COUNT(1) AS ShouldBeZero 
+FROM BSADBJP..OFAC_SPEC 
+WHERE GROUPID = 5 AND remark = '<反向測試的EntityId>';
+
+情境二：新增 Sanctions IDs (GROUPID = 10) 驗證
+ * Before (準備測試資料)：
+   確認來源實體符合條件（Active、OFAC/EU 制裁類別、具備 19 類證件如 Passport No.），目前 BSADB.dbo.OFAC_GLSpec（GROUPID = 10）無此證號。
+ * After (執行 SP 後預期)：
+   BSADB.dbo.OFAC_GLSpec 產生新筆數：
+   * spec_name = 護照號碼
+   * remark = EntityId
+   * GROUPID = 10
+   * ADDRESS = Passport No.; Please go to Dowjones website for more detail
+   * OFAC_GLSpec_Log 寫入 ActionCD = '01'
+ * 反向驗證 (Negative Test)：
+   * 反向 1（無效狀態）： 設定 DJ_Entity.PersonStatus = 'Inactive'，執行 SP 後確認 OFAC_GLSpec 查無 該筆證號。
+   * 反向 2（非指定 19 類）： 設定證件類型為 Driver's License 以外的非清單類型（例如 Local Club ID），執行 SP 後確認 查無 該筆證號。
+   * 反向 3（已軟刪除）： 設定 DJ_IdentificationTypeInfo.Deleted = 1，執行 SP 後確認 查無 該筆證號。
+-- 【情境二 驗證 SQL】
+-- 正向 (After)：確認 ID 轉入 spec_name，ADDRESS 格式正確
+SELECT spec_name, remark, GROUPID, ADDRESS, DInd 
+FROM BSADB.dbo.OFAC_GLSpec 
+WHERE GROUPID = 10 AND remark = '<測試的EntityId>';
+
+-- 反向 (Negative)：確認 Inactive 或非指定類型不會被寫入
+SELECT COUNT(1) AS ShouldBeZero 
+FROM BSADB.dbo.OFAC_GLSpec 
+WHERE GROUPID = 10 AND remark IN ('<Inactive的EntityId>', '<非指定類型的EntityId>');
+
+情境三：名單下架 (軟刪除 DInd = 'Y') 與 Log 驗證
+ * Before (準備測試資料)：
+   先讓某一筆 Sanctions ID 正常同步成功（DInd = 'N'）。接著將來源端標記刪除（例如將 DJ_IdentificationTypeInfo.Deleted 改為 1）。
+ * After (執行 SP 後預期)：
+   * BSADB.dbo.OFAC_GLSpec 該筆資料由 'N' 轉為 DInd = 'Y'，並填入 DelUserID = 'System Admin' 與 DelDate。
+   * OFAC_GLSpec_Log 產生一筆 ActionCD = '03' 的紀錄。
+ * 反向驗證 (Negative Test)：
+   若來源端資料沒有任何異動（UpdatedDate 相同且仍然有效），再次執行 SP，確認 Log 表 不會 產生多餘的 '02' 或 '03' 異動紀錄。
+-- 【情境三 驗證 SQL】
+-- 1. 檢查 Target 表是否被標記為軟刪除
+SELECT spec_name, remark, GROUPID, DInd, DelUserID, DelDate 
+FROM BSADB.dbo.OFAC_GLSpec 
+WHERE GROUPID = 10 AND remark = '<測試下架的EntityId>';
+
+-- 2. 檢查 Log 表是否正確記錄 ActionCD = '03'
+SELECT TOP 5 ent_num, spec_name, ActionCD, ActionDt, DInd 
+FROM BSADB.dbo.OFAC_GLSpec_Log 
+WHERE GROUPID = 10 AND remark = '<測試下架的EntityId>'
+ORDER BY ActionDt DESC;
+
