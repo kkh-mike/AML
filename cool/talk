@@ -1,11 +1,18 @@
-hi Ling 
-龍潭環境可以透過遠端桌面登入
+Hi Ling,
 
-透過您本機PC，使用遠端桌面連線至DR跳板機(共四台 UATTRM03’、UATTRM04、UATTRM05、UATTRM06，選擇連線其中一台)  
-密碼跟你的電腦密碼相同
+You can access the Longtan environment through Remote Desktop.
 
-協助龍潭資轉驗證
+Please use your local PC to connect to one of the four DR jump servers:
 
+* UATTRM03
+* UATTRM04
+* UATTRM05
+* UATTRM06
 
+You can choose any one of them.
 
-幫我用英文表達
+The password is the same as your computer password.
+
+Please help us with the Longtan data migration verification.
+
+Thank you!
