@@ -1,1 +1,9 @@
 sp_helptext 'NMCK_Detection_CombineResults'
+
+
+
+EXEC sp_MSforeachdb '
+    USE [?];
+    IF OBJECT_ID(''NMCK_Detection_CombineResults'') IS NOT NULL
+        SELECT DB_NAME() AS Found_In_DB, name, type_desc FROM sys.objects WHERE name = ''NMCK_Detection_CombineResults'';
+';
