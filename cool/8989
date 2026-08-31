@@ -1,112 +1,26 @@
-DECLARE @OtherIdentMthCode VARCHAR(2);
-SELECT @OtherIdentMthCode = IDENTCODE 
-FROM dbo.IDENTMTHD_DIM 
-WHERE OTHIND = 'Y';
+直接在 SSMS 執行以下三段語法，逐一驗證這三點：
+1. 驗證 ent_num 是否全部重複
+SELECT ent_num, COUNT(*) AS cnt, MAX(spec_name) AS sample_name
+FROM BSADBJP.dbo.OFAC_SPEC
+WHERE GROUPID = 11
+GROUP BY ent_num
+HAVING COUNT(*) > 1;
 
--- 1. 彙整日本黑名單實體（包含原本的本名 + 本次新增的 Deceased 死亡名單）
-;WITH RawBlacklistJP AS (
-    -- 原有邏輯：本名 + 日本金融制裁
-    SELECT 
-        A.EntNum, 
-        A.SdnName, 
-        MAX(A.UpdatedDate) AS UpdatedDate,
-        'Primary_Alive' AS [Data_Source_Type]
-    FROM BSADB.dbo.DJ_List_Data_A A WITH (NOLOCK)
-    JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) ON A.EntNum = B.EntityId
-    WHERE A.NamePropertyBitCode & 1 > 0
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-    GROUP BY A.EntNum, A.SdnName
+ * 判斷標準：若查出任何資料且 cnt > 1，代表 UPDATE 取號語法確實出錯，導致多筆資料共用了同一個 ent_num。
+2. 驗證比對設定是否有啟用 GROUPID = 11
+直接手動呼叫 Profiler 抓到的設定 SP：
+EXEC BSADB.dbo.NMCK_GetDetectionSettings @ModuleName = N'NMCK';
 
-    UNION ALL
+(若不在 BSADB，請切換至 BSADBJP 執行)
+ * 判斷標準：查看回傳的 Result Set 中是否有 GROUPID、Source 或名單權重設定，確認名單清單中是否包含 11 或 JP FINANCE。
+3. 驗證底層是否有拆詞/索引表（Token Table）
+搜尋系統內是否存在專門放 Name Token 的資料表或索引預存程序：
+-- 查詢是否有名稱拆詞暫存表/索引表
+SELECT name, type_desc 
+FROM BSADBJP.sys.objects 
+WHERE name LIKE '%TOKEN%' 
+   OR name LIKE '%INDEX%' 
+   OR name LIKE '%SOUNDEX%'
+ORDER BY type_desc, name;
 
-    -- 本次新增：已故 (Deceased = 1) + 日本金融制裁 (排除已在上方本名者)
-    SELECT 
-        A.EntityId AS EntNum, 
-        A.FullName AS SdnName, 
-        MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate,
-        'Deceased_Scan' AS [Data_Source_Type]
-    FROM BSADB.dbo.DJ_Entity A WITH (NOLOCK)
-    JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) ON A.EntityId = B.EntityId
-    WHERE A.Deceased = 1
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-      AND NOT EXISTS (
-          SELECT 1 
-          FROM BSADB.dbo.DJ_List_Data_A X WITH (NOLOCK)
-          JOIN BSADB.dbo.DJ_SanctionListReference Y WITH (NOLOCK) ON X.EntNum = Y.EntityId
-          WHERE X.EntNum = A.EntityId 
-            AND X.NamePropertyBitCode & 1 > 0
-            AND Y.SanctionListReference LIKE '%Japanese Finance%'
-      )
-    GROUP BY A.EntityId, A.FullName
-),
--- 2. 串接第一筆地址
-TempAddress AS (
-    SELECT 
-        A.EntityId, A.Address, A.City, A.AddressCountry,
-        ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
-    FROM BSADB.dbo.DJ_Address A WITH (NOLOCK)
-    WHERE A.Deleted = 0
-      AND EXISTS (SELECT 1 FROM RawBlacklistJP X WHERE A.EntityId = X.EntNum)
-),
--- 3. 串接第一筆證件識別碼
-TempIdent AS (
-    SELECT 
-        A.EntityId,
-        CASE WHEN ISNULL(A.IdentificationType, '') = '' THEN NULL ELSE @OtherIdentMthCode END AS IdentificationType,
-        A.IdentificationNumber,
-        ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
-    FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH (NOLOCK)
-    WHERE A.Deleted = 0
-      AND EXISTS (SELECT 1 FROM RawBlacklistJP X WHERE A.EntityId = X.EntNum)
-),
--- 4. 串接第一筆出生日期
-TempDOB AS (
-    SELECT 
-        A.EntityId, A.InfoDay, A.InfoMonth, A.InfoYear,
-        ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
-    FROM BSADB.dbo.DJ_DateTypeInfo A WITH (NOLOCK)
-    WHERE A.DateType = 'Date of Birth'
-      AND A.Deleted = 0
-      AND EXISTS (SELECT 1 FROM RawBlacklistJP X WHERE A.EntityId = X.EntNum)
-),
--- 5. 比對目標表既有 ent_num
-TempNUM AS (
-    SELECT A.spec_name, A.remark, A.ent_num
-    FROM BSADBJP..OFAC_SPEC A WITH (NOLOCK)
-    WHERE A.GROUPID = 5 AND A.DInd = 'N'
-)
--- 6. 輸出預計寫入資料並顯示 Deceased 狀態
-SELECT 
-    CASE 
-        WHEN T.remark IS NULL THEN '預計 INSERT (全新新增)'
-        WHEN T.DInd = 'Y' THEN '預計 UPDATE (重新上架)'
-        WHEN A.UpdatedDate <> T.updated_date THEN '預計 UPDATE (資料更新)'
-        ELSE '資料一致 (不異動)'
-    END AS [Expected_Action],
-    A.[Data_Source_Type],
-    CASE WHEN ENT.Deceased = 1 THEN 'Y (已故)' ELSE 'N (未標記/存活)' END AS [Is_Deceased],
-    ENT.Deceased AS [Deceased_RawVal],
-    ISNULL(E.ent_num, T.ent_num) AS [ent_num(既有)],
-    A.EntNum AS [remark(EntityId)],
-    A.SdnName AS [spec_name(Name)],
-    A.UpdatedDate AS [updated_date],
-    B.Address,
-    LEFT(B.City, 100) AS [City],
-    LEFT(B.AddressCountry, 100) AS [Country],
-    C.IdentificationType AS [IDENT],
-    LEFT(C.IdentificationNumber, 44) AS [IDNUM],
-    CASE 
-        WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL THEN D.InfoYear 
-        ELSE CONVERT(VARCHAR(8), dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) 
-    END AS [DOB]
-FROM RawBlacklistJP A
-LEFT JOIN BSADB.dbo.DJ_Entity ENT WITH (NOLOCK) ON A.EntNum = ENT.EntityId
-LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1
-LEFT JOIN TempIdent   C ON A.EntNum = C.EntityId AND C.RowId = 1
-LEFT JOIN TempDOB     D ON A.EntNum = D.EntityId AND D.RowId = 1
-LEFT JOIN TempNUM     E ON A.EntNum = E.remark AND A.SdnName = E.spec_name
-LEFT JOIN BSADBJP..OFAC_SPEC T WITH (NOLOCK) 
-       ON T.GROUPID = 5 
-      AND T.spec_name = A.SdnName 
-      AND T.remark = CAST(A.EntNum AS VARCHAR(100))
-ORDER BY [Is_Deceased] DESC, [Expected_Action] DESC, A.EntNum;
+ * 判斷標準：若存在類似 OFAC_SPEC_TOKENS、NMCK_TOKENS 等資料表，可以直接 SELECT TOP 10 * 該表，確認該表中是否有 Rahmani 的分詞紀錄。若表中沒有，即代表名單雖寫入主表但未建索引。
