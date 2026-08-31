@@ -1,105 +1,43 @@
-USE [BSADB]
-GO
-/****** Object:  StoredProcedure [dbo].[NMCHK_InitiateNewAcctTables]    Script Date: 2026/8/31 下午 12:38:12 ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROC [dbo].[NMCHK_InitiateNewAcctTables]
-@RANDNUM				NVARCHAR(20),
-@NAME					NVARCHAR(350),
-@DOB					NVARCHAR(10) = '',
-@Nationality			NVARCHAR(50) = '',
-@RELATIONSHIP			NVARCHAR(50),
-@TaxID					NVARCHAR(50) = '', 
-@UserID					NVARCHAR(50),
-@Address		NVARCHAR(160) = '',
-@City			NVARCHAR(50) = '',
-@Country		NVARCHAR(50) = '',
-@CombineKey     INTEGER,
-@Gender			NVARCHAR(2) = '',
-@IdentificationNumber NVARCHAR(MAX) = '',
-@NameCategory INTEGER, 
-@VesselIMONo NVARCHAR(MAX) = ''
-
-AS 
-BEGIN
-
-DECLARE
-@OFAC_NEW_ACCT_NAMES_TABLE	NVARCHAR(50),
-@EXTRA_NAME					NVARCHAR(350),
-@RELATIONSHIP2				NVARCHAR(100),
-@NSTRSQL NVARCHAR(MAX)
-
-
-SET NOCOUNT ON
-
-SELECT @OFAC_NEW_ACCT_NAMES_TABLE = 'OFAC_NEW_ACCT_NAMES_' + @RANDNUM, 
-		@DOB = CASE ISNULL(@DOB,'') WHEN '' THEN NULL ELSE CONVERT(VARCHAR, CONVERT(DATETIME,@DOB),112) END,
-		@Nationality = ISNULL(@Nationality,''), 
-		@TaxID = ISNULL(@TaxID, '') , 
-		@IdentificationNumber = ISNULL(LTRIM(RTRIM(@IdentificationNumber)), '')
-
-IF OBJECT_ID(@OFAC_NEW_ACCT_NAMES_TABLE, 'U') IS NOT NULL
-	EXEC('DROP TABLE ' + @OFAC_NEW_ACCT_NAMES_TABLE + ' ')
-
-EXEC('
-CREATE TABLE [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(
-	[new_acct_key]  [int] NULL,
-	[new_acct_name] [NVARCHAR] (350) COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS NULL , 
-	[relationship]  [NVARCHAR] (50) NULL , 
-	[NameSource] [NVARCHAR] (20) NULL, 
-	[Nationality] NVARCHAR(50),
-	[DOB] NVARCHAR(10), 
-	[TAXID] NVARCHAR(50),
-	[Address] NVARCHAR(160),
-	[City]	NVARCHAR(50),
-	[Country] NVARCHAR(50),
-	[CombineKey] INTEGER, 
-	[Gender] NVARCHAR(2),
-	[IdentificationNumber] NVARCHAR(MAX), 
-	[NameCategory] INTEGER,
-	[VesselIMONo] NVARCHAR(MAX))')
-	
-/*Added Name Source table to determine the source of the name is from English Name Column or Non English Name column*/
-SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
-																	Address, City, Country, CombineKey, 
-																	Gender, IdentificationNumber, NameCategory, VesselIMONo)
-	VALUES(''1'', @NAME , @RELATIONSHIP, ''EnglishName'', @Nationality, @DOB, @TaxID, @Address, @City, @Country, @CombineKey, 
-			@Gender, @IdentificationNumber, @NameCategory, @VesselIMONo)'
-
-EXEC SP_EXECUTESQL @NSTRSQL, N'@NAME NVARCHAR(350), @RELATIONSHIP NVARCHAR(100), @Nationality NVARCHAR(50), @DOB NVARCHAR(16), @TaxID NVARCHAR(50),
-								@Address NVARCHAR(160), @City NVARCHAR(50), @Country NVARCHAR(50), @CombineKey INTEGER, 
-								@Gender NVARCHAR(2), @IdentificationNumber NVARCHAR(MAX), @NameCategory INTEGER, @VesselIMONo NVARCHAR(MAX)', 
-								@NAME, @RELATIONSHIP, @Nationality, @DOB, @TaxID, @Address, @City, @Country, @CombineKey, 
-								@Gender, @IdentificationNumber, @NameCategory, @VesselIMONo
-
-SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
-																	Address, City, Country, CombineKey, 
-																	Gender, IdentificationNumber, NameCategory, VesselIMONo)
-				SELECT 1 + ROW_NUMBER() OVER(ORDER BY Id), EXTRA_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
-					   Address, City, Country, CombineKey, Gender, IdentificationNumber, NameCategory, VesselIMONo
-				FROM dbo.NMCHK_MultipleList_TMP WITH(NOLOCK) 
-				WHERE USERID = @UserID '
-EXEC SP_EXECUTESQL @NSTRSQL, N'@UserID NVARCHAR(50)', @UserID 
-
-END
-
-我輸入了 
-
+請依序執行以下 4 步排查，直接找出未命中的原因：
+第一步：確認黑名單有效狀態與類別
+直接在資料庫執行這段語法，確認該筆黑名單是否被狀態條件排除：
 SELECT 
     ent_num,
     spec_name,
     GROUPID,
     SOURCE,
-    DInd,        -- 是否有效/未刪除（正常應為 'N'）
-    EnterFlag,   -- 狀態標記（若是 'D' 可能是草稿或刪除）
-    ApprovedBy,  -- 是否已放行審核
-    DelUserID,    -- 刪除人員（若有值代表被軟刪除）
-	updated_date_UTC
-FROM BSADBJP.dbo.OFAC_SPEC
-裡面的spec_name
+    DInd,        -- 需為正常狀態 (通常為 'N' 或 '0')
+    EnterFlag,   -- 需為已生效狀態 (不能是草稿或待刪)
+    ApprovedBy,  -- 需有值 (代表已放行)
+    DelUserID    -- 需為 NULL (不能有刪除人)
+FROM BSADBJP.dbo.OFAC_SPEC WITH(NOLOCK)
+WHERE spec_name = N'你輸入的完整名字' 
+   OR spec_name LIKE N'%名字關鍵字%';
 
-但name_check 沒有命中 為什麼
+第二步：確認資料庫同步與環境
+比對邏輯通常是讀取當前連線庫（BSADB），確認兩邊資料是否一致：
+-- 檢查 BSADB 本地是否存在該筆黑名單
+SELECT ent_num, spec_name, DInd, ApprovedBy 
+FROM BSADB.dbo.OFAC_SPEC WITH(NOLOCK)
+WHERE spec_name LIKE N'%名字關鍵字%';
 
+若 BSADBJP 有資料但 BSADB 沒有，代表跨庫資料尚未同步。
+第三步：比對傳入的實體類別（NameCategory）
+確認你在叫用 NMCHK_InitiateNewAcctTables 時傳入的 @NameCategory 是否與黑名單定義的類別相符：
+-- 查詢該黑名單實體在系統中的類別定義（個人 / 法人 / 船隻）
+SELECT ent_num, spec_name, Category, Ent_Type -- 欄位名稱依系統可能為 Category 或 Type
+FROM BSADBJP.dbo.OFAC_SPEC WITH(NOLOCK)
+WHERE spec_name LIKE N'%名字關鍵字%';
 
+第四步：檢查暫存表寫入的實際內容（排除隱藏字元）
+在比對尚未 drop table 前，或手動執行一次 SP 寫入後，檢查產生的暫存表：
+-- 替換為執行時傳入的 RANDNUM
+SELECT 
+    new_acct_name, 
+    NameCategory, 
+    NameSource, 
+    LEN(new_acct_name) AS InputLength,
+    DATALENGTH(new_acct_name) AS ByteLength
+FROM BSADB.dbo.OFAC_NEW_ACCT_NAMES_你的隨機碼;
+
+檢查是否有全形空格、前後非顯示字元，導致長度與黑名單表不一致。
