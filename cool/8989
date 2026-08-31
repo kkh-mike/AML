@@ -24,6 +24,39 @@ ORDER BY updated_date_UTC DESC;
 
 
 
+這張查詢結果直接抓出問題了：
+ * 有 116,490 筆的 ent_num 全是 NULL
+   * Total_Count 為 489,704 筆，但 Has_Value_Count 只有 373,214 筆，差額剛好就是 116,490 筆 NULL。
+ * 你要比對的這筆名單正好就在這 11.6 萬筆 NULL 裡面
+   * 下方明細看到的都是剛好有值（舊資料或更新前留存）的名單。
+   * 你剛才查的 Rahmani, Arsalan 是這次被同步寫入的新增資料，因為當初取號失效，它的 ent_num 是 NULL。
+直接執行這段 SQL，確認 Rahmani, Arsalan 的 ent_num：
+SELECT ent_num, spec_name, GROUPID, SOURCE, updated_date_UTC
+FROM BSADBJP.dbo.OFAC_SPEC
+WHERE spec_name = 'Rahmani, Arsalan' AND GROUPID = 11;
+
+立即修復這 116,490 筆 NULL 資料
+請直接在 SSMS 執行以下修補語法，幫這批 NULL 補上正確的唯一流水號：
+DECLARE @BaseNum INT;
+-- 找出目前資料庫中最大的 ent_num
+SELECT @BaseNum = ISNULL(MAX(ent_num), 0) 
+FROM BSADBJP.dbo.OFAC_SPEC;
+
+-- 為所有 ent_num 為 NULL 的資料依序編號
+;WITH FixCTE AS (
+    SELECT ent_num, ROW_NUMBER() OVER (ORDER BY (SELECT 1)) AS rn
+    FROM BSADBJP.dbo.OFAC_SPEC
+    WHERE GROUPID = 11 AND ent_num IS NULL
+)
+UPDATE FixCTE
+SET ent_num = @BaseNum + rn;
+
+補完號後，再回前端 Name Check 重新搜尋一次 Rahmani, Arsalan 就能成功命中。
+
+
+
+
+
 
 
 直接在 SSMS 執行以下三段語法，逐一驗證這三點：
