@@ -1,43 +1,4 @@
-請依序執行以下 4 步排查，直接找出未命中的原因：
-第一步：確認黑名單有效狀態與類別
-直接在資料庫執行這段語法，確認該筆黑名單是否被狀態條件排除：
-SELECT 
-    ent_num,
-    spec_name,
-    GROUPID,
-    SOURCE,
-    DInd,        -- 需為正常狀態 (通常為 'N' 或 '0')
-    EnterFlag,   -- 需為已生效狀態 (不能是草稿或待刪)
-    ApprovedBy,  -- 需有值 (代表已放行)
-    DelUserID    -- 需為 NULL (不能有刪除人)
-FROM BSADBJP.dbo.OFAC_SPEC WITH(NOLOCK)
-WHERE spec_name = N'你輸入的完整名字' 
-   OR spec_name LIKE N'%名字關鍵字%';
-
-第二步：確認資料庫同步與環境
-比對邏輯通常是讀取當前連線庫（BSADB），確認兩邊資料是否一致：
--- 檢查 BSADB 本地是否存在該筆黑名單
-SELECT ent_num, spec_name, DInd, ApprovedBy 
-FROM BSADB.dbo.OFAC_SPEC WITH(NOLOCK)
-WHERE spec_name LIKE N'%名字關鍵字%';
-
-若 BSADBJP 有資料但 BSADB 沒有，代表跨庫資料尚未同步。
-第三步：比對傳入的實體類別（NameCategory）
-確認你在叫用 NMCHK_InitiateNewAcctTables 時傳入的 @NameCategory 是否與黑名單定義的類別相符：
--- 查詢該黑名單實體在系統中的類別定義（個人 / 法人 / 船隻）
-SELECT ent_num, spec_name, Category, Ent_Type -- 欄位名稱依系統可能為 Category 或 Type
-FROM BSADBJP.dbo.OFAC_SPEC WITH(NOLOCK)
-WHERE spec_name LIKE N'%名字關鍵字%';
-
-第四步：檢查暫存表寫入的實際內容（排除隱藏字元）
-在比對尚未 drop table 前，或手動執行一次 SP 寫入後，檢查產生的暫存表：
--- 替換為執行時傳入的 RANDNUM
-SELECT 
-    new_acct_name, 
-    NameCategory, 
-    NameSource, 
-    LEN(new_acct_name) AS InputLength,
-    DATALENGTH(new_acct_name) AS ByteLength
-FROM BSADB.dbo.OFAC_NEW_ACCT_NAMES_你的隨機碼;
-
-檢查是否有全形空格、前後非顯示字元，導致長度與黑名單表不一致。
+INSERT INTO BSADB.dbo.OFAC_SPEC (ent_num, spec_name, GROUPID, SOURCE, DInd, EnterFlag, ApprovedBy, DelUserID)
+SELECT ent_num, spec_name, GROUPID, SOURCE, DInd, EnterFlag, ApprovedBy, DelUserID
+FROM BSADBJP.dbo.OFAC_SPEC
+WHERE ent_num IN (721314, 681276);
