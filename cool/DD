@@ -1,17 +1,88 @@
+可是我這裡還有一個
 
-SELECT ent_num, spec_name, GROUPID, SOURCE, DInd, ApprovedBy
-FROM BSADB.dbo.OFAC_GLSPEC WITH(NOLOCK)
-WHERE spec_name LIKE N'%Rahmani, Arsalan%' 
-   OR ent_num IN (721314, 681276);
+USE [BSADBJP]
+GO
+/****** Object:  StoredProcedure [dbo].[NMCHK_InitiateNewAcctTables]    Script Date: 2026/8/31 下午 01:20:21 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER PROC [dbo].[NMCHK_InitiateNewAcctTables]
+@RANDNUM				NVARCHAR(20),
+@NAME					NVARCHAR(350),
+@DOB					NVARCHAR(10) = '',
+@Nationality			NVARCHAR(50) = '',
+@RELATIONSHIP			NVARCHAR(50),
+@TaxID					NVARCHAR(50) = '', 
+@UserID					NVARCHAR(50),
+@Address		NVARCHAR(160) = '',
+@City			NVARCHAR(50) = '',
+@Country		NVARCHAR(50) = '',
+@CombineKey     INTEGER,
+@Gender			NVARCHAR(2) = '',
+@IdentificationNumber NVARCHAR(MAX) = '',
+@NameCategory INTEGER, 
+@VesselIMONo NVARCHAR(MAX) = ''
+
+AS 
+BEGIN
+
+DECLARE
+@OFAC_NEW_ACCT_NAMES_TABLE	NVARCHAR(50),
+@EXTRA_NAME					NVARCHAR(350),
+@RELATIONSHIP2				NVARCHAR(100),
+@NSTRSQL NVARCHAR(MAX)
 
 
+SET NOCOUNT ON
 
+SELECT @OFAC_NEW_ACCT_NAMES_TABLE = 'OFAC_NEW_ACCT_NAMES_' + @RANDNUM, 
+		@DOB = CASE ISNULL(@DOB,'') WHEN '' THEN NULL ELSE CONVERT(VARCHAR, CONVERT(DATETIME,@DOB),112) END,
+		@Nationality = ISNULL(@Nationality,''), 
+		@TaxID = ISNULL(@TaxID, '') , 
+		@IdentificationNumber = ISNULL(LTRIM(RTRIM(@IdentificationNumber)), '')
 
-不對阿 
-這樣說name check 不會來
-BSADBJP.dbo.OFAC_SPEC 這邊的名單看?
+IF OBJECT_ID(@OFAC_NEW_ACCT_NAMES_TABLE, 'U') IS NOT NULL
+	EXEC('DROP TABLE ' + @OFAC_NEW_ACCT_NAMES_TABLE + ' ')
 
-只會來這裡
-BSADB.dbo.OFAC_GLSPEC 
+EXEC('
+CREATE TABLE [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(
+	[new_acct_key]  [int] NULL,
+	[new_acct_name] [NVARCHAR] (350) COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS NULL , 
+	[relationship]  [NVARCHAR] (50) NULL , 
+	[NameSource] [NVARCHAR] (20) NULL, 
+	[Nationality] NVARCHAR(50),
+	[DOB] NVARCHAR(10), 
+	[TAXID] NVARCHAR(50),
+	[Address] NVARCHAR(160),
+	[City]	NVARCHAR(50),
+	[Country] NVARCHAR(50),
+	[CombineKey] INTEGER, 
+	[Gender] NVARCHAR(2),
+	[IdentificationNumber] NVARCHAR(MAX), 
+	[NameCategory] INTEGER,
+	[VesselIMONo] NVARCHAR(MAX))')
+	
+/*Added Name Source table to determine the source of the name is from English Name Column or Non English Name column*/
+SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
+																	Address, City, Country, CombineKey, 
+																	Gender, IdentificationNumber, NameCategory, VesselIMONo)
+	VALUES(''1'', @NAME , @RELATIONSHIP, ''EnglishName'', @Nationality, @DOB, @TaxID, @Address, @City, @Country, @CombineKey, 
+			@Gender, @IdentificationNumber, @NameCategory, @VesselIMONo)'
 
-是這樣? 好怪
+EXEC SP_EXECUTESQL @NSTRSQL, N'@NAME NVARCHAR(350), @RELATIONSHIP NVARCHAR(100), @Nationality NVARCHAR(50), @DOB NVARCHAR(16), @TaxID NVARCHAR(50),
+								@Address NVARCHAR(160), @City NVARCHAR(50), @Country NVARCHAR(50), @CombineKey INTEGER, 
+								@Gender NVARCHAR(2), @IdentificationNumber NVARCHAR(MAX), @NameCategory INTEGER, @VesselIMONo NVARCHAR(MAX)', 
+								@NAME, @RELATIONSHIP, @Nationality, @DOB, @TaxID, @Address, @City, @Country, @CombineKey, 
+								@Gender, @IdentificationNumber, @NameCategory, @VesselIMONo
+
+SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
+																	Address, City, Country, CombineKey, 
+																	Gender, IdentificationNumber, NameCategory, VesselIMONo)
+				SELECT 1 + ROW_NUMBER() OVER(ORDER BY Id), EXTRA_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
+					   Address, City, Country, CombineKey, Gender, IdentificationNumber, NameCategory, VesselIMONo
+				FROM dbo.NMCHK_MultipleList_TMP WITH(NOLOCK) 
+				WHERE USERID = @UserID '
+EXEC SP_EXECUTESQL @NSTRSQL, N'@UserID NVARCHAR(50)', @UserID 
+
+END
