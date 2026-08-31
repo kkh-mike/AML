@@ -1,5 +1,30 @@
 
 
+清單中的第 1 支 dbo.NMCHK_AUTOMATION 就是 PATRIOT OFFICER 的核心比對引擎主進入點。
+請直接查看它的參數定義，或直接傳入隨機碼執行：
+1. 查看 NMCHK_AUTOMATION 需要哪些參數
+USE [BSADBJP];
+EXEC sp_helptext 'dbo.NMCHK_AUTOMATION';
+
+2. 手動執行比對
+通常該 SP 只需要傳入 @RANDNUM（或是加上 @UserID）：
+USE [BSADBJP];
+
+-- 執行核心比對
+EXEC dbo.NMCHK_AUTOMATION @RANDNUM = 'TEST0831';
+
+-- 查詢比對完成後是否有命中結果（檢查相關暫存表）
+SELECT * FROM dbo.OFAC_NEW_ACCT_NAMES_TEST0831;
+SELECT name FROM sys.tables WHERE name LIKE '%TEST0831%';
+
+執行後請觀察是否有產生類似 OFAC_MATCH_..._TEST0831 的命中結果表。
+
+
+
+
+
+
+
 USE [BSADBJP];
 SELECT name 
 FROM sys.procedures 
