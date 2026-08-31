@@ -1,27 +1,35 @@
-這是因為在 SSMS 中「只反白選取了後半段程式碼」去執行，導致最上面宣告的 DECLARE @RAND ... 沒有一起被執行到。
-請直接不要反白任何文字（或全選整份語法 Ctrl + A），然後按 F5 執行以下整段完整腳本：
-USE [BSADBJP];
 
--- 1. 宣告固定變數
-DECLARE @RAND NVARCHAR(20) = 'TEST20260831';
 
--- 2. 步驟 1：建立輸入暫存表並寫入名字
-EXEC dbo.NMCHK_InitiateNewAcctTables
-    @RANDNUM              = @RAND,
-    @NAME                 = N'Rahmani, Arsalan',
-    @RELATIONSHIP         = 'Primary',
-    @UserID               = 'SYSTEM',
-    @CombineKey           = 0,
-    @NameCategory         = 1;
+--BEFORE
+SELECT *
+FROM OAAML.AML_REPORT_ADD_ROLE
+WHERE EMPNO IN (
+'1151695','1090115','942095'
+);
 
--- 3. 步驟 2：呼叫核心比對引擎
-EXEC dbo.NMCHK_AUTOMATION @RANDNUM = @RAND;
+--INSERT
+-------
+INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','TAOCHU','','','1151695');
+INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','CHUNGCHANG','','','1151695');
 
--- 4. 步驟 3：查看產生了哪些結果暫存表
-SELECT name, create_date 
-FROM sys.tables 
-WHERE name LIKE '%' + @RAND + '%'
-ORDER BY create_date DESC;
+INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','TAOCHU','','','1090115');
+INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','CHUNGCHANG','','','1090115');
 
-執行完成後：
- * 若第 4 步的查詢結果出現類似 OFAC_MATCH_TEST20260831 或 OFAC_NEW_ACCT_MATCH_TEST20260831 的表名，直接執行 SELECT * FROM dbo.[表名] 即可看到命中結果。
+INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','TAOCHU','','','942095');
+INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','CHUNGCHANG','','','942095');
+
+
+COMMIT;
+
+--AFTER
+SELECT *
+FROM OAAML.AML_REPORT_ADD_ROLE
+WHERE EMPNO IN (
+'1151695','1090115','942095'
+);
+
+
+
+
+幫我看有沒有錯
+然後給我oracle 跑完的log
