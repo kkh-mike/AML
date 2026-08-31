@@ -75,7 +75,7 @@ TempNUM AS (
     FROM BSADBJP..OFAC_SPEC A WITH (NOLOCK)
     WHERE A.GROUPID = 5 AND A.DInd = 'N'
 )
--- 6. 輸出預計寫入資料並比對目標表判定動作 (Action)
+-- 6. 輸出預計寫入資料並顯示 Deceased 狀態
 SELECT 
     CASE 
         WHEN T.remark IS NULL THEN '預計 INSERT (全新新增)'
@@ -84,6 +84,8 @@ SELECT
         ELSE '資料一致 (不異動)'
     END AS [Expected_Action],
     A.[Data_Source_Type],
+    CASE WHEN ENT.Deceased = 1 THEN 'Y (已故)' ELSE 'N (未標記/存活)' END AS [Is_Deceased],
+    ENT.Deceased AS [Deceased_RawVal],
     ISNULL(E.ent_num, T.ent_num) AS [ent_num(既有)],
     A.EntNum AS [remark(EntityId)],
     A.SdnName AS [spec_name(Name)],
@@ -98,15 +100,13 @@ SELECT
         ELSE CONVERT(VARCHAR(8), dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) 
     END AS [DOB]
 FROM RawBlacklistJP A
+LEFT JOIN BSADB.dbo.DJ_Entity ENT WITH (NOLOCK) ON A.EntNum = ENT.EntityId
 LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1
 LEFT JOIN TempIdent   C ON A.EntNum = C.EntityId AND C.RowId = 1
 LEFT JOIN TempDOB     D ON A.EntNum = D.EntityId AND D.RowId = 1
 LEFT JOIN TempNUM     E ON A.EntNum = E.remark AND A.SdnName = E.spec_name
 LEFT JOIN BSADBJP..OFAC_SPEC T WITH (NOLOCK) 
-       ON T.GROUPID = 11 
+       ON T.GROUPID = 5 
       AND T.spec_name = A.SdnName 
       AND T.remark = CAST(A.EntNum AS VARCHAR(100))
-ORDER BY [Expected_Action] DESC, A.EntNum;
-
-
-我的欄位要顯示哪些是Deceased = 1
+ORDER BY [Is_Deceased] DESC, [Expected_Action] DESC, A.EntNum;
