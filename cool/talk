@@ -1,18 +1,88 @@
-Hi Ling,
 
-You can access the Longtan environment through Remote Desktop.
 
-Please use your local PC to connect to one of the four DR jump servers:
+--BEFORE
+SELECT *
+FROM OAAML.AML_REPORT_ADD_ROLE
+WHERE EMPNO IN (
+'1151695','1090115','942095'
+);
 
-* UATTRM03
-* UATTRM04
-* UATTRM05
-* UATTRM06
+--INSERT
+-------
+INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','TAOCHU','','','1151695');
+INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','CHUNGCHANG','','','1151695');
 
-You can choose any one of them.
+INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','TAOCHU','','','1090115');
+INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','CHUNGCHANG','','','1090115');
 
-The password is the same as your computer password.
+INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','TAOCHU','','','942095');
+INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','CHUNGCHANG','','','942095');
 
-Please help us with the Longtan data migration verification.
 
-Thank you!
+COMMIT;
+
+--AFTER
+SELECT *
+FROM OAAML.AML_REPORT_ADD_ROLE
+WHERE EMPNO IN (
+'1151695','1090115','942095'
+);
+
+
+
+
+
+-------------------
+
+Connected to Oracle Database 19c Enterprise Edition Release 19.0.0.0.0 
+Connected as OAAML
+ 
+SQL> 
+ 
+OVS_CD     ROLE_TYPE            ACC_DEP_COD          DEPT_CD_FUNC         EMPNO
+---------- -------------------- -------------------- -------------------- --------------------
+TW         CHIANAN                                                        942095
+TW         KAOPIN                                                         942095
+TW         CHIANAN                                                        1090115
+TW         KAOPIN                                                         1090115
+TW         CHIANAN                                                        1151695
+TW         KAOPIN                                                         1151695
+ 
+6 rows selected
+ 
+1 row inserted
+ 
+1 row inserted
+ 
+1 row inserted
+ 
+1 row inserted
+ 
+1 row inserted
+ 
+1 row inserted
+ 
+Commit complete
+ 
+OVS_CD     ROLE_TYPE            ACC_DEP_COD          DEPT_CD_FUNC         EMPNO
+---------- -------------------- -------------------- -------------------- --------------------
+TW         CHIANAN                                                        942095
+TW         KAOPIN                                                         942095
+TW         CHIANAN                                                        1090115
+TW         KAOPIN                                                         1090115
+TW         CHIANAN                                                        1151695
+TW         KAOPIN                                                         1151695
+TW         TAOCHU                                                         1151695
+TW         CHUNGCHANG                                                     1151695
+TW         TAOCHU                                                         1090115
+TW         CHUNGCHANG                                                     1090115
+TW         TAOCHU                                                         942095
+TW         CHUNGCHANG                                                     942095
+ 
+12 rows selected
+ 
+SQL> 
+
+
+我跑出來的這樣log 有對?
+
