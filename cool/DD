@@ -1,4 +1,8 @@
-INSERT INTO BSADB.dbo.OFAC_SPEC (ent_num, spec_name, GROUPID, SOURCE, DInd, EnterFlag, ApprovedBy, DelUserID)
-SELECT ent_num, spec_name, GROUPID, SOURCE, DInd, EnterFlag, ApprovedBy, DelUserID
-FROM BSADBJP.dbo.OFAC_SPEC
-WHERE ent_num IN (721314, 681276);
+不對阿 
+這樣說name check 不會來
+BSADBJP.dbo.OFAC_SPEC 這邊的名單看?
+
+只會來這裡
+BSADB.dbo.OFAC_GLSPEC 
+
+是這樣? 好怪
