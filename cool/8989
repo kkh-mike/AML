@@ -1,4 +1,3 @@
-要將執行 MERGE 前所有**預計會被寫入（新增或更新）**的資料完整撈出來預覽，直接提取預存程序中的暫存邏輯與關聯 CTE，執行以下查詢腳本即可：
 DECLARE @OtherIdentMthCode VARCHAR(2);
 SELECT @OtherIdentMthCode = IDENTCODE 
 FROM dbo.IDENTMTHD_DIM 
@@ -104,13 +103,10 @@ LEFT JOIN TempIdent   C ON A.EntNum = C.EntityId AND C.RowId = 1
 LEFT JOIN TempDOB     D ON A.EntNum = D.EntityId AND D.RowId = 1
 LEFT JOIN TempNUM     E ON A.EntNum = E.remark AND A.SdnName = E.spec_name
 LEFT JOIN BSADBJP..OFAC_SPEC T WITH (NOLOCK) 
-       ON T.GROUPID = 5 
+       ON T.GROUPID = 11 
       AND T.spec_name = A.SdnName 
       AND T.remark = CAST(A.EntNum AS VARCHAR(100))
 ORDER BY [Expected_Action] DESC, A.EntNum;
 
-欄位說明：
- * Expected_Action： 顯示此筆資料執行 SP 後的行為（預計 INSERT、預計 UPDATE 或 資料一致）。
- * Data_Source_Type：
-   * Primary_Alive：來自原本第一段的活體本名資料。
-   * Deceased_Scan：本次新增邏輯撈出的已故名單（可直接用來驗證本次需求範圍）。
+
+我的欄位要顯示哪些是Deceased = 1
