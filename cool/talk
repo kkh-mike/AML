@@ -1,98 +1,112 @@
+這段 Stored Procedure 主要用於 反洗錢／制裁名單掃描（AML / OFAC Name Screening） 流程中的「初始化與資料暫存」。
+1. 程式碼逐段詳細註解
 USE [BSADBJP]
 GO
-/****** Object:  StoredProcedure [dbo].[NMCHK_InitiateNewAcctTables]    Script Date: 2026/8/31 下午 01:20:21 ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-ALTER PROC [dbo].[NMCHK_InitiateNewAcctTables]
-@RANDNUM				NVARCHAR(20),
-@NAME					NVARCHAR(350),
-@DOB					NVARCHAR(10) = '',
-@Nationality			NVARCHAR(50) = '',
-@RELATIONSHIP			NVARCHAR(50),
-@TaxID					NVARCHAR(50) = '', 
-@UserID					NVARCHAR(50),
-@Address		NVARCHAR(160) = '',
-@City			NVARCHAR(50) = '',
-@Country		NVARCHAR(50) = '',
-@CombineKey     INTEGER,
-@Gender			NVARCHAR(2) = '',
-@IdentificationNumber NVARCHAR(MAX) = '',
-@NameCategory INTEGER, 
-@VesselIMONo NVARCHAR(MAX) = ''
 
+-- ==========================================================================================
+-- 預存程序名稱: [dbo].[NMCHK_InitiateNewAcctTables]
+-- 功能說明: 
+--   1. 依隨機碼 (@RANDNUM) 動態建立一張專屬的實體暫存表 (OFAC_NEW_ACCT_NAMES_{RANDNUM})
+--   2. 將主帳戶/主要比對對象 (@NAME) 寫入為第 1 筆資料
+--   3. 將該使用者在暫存清單 (NMCHK_MultipleList_TMP) 中的關聯人/其他名稱依序追加寫入
+-- ==========================================================================================
+ALTER PROC [dbo].[NMCHK_InitiateNewAcctTables]
+    @RANDNUM                NVARCHAR(20),          -- 隨機流水序號，用於動態命名暫存表避免多人併發衝突
+    @NAME                   NVARCHAR(350),         -- 主要待比對的開戶人/實體名稱
+    @DOB                    NVARCHAR(10) = '',     -- 出生日期 (格式若非空會轉為 YYYYMMDD)
+    @Nationality            NVARCHAR(50) = '',     -- 國籍
+    @RELATIONSHIP           NVARCHAR(50),          -- 與帳戶的關係 (如 CustomerName, Beneficiary, Director 等)
+    @TaxID                  NVARCHAR(50) = '',     -- 統一編號 / 稅籍編號
+    @UserID                 NVARCHAR(50),          -- 操作人員或 Session 識別碼
+    @Address                NVARCHAR(160) = '',    -- 地址
+    @City                   NVARCHAR(50) = '',     -- 城市
+    @Country                NVARCHAR(50) = '',     -- 國家
+    @CombineKey             INTEGER,               -- 組合比對鍵值 (演算法內部權重/比對代碼)
+    @Gender                 NVARCHAR(2) = '',      -- 性別
+    @IdentificationNumber   NVARCHAR(MAX) = '',    -- 身分證號 / 護照號碼等證號
+    @NameCategory           INTEGER,               -- 名稱類別 (如 1: 個人, 2: 企業, 3: 船隻 等)
+    @VesselIMONo            NVARCHAR(MAX) = ''     -- 船隻 IMO 識別號 (用於海事/制裁船隻比對)
 AS 
 BEGIN
+    -- 宣告內部變數
+    DECLARE
+        @OFAC_NEW_ACCT_NAMES_TABLE  NVARCHAR(50),   -- 動態表名
+        @EXTRA_NAME                 NVARCHAR(350),  
+        @RELATIONSHIP2              NVARCHAR(100),
+        @NSTRSQL                    NVARCHAR(MAX)   -- 動態 SQL 字串
 
-DECLARE
-@OFAC_NEW_ACCT_NAMES_TABLE	NVARCHAR(50),
-@EXTRA_NAME					NVARCHAR(350),
-@RELATIONSHIP2				NVARCHAR(100),
-@NSTRSQL NVARCHAR(MAX)
+    SET NOCOUNT ON;
 
+    -- 1. 整理傳入參數與格式化
+    SELECT 
+        @OFAC_NEW_ACCT_NAMES_TABLE = 'OFAC_NEW_ACCT_NAMES_' + @RANDNUM, 
+        -- 若 DOB 有傳入，先轉 DateTime 再轉為 'YYYYMMDD' (代碼 112)，否則設為 NULL
+        @DOB = CASE ISNULL(@DOB,'') WHEN '' THEN NULL ELSE CONVERT(VARCHAR, CONVERT(DATETIME,@DOB), 112) END,
+        @Nationality = ISNULL(@Nationality,''), 
+        @TaxID = ISNULL(@TaxID, ''), 
+        @IdentificationNumber = ISNULL(LTRIM(RTRIM(@IdentificationNumber)), '');
 
-SET NOCOUNT ON
+    -- 2. 若動態表已存在則先刪除 (避免殘留髒資料)
+    IF OBJECT_ID(@OFAC_NEW_ACCT_NAMES_TABLE, 'U') IS NOT NULL
+        EXEC('DROP TABLE ' + @OFAC_NEW_ACCT_NAMES_TABLE + ' ');
 
-SELECT @OFAC_NEW_ACCT_NAMES_TABLE = 'OFAC_NEW_ACCT_NAMES_' + @RANDNUM, 
-		@DOB = CASE ISNULL(@DOB,'') WHEN '' THEN NULL ELSE CONVERT(VARCHAR, CONVERT(DATETIME,@DOB),112) END,
-		@Nationality = ISNULL(@Nationality,''), 
-		@TaxID = ISNULL(@TaxID, '') , 
-		@IdentificationNumber = ISNULL(LTRIM(RTRIM(@IdentificationNumber)), '')
+    -- 3. 動態建立該次掃描專用的實體暫存表
+    EXEC('
+    CREATE TABLE [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(
+        [new_acct_key]          [int] NULL,
+        [new_acct_name]         [NVARCHAR] (350) COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS NULL, 
+        [relationship]          [NVARCHAR] (50) NULL, 
+        [NameSource]            [NVARCHAR] (20) NULL, 
+        [Nationality]           NVARCHAR(50),
+        [DOB]                   NVARCHAR(10), 
+        [TAXID]                 NVARCHAR(50),
+        [Address]               NVARCHAR(160),
+        [City]                  NVARCHAR(50),
+        [Country]               NVARCHAR(50),
+        [CombineKey]            INTEGER, 
+        [Gender]                NVARCHAR(2),
+        [IdentificationNumber]  NVARCHAR(MAX), 
+        [NameCategory]          INTEGER,
+        [VesselIMONo]           NVARCHAR(MAX))');
 
-IF OBJECT_ID(@OFAC_NEW_ACCT_NAMES_TABLE, 'U') IS NOT NULL
-	EXEC('DROP TABLE ' + @OFAC_NEW_ACCT_NAMES_TABLE + ' ')
+    -- 4. 插入第 1 筆資料：主帳戶/申請人本人的資料 (new_acct_key 固定設為 1，NameSource 為 EnglishName)
+    SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(
+                        NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
+                        Address, City, Country, CombineKey, Gender, IdentificationNumber, NameCategory, VesselIMONo)
+                    VALUES(''1'', @NAME , @RELATIONSHIP, ''EnglishName'', @Nationality, @DOB, @TaxID, 
+                           @Address, @City, @Country, @CombineKey, @Gender, @IdentificationNumber, @NameCategory, @VesselIMONo)';
 
-EXEC('
-CREATE TABLE [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(
-	[new_acct_key]  [int] NULL,
-	[new_acct_name] [NVARCHAR] (350) COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS NULL , 
-	[relationship]  [NVARCHAR] (50) NULL , 
-	[NameSource] [NVARCHAR] (20) NULL, 
-	[Nationality] NVARCHAR(50),
-	[DOB] NVARCHAR(10), 
-	[TAXID] NVARCHAR(50),
-	[Address] NVARCHAR(160),
-	[City]	NVARCHAR(50),
-	[Country] NVARCHAR(50),
-	[CombineKey] INTEGER, 
-	[Gender] NVARCHAR(2),
-	[IdentificationNumber] NVARCHAR(MAX), 
-	[NameCategory] INTEGER,
-	[VesselIMONo] NVARCHAR(MAX))')
-	
-/*Added Name Source table to determine the source of the name is from English Name Column or Non English Name column*/
-SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
-																	Address, City, Country, CombineKey, 
-																	Gender, IdentificationNumber, NameCategory, VesselIMONo)
-	VALUES(''1'', @NAME , @RELATIONSHIP, ''EnglishName'', @Nationality, @DOB, @TaxID, @Address, @City, @Country, @CombineKey, 
-			@Gender, @IdentificationNumber, @NameCategory, @VesselIMONo)'
+    EXEC SP_EXECUTESQL @NSTRSQL, 
+        N'@NAME NVARCHAR(350), @RELATIONSHIP NVARCHAR(100), @Nationality NVARCHAR(50), @DOB NVARCHAR(16), @TaxID NVARCHAR(50),
+          @Address NVARCHAR(160), @City NVARCHAR(50), @Country NVARCHAR(50), @CombineKey INTEGER, 
+          @Gender NVARCHAR(2), @IdentificationNumber NVARCHAR(MAX), @NameCategory INTEGER, @VesselIMONo NVARCHAR(MAX)', 
+        @NAME, @RELATIONSHIP, @Nationality, @DOB, @TaxID, @Address, @City, @Country, @CombineKey, 
+        @Gender, @IdentificationNumber, @NameCategory, @VesselIMONo;
 
-EXEC SP_EXECUTESQL @NSTRSQL, N'@NAME NVARCHAR(350), @RELATIONSHIP NVARCHAR(100), @Nationality NVARCHAR(50), @DOB NVARCHAR(16), @TaxID NVARCHAR(50),
-								@Address NVARCHAR(160), @City NVARCHAR(50), @Country NVARCHAR(50), @CombineKey INTEGER, 
-								@Gender NVARCHAR(2), @IdentificationNumber NVARCHAR(MAX), @NameCategory INTEGER, @VesselIMONo NVARCHAR(MAX)', 
-								@NAME, @RELATIONSHIP, @Nationality, @DOB, @TaxID, @Address, @City, @Country, @CombineKey, 
-								@Gender, @IdentificationNumber, @NameCategory, @VesselIMONo
+    -- 5. 插入多筆關聯人資料：將暫存表 NMCHK_MultipleList_TMP 內屬於該 UserID 的其他關聯名單依序寫入 (Key 從 2, 3, 4... 往上排)
+    SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(
+                        NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
+                        Address, City, Country, CombineKey, Gender, IdentificationNumber, NameCategory, VesselIMONo)
+                    SELECT 1 + ROW_NUMBER() OVER(ORDER BY Id), EXTRA_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
+                           Address, City, Country, CombineKey, Gender, IdentificationNumber, NameCategory, VesselIMONo
+                    FROM dbo.NMCHK_MultipleList_TMP WITH(NOLOCK) 
+                    WHERE USERID = @UserID ';
 
-SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
-																	Address, City, Country, CombineKey, 
-																	Gender, IdentificationNumber, NameCategory, VesselIMONo)
-				SELECT 1 + ROW_NUMBER() OVER(ORDER BY Id), EXTRA_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
-					   Address, City, Country, CombineKey, Gender, IdentificationNumber, NameCategory, VesselIMONo
-				FROM dbo.NMCHK_MultipleList_TMP WITH(NOLOCK) 
-				WHERE USERID = @UserID '
-EXEC SP_EXECUTESQL @NSTRSQL, N'@UserID NVARCHAR(50)', @UserID 
+    EXEC SP_EXECUTESQL @NSTRSQL, N'@UserID NVARCHAR(50)', @UserID;
 
 END
 
-
-
-給我註解一下這ˋ段code
-然後
+2. 查詢結果代表什麼？能幹嘛？
 SELECT * FROM BSADBJP..OFAC_NEW_ACCT_NAMES_202672
 
-new_acct_key	new_acct_name	relationship	NameSource	Nationality	DOB	TAXID	Address	City	Country	CombineKey	Gender	IdentificationNumber	NameCategory	VesselIMONo
-1	Rahmani, Arsalan	CustomerName	EnglishName		NULL					0			0	
-
-
-這個能幹嘛
+這張表是系統在執行 開戶/交易黑名單比對 (Name Checking) 時所建立的 「待檢核清單」。
+ * 比對對象 (new_acct_name)： Rahmani, Arsalan
+ * 身分關係 (relationship)： CustomerName（客戶主體姓名）
+ * 來源類別 (NameSource)： EnglishName（英文名稱欄位）
+ * 用途與後續動作：
+   * 後續的 Stored Procedure（例如 NMCHK_RunMatching 或比對引擎）會拿這張表裡面的名字與特徵，去比對美國財政部海外資產控制辦公室（OFAC）、聯合國（UN）、歐盟（EU）或本地法規的制裁/黑名單資料庫。
+   * 系統會計算姓名相似度（模糊比對 / Fuzzy Matching）、比對出生日期與國家，判斷該客戶是否為受制裁實體、恐怖分子或高風險政治人物（PEP），並產出命中報告（Hit List）以供合規人員審查。
