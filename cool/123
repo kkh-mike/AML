@@ -1,544 +1,139 @@
-Sub A_Use_This()
+以下為本次 SP 異動（日本名單納入死亡名單、新增 GROUPID=10 Sanctions IDs、Log 歷程）的完整測試案例（TC），包含測試前置準備（Before）、執行指令、預期結果（After）、反向邊界驗證與驗證 SQL。
+第一部分：日本金融制裁名單（GROUPID = 5）
+TC-JP-01：已故人員（Deceased = 1）成功同步
+ * 驗證目的： 驗證本次新增邏輯，只要標記為已故且有日本金融制裁標籤，不論身分皆能同步。
+ * Before（資料準備）：
+   * 在 BSADB.dbo.DJ_Entity 建立 EntityId = 99901，Deceased = 1，FullName = 'TEST DECEASED JP'。
+   * 在 BSADB.dbo.DJ_SanctionListReference 建立 EntityId = 99901，SanctionListReference = 'Japanese Finance Sanctions'。
+   * 確認 BSADBJP..OFAC_SPEC 無此筆資料。
+ * 執行： 執行 SP EXEC [dbo].[GLSPEC_SyncDJToInternalList] @GroupId = 1;
+ * After（預期結果）：
+   * BSADBJP..OFAC_SPEC 新增 remark = '99901'、spec_name = 'TEST DECEASED JP'、GROUPID = 5、DInd = 'N'。
+   * BSADBJP.dbo.OFAC_SPEC_LOG 新增一筆 remark = '99901'，ActionCD = '01'。
+TC-JP-02：存活本名（正常名單）回歸測試
+ * 驗證目的： 確保既有邏輯未被破壞，活著且具本名者正常同步。
+ * Before（資料準備）：
+   * 在 BSADB.dbo.DJ_List_Data_A 建立 EntNum = 99902，SdnName = 'TEST ALIVE PRIMARY'，NamePropertyBitCode = 1。
+   * 在 BSADB.dbo.DJ_SanctionListReference 建立 EntityId = 99902，SanctionListReference = 'Japanese Finance Sanctions'。
+   * 在 BSADB.dbo.DJ_Entity 建立 EntityId = 99902，Deceased = 0。
+ * 執行： 執行 SP
+ * After（預期結果）： BSADBJP..OFAC_SPEC 成功寫入 remark = '99902'，GROUPID = 5。
+TC-JP-03：反向驗證 — 存活但僅為別名（Alias）
+ * 驗證目的： 活著的人若僅為別名（非本名），不可被納入名單。
+ * Before（資料準備）：
+   * 在 BSADB.dbo.DJ_List_Data_A 建立 EntNum = 99903，SdnName = 'TEST ALIVE ALIAS'，NamePropertyBitCode = 0（別名）。
+   * 在 BSADB.dbo.DJ_Entity 建立 EntityId = 99903，Deceased = 0。
+   * 在 BSADB.dbo.DJ_SanctionListReference 建立 EntityId = 99903，SanctionListReference = 'Japanese Finance Sanctions'。
+ * 執行： 執行 SP
+ * After（預期結果）： BSADBJP..OFAC_SPEC 查無 remark = '99903'。
+TC-JP-04：反向驗證 — 已故但非日本金融制裁
+ * 驗證目的： 已故人員若無日本金融標籤，不可被誤撈至 GROUPID = 5。
+ * Before（資料準備）：
+   * 在 BSADB.dbo.DJ_Entity 建立 EntityId = 99904，Deceased = 1。
+   * 在 BSADB.dbo.DJ_SanctionListReference 建立 EntityId = 99904，SanctionListReference = 'US OFAC List'（無 Japanese Finance）。
+ * 執行： 執行 SP
+ * After（預期結果）： BSADBJP..OFAC_SPEC 查無 remark = '99904'。
+-- ============================================================
+-- 第一部分驗證 SQL
+-- ============================================================
+-- 1. 正向驗證：TC-JP-01 (已故) 與 TC-JP-02 (存活本名) 應存在
+SELECT ent_num, spec_name, remark, GROUPID, DInd, updated_date
+FROM BSADBJP..OFAC_SPEC
+WHERE GROUPID = 5 AND remark IN ('99901', '99902');
 
-'上限10欄（F~O）
-'B~E為保留欄位
-'B：Count/1000
-'C：組字串
-'D、E：備用
+-- 2. 反向驗證：TC-JP-03 (存活別名) 與 TC-JP-04 (非日本制裁已故) 筆數必須為 0
+SELECT COUNT(1) AS NegativeCheck_ShouldBeZero
+FROM BSADBJP..OFAC_SPEC
+WHERE GROUPID = 5 AND remark IN ('99903', '99904');
 
-    Application.ScreenUpdating = False
-    
-    If ActiveSheet.Name = "Insert" Then
+-- 3. Log 驗證：檢查新增動作代碼 (01)
+SELECT ent_num, spec_name, remark, ActionCD, ActionDT_UTC
+FROM BSADBJP.dbo.OFAC_SPEC_LOG
+WHERE GROUPID = 5 AND remark IN ('99901', '99902');
 
-        '清除Del資料
-        Sheets("Del").Cells.Clear
-        Range("A1").Select
-        
-        '編號
-        Sheets("Insert").Select
-        Range("A2").Select
-        
-        Dim RowCount
-        RowCount = Sheets("Insert").Range("F2").End(xlDown).Row
-        
-        If Range("F4").Value = "" Or RowCount = 1048576 Then
-            MsgBox "請輸入至少三筆資料", , "：）"
-            Range("A1").Select
-            Exit Sub
-        End If
-        
-        Range("A2").Value = "1"
-        Range("A3").Value = "2"
-        Set SourceRange = Worksheets("Insert").Range("A2:A3")
-        Set fillRange = Worksheets("Insert").Range("A2:A" & RowCount)
-        SourceRange.AutoFill Destination:=fillRange
-        
-        Dim AtName
-        Dim ColNum
-        
-        'InputBox
-        Func = InputBox("0:ID補0  9:去ID底線  10:Others" & vbNewLine _
-                      & "1:審核結果" & vbNewLine & "2:Occup  3:JobTitle  4:ServingEntity" & vbNewLine _
-                      & "5:出生地  6:永久住址  7:郵寄地址  8:開戶目的", "Function")
-        
-        Select Case Func
-            'ID補0
-            Case 0
-                Columns("B:B").Select
-                Selection.NumberFormatLocal = "@"
-                
-                Dim strAreaCode As String
-                
-                '檢核身分證
-                For i = 2 To (RowCount)
-                    Range("B" & i).Value = Trim(Range("B" & i))
-                    Set strUserID = Worksheets("Insert").Range("B" & i)
-                    ' 轉為大寫
-                    strUserID = UCase(strUserID)
-                    ' 確定有10碼
-                    If Len(Trim(strUserID)) = 10 Then
-                        Range("B" & i).Value = Trim(Range("B" & i)) & "0"
-                    Else
-                        Range("B" & i).Value = Trim(Range("B" & i))
-                    End If
-                Next
-                
-                Range("A1").Select
-                Exit Sub
-                
-            '去除_
-            Case 9
-                Columns("F:F").Select
-                Selection.NumberFormatLocal = "@"
-                
-                For i = 2 To (RowCount)
-                    Range("F" & i).Value = Trim(Range("F" & i))
-                    Set strUserID = Worksheets("Insert").Range("F" & i)
-                    '移除底線
-                    If Mid(Range("F" & i), 1, 1) = "_" Then
-                        Range("F" & i).Value = Right(strUserID, Len(strUserID) - 1)
-                    End If
-                    ' 轉為大寫
-                    strUserID = UCase(strUserID)
-                    ' 取最後一碼是否為零
-                    strZero = Right(strUserID, 1)
-                    ' 確定有10碼
-                    If Len(Trim(strUserID)) = 11 And strZero = 0 Then
-                        Range("P" & i).Value = "OK"
-                    Else
-                        Range("P" & i).Value = "ERROR"
-                    End If
-                Next
-                
-                Range("A1").Select
-                Exit Sub
-            
-            'NextReviewDate
-            Case 1
-                AtName = "@CustID"
-                ColNum = 3
-             
-            'Occup
-            Case 2
-                AtName = "#Cust_OCCUP"
-                ColNum = 2
-                For i = 2 To (RowCount)
-                    'Check
-                    checkData = WorksheetFunction.IfError(Application.VLookup(Left(Range("G" & i), 4), Worksheets("Check").Range("B:B"), 1, False), "Error")
-                    If checkData = "Error" Then
-                        Range("G" & i).Interior.Color = RGB(255, 220, 220)
-                        MsgBox "格式錯誤", , "格式錯誤"
-                        Exit Sub
-                    End If
-                    
-                    '取前四碼
-                    Range("G" & i).Value = Trim(Range("G" & i))
-                    Range("G" & i) = Left(Range("G" & i), 4)
-                    
-                Next
-            
-            'JobTitle
-            Case 3
-                AtName = "#Cust_JOBTITLE"
-                ColNum = 2
-                For i = 2 To (RowCount)
-                    'Check
-                    checkData = WorksheetFunction.IfError(Application.VLookup(Left(Range("G" & i), 4), Worksheets("Check").Range("C:C"), 1, False), "Error")
-                    If checkData = "Error" Then
-                        Range("G" & i).Interior.Color = RGB(255, 220, 220)
-                        MsgBox "格式錯誤", , "格式錯誤"
-                        Exit Sub
-                    End If
-                    
-                    '取前四碼
-                    Range("G" & i).Value = Trim(Range("G" & i))
-                    Range("G" & i) = Left(Range("G" & i), 4)
-                Next
-            
-            'ServingEntity
-            Case 4
-                AtName = "#Cust_Serving_Entity"
-                ColNum = 2
-                
-          'POB 出生地國家
-Case 5
-    AtName = "@CUST_PLACE_OF_BIRTH"
-    ColNum = 2
+第二部分：Sanctions IDs 同步（GROUPID = 10）
+TC-SID-01：標準 19 類證件/通訊識別碼同步
+ * 驗證目的： 驗證符合條件的實體，其識別碼寫入 spec_name，格式與固定文字正確填入。
+ * Before（資料準備）：
+   * DJ_Entity：EntityId = 99911，PersonStatus = 'Active'。
+   * DJ_ListCategory：EntityId = 99911，Description2 = 'Sanctions Lists'，Deleted = 0。
+   * DJ_List_Data_A：EntNum = 99911，UpdatedDate = '20260831'。
+   * DJ_IdentificationTypeInfo：EntityId = 99911，IdentificationType = 'Passport No.'，IdentificationNumber = 'PASSPORT12345'，Deleted = 0。
+ * 執行： 執行 SP
+ * After（預期結果）：
+   * BSADB.dbo.OFAC_GLSpec 產生新資料：
+     * spec_name = 'PASSPORT12345'
+     * remark = '99911'
+     * GROUPID = 10
+     * ADDRESS = 'Passport No.; Please go to Dowjones website for more detail'
+     * DInd = 'N'
+   * BSADB.dbo.OFAC_GLSpec_Log 寫入 ActionCD = '01'。
+TC-SID-02：反向驗證 — 人員狀態為 Inactive
+ * 驗證目的： PersonStatus = 'Inactive' 者不可同步。
+ * Before（資料準備）：
+   * EntityId = 99912，所有制裁分類與證件條件皆符合，但 DJ_Entity.PersonStatus = 'Inactive'。
+ * 執行： 執行 SP
+ * After（預期結果）： BSADB.dbo.OFAC_GLSpec（GROUPID = 10）查無 remark = '99912'。
+TC-SID-03：反向驗證 — 非指定 19 類證件類型
+ * 驗證目的： 證件類型不在限定的 19 種清單內，不可同步。
+ * Before（資料準備）：
+   * EntityId = 99913，Active 且符合制裁分類，但 DJ_IdentificationTypeInfo.IdentificationType = 'Employee ID'。
+ * 執行： 執行 SP
+ * After（預期結果）： BSADB.dbo.OFAC_GLSpec（GROUPID = 10）查無 remark = '99913'。
+TC-SID-04：反向驗證 — 證件/分類已軟刪除（Deleted = 1）
+ * 驗證目的： 來源端標記刪除者不可同步。
+ * Before（資料準備）：
+   * EntityId = 99914，Active 且符合制裁分類，證件為 Passport No.，但 DJ_IdentificationTypeInfo.Deleted = 1。
+ * 執行： 執行 SP
+ * After（預期結果）： BSADB.dbo.OFAC_GLSpec（GROUPID = 10）查無 remark = '99914'。
+-- ============================================================
+-- 第二部分驗證 SQL
+-- ============================================================
+-- 1. 正向驗證：TC-SID-01 檢查欄位映射與固定字串
+SELECT spec_name, remark, GROUPID, ADDRESS, DInd, updated_date
+FROM BSADB.dbo.OFAC_GLSpec
+WHERE GROUPID = 10 AND remark = '99911';
 
-    'Check
-    For i = 2 To RowCount
-        
-        Dim originalValue As String
-        Dim checkValue As String
-        
-        originalValue = Trim(CStr(Range("G" & i).Value))
-        checkValue = Left(originalValue, 4)
-        
-        checkData = WorksheetFunction.IfError( _
-                        Application.VLookup( _
-                            checkValue, _
-                            Worksheets("Check").Range("A:A"), _
-                            1, _
-                            False), _
-                        "Error")
-        
-        If checkData = "Error" Then
-            
-            '標記錯誤欄位
-            Range("G" & i).Interior.Color = RGB(255, 220, 220)
-            
-            MsgBox _
-                "格式錯誤！" & vbNewLine & vbNewLine & _
-                "Excel列數：" & i & vbNewLine & _
-                "原始資料：" & originalValue & vbNewLine & _
-                "檢查值（前4碼）：" & checkValue & vbNewLine & _
-                "查找範圍：Check!A:A", _
-                vbExclamation, _
-                "格式錯誤"
-            
-            Range("G" & i).Select
-            Exit Sub
-        End If
-        
-    Next
-                
-            'P_CTRYCD 永久住址國家
-            Case 6
-                AtName = "@CUST_P_CTRYCD"
-                ColNum = 2
-                'Check
-                For i = 2 To (RowCount)
-                    checkData = WorksheetFunction.IfError(Application.VLookup(Left(Range("G" & i), 4), Worksheets("Check").Range("A:A"), 1, False), "Error")
-                    If checkData = "Error" Then
-                        Range("G" & i).Interior.Color = RGB(255, 220, 220)
-                        MsgBox "格式錯誤", , "格式錯誤"
-                        Exit Sub
-                    End If
-                Next
-                
-            'C_CTRYCD 郵寄地址國家
-            Case 7
-                AtName = "@CUST_C_CTRYCD"
-                ColNum = 2
-                'Check
-                For i = 2 To (RowCount)
-                    checkData = WorksheetFunction.IfError(Application.VLookup(Left(Range("G" & i), 4), Worksheets("Check").Range("A:A"), 1, False), "Error")
-                    If checkData = "Error" Then
-                        Range("G" & i).Interior.Color = RGB(255, 220, 220)
-                        MsgBox "格式錯誤", , "格式錯誤"
-                        Exit Sub
-                    End If
-                Next
-                
-            'Purpose 開戶目的
-            Case 8
-                AtName = "@CUST_ACCOUNT_PURPOSE"
-                ColNum = 2
-                'Check
-                For i = 2 To (RowCount)
-                    checkData = WorksheetFunction.IfError(Application.VLookup(Left(Range("G" & i), 4), Worksheets("Check").Range("D:D"), 1, False), "Error")
-                    If checkData = "Error" Then
-                        Range("G" & i).Interior.Color = RGB(255, 220, 220)
-                        MsgBox "格式錯誤", , "格式錯誤"
-                        Exit Sub
-                    End If
-                Next
-            
-            'Other
-            Case 10
-                'InputBox
-                AtName = InputBox("TempTableName（記得加@/#）", "TableName")
-                ColNum = InputBox("1~10 Column", "Column")
-            
-            '非1~10
-            Case Else
-                MsgBox "請輸入1~10", , "：）"
-                Exit Sub
-            
-        End Select
-        
-        
-        '計算1000餘數
-        For i = 2 To (RowCount - 1)
-            Range("B" & i) = Range("A" & i) Mod 1000
-            
-            Range("F" & i).Value = Trim(Range("F" & i))
-            Range("G" & i).Value = Trim(Range("G" & i))
-            Range("H" & i).Value = Trim(Range("H" & i))
-            Range("I" & i).Value = Trim(Range("I" & i))
-            Range("J" & i).Value = Trim(Range("J" & i))
-            Range("K" & i).Value = Trim(Range("K" & i))
-            Range("L" & i).Value = Trim(Range("L" & i))
-            Range("M" & i).Value = Trim(Range("M" & i))
-            Range("N" & i).Value = Trim(Range("N" & i))
-            Range("O" & i).Value = Trim(Range("O" & i))
-            
-            Select Case ColNum
-                Case 1
-                    '條件判斷產生字串
-                    If (Range("B" & i) = 1) Then
-                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "'),"
-                    ElseIf (Range("B" & i) = 0) Then
-                        Range("C" & i).Value = "('" & Range("F" & i) & "');"
-                    Else
-                        Range("C" & i).Value = "('" & Range("F" & i) & "'),"
-                    End If
-                    
-                    '最後一筆
-                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
-                    
-                    If (Range("B" & RowCount) = 1) Then
-                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "');"
-                    Else
-                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "');"
-                    End If
-                    
-                Case 2
-                    '條件判斷產生字串
-                    If (Range("B" & i) = 1) Then
-                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "'),"
-                    ElseIf (Range("B" & i) = 0) Then
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "');"
-                    Else
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "'),"
-                    End If
-                    
-                    '最後一筆
-                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
-                    
-                    If (Range("B" & RowCount) = 1) Then
-                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "');"
-                    Else
-                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "');"
-                    End If
-                    
-                Case 3
-                    '條件判斷產生字串
-                    If (Range("B" & i) = 1) Then
-                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "'),"
-                    ElseIf (Range("B" & i) = 0) Then
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "');"
-                    Else
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "'),"
-                    End If
-                    
-                    '最後一筆
-                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
-                    
-                    If (Range("B" & RowCount) = 1) Then
-                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" _
-                        & Range("H" & RowCount) & "');"
-                    Else
-                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" & Range("H" & RowCount) & "');"
-                    End If
-                    
-                Case 4
-                    '條件判斷產生字串
-                    If (Range("B" & i) = 1) Then
-                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "'),"
-                    ElseIf (Range("B" & i) = 0) Then
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "');"
-                    Else
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "'),"
-                    End If
-                    
-                    '最後一筆
-                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
-                    
-                    If (Range("B" & RowCount) = 1) Then
-                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" _
-                        & Range("H" & RowCount) & "','" & Range("I" & i) & "');"
-                    Else
-                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" & Range("H" & RowCount) & "','" _
-                        & Range("I" & i) & "');"
-                    End If
-                    
-                Case 5
-                    '條件判斷產生字串
-                    If (Range("B" & i) = 1) Then
-                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "'),"
-                    ElseIf (Range("B" & i) = 0) Then
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "');"
-                    Else
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "'),"
-                    End If
-                    
-                    '最後一筆
-                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
-                    
-                    If (Range("B" & RowCount) = 1) Then
-                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" _
-                        & Range("H" & RowCount) & "','" & Range("I" & i) & "','" & Range("J" & i) & "');"
-                    Else
-                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" & Range("H" & RowCount) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "');"
-                    End If
-                    
-                Case 6
-                    '條件判斷產生字串
-                    If (Range("B" & i) = 1) Then
-                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "'),"
-                    ElseIf (Range("B" & i) = 0) Then
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "');"
-                    Else
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "'),"
-                    End If
-                    
-                    '最後一筆
-                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
-                    
-                    If (Range("B" & RowCount) = 1) Then
-                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" _
-                        & Range("H" & RowCount) & "','" & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "');"
-                    Else
-                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" & Range("H" & RowCount) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "');"
-                    End If
-                    
-                Case 7
-                    '條件判斷產生字串
-                    If (Range("B" & i) = 1) Then
-                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "'),"
-                    ElseIf (Range("B" & i) = 0) Then
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "');"
-                    Else
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "'),"
-                    End If
-                    
-                    '最後一筆
-                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
-                    
-                    If (Range("B" & RowCount) = 1) Then
-                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" _
-                        & Range("H" & RowCount) & "','" & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "');"
-                    Else
-                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" & Range("H" & RowCount) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "');"
-                    End If
-                    
-                Case 8
-                    '條件判斷產生字串
-                    If (Range("B" & i) = 1) Then
-                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "'),"
-                    ElseIf (Range("B" & i) = 0) Then
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "');"
-                    Else
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "'),"
-                    End If
-                    
-                    '最後一筆
-                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
-                    
-                    If (Range("B" & RowCount) = 1) Then
-                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" _
-                        & Range("H" & RowCount) & "','" & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" _
-                        & Range("M" & i) & "');"
-                    Else
-                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" & Range("H" & RowCount) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "');"
-                    End If
-                    
-                Case 9
-                    '條件判斷產生字串
-                    If (Range("B" & i) = 1) Then
-                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "','" _
-                        & Range("N" & i) & "'),"
-                    ElseIf (Range("B" & i) = 0) Then
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "','" _
-                        & Range("N" & i) & "');"
-                    Else
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "','" _
-                        & Range("N" & i) & "'),"
-                    End If
-                    
-                    '最後一筆
-                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
-                    
-                    If (Range("B" & RowCount) = 1) Then
-                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" _
-                        & Range("H" & RowCount) & "','" & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" _
-                        & Range("M" & i) & "','" & Range("N" & i) & "');"
-                    Else
-                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" & Range("H" & RowCount) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "','" _
-                        & Range("N" & i) & "');"
-                    End If
-                    
-                Case 10
-                    '條件判斷產生字串
-                    If (Range("B" & i) = 1) Then
-                        Range("C" & i).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "','" _
-                        & Range("N" & i) & "','" & Range("O" & i) & "'),"
-                    ElseIf (Range("B" & i) = 0) Then
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "','" _
-                        & Range("N" & i) & "','" & Range("O" & i) & "');"
-                    Else
-                        Range("C" & i).Value = "('" & Range("F" & i) & "','" & Range("G" & i) & "','" & Range("H" & i) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "','" _
-                        & Range("N" & i) & "','" & Range("O" & i) & "'),"
-                    End If
-                    
-                    '最後一筆
-                    Range("B" & RowCount) = Range("A" & RowCount) Mod 1000
-                    
-                    If (Range("B" & RowCount) = 1) Then
-                        Range("C" & RowCount).Value = "INSERT INTO " & AtName & " VALUES('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" _
-                        & Range("H" & RowCount) & "','" & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" _
-                        & Range("M" & i) & "','" & Range("N" & i) & "','" & Range("O" & i) & "');"
-                    Else
-                        Range("C" & RowCount).Value = "('" & Range("F" & RowCount) & "','" & Range("G" & RowCount) & "','" & Range("H" & RowCount) & "','" _
-                        & Range("I" & i) & "','" & Range("J" & i) & "','" & Range("K" & i) & "','" & Range("L" & i) & "','" & Range("M" & i) & "','" _
-                        & Range("N" & i) & "','" & Range("O" & i) & "');"
-                    End If
-                
-                '非1~10
-                Case Else
-                    MsgBox "請輸入1~10", , "：）"
-                    Exit Sub
-                    
-            End Select
-        Next
-        
-        
-        '複製資料到Del
-        Sheets("Insert").Range("C2:C" & RowCount).Copy
-        Sheets("Del").Select
-        Range("A1").Select
-        Sheets("Del").Paste
-        Application.CutCopyMode = False
-        
-        '清除Insert資料
-        Sheets("Insert").Select
-        Range("A2:A" & RowCount).Select
-        Selection.EntireRow.Delete
-        Selection.NumberFormatLocal = "@"
-        Range("A1").Value = "序號"
-        Range("F1").Value = "1"
-        Range("G1").Value = "2"
-        Range("H1").Value = "3"
-        Range("I1").Value = "4"
-        Range("J1").Value = "5"
-        Range("K1").Value = "6"
-        Range("L1").Value = "7"
-        Range("M1").Value = "8"
-        Range("N1").Value = "9"
-        Range("O1").Value = "10"
-        Range("A1").Select
-        Sheets("Del").Select
-        
-        'Copy Del
-        Sheets("Del").Range("A1:A" & RowCount - 1).Copy
-    
-    End If
-    
-End Sub
+-- 2. 反向驗證：TC-SID-02, 03, 04 筆數必須為 0
+SELECT COUNT(1) AS NegativeCheck_ShouldBeZero
+FROM BSADB.dbo.OFAC_GLSpec
+WHERE GROUPID = 10 AND remark IN ('99912', '99913', '99914');
 
+-- 3. Log 驗證：ActionCD 應為 '01' (新增)
+SELECT ent_num, spec_name, remark, ActionCD, ActionDt
+FROM BSADB.dbo.OFAC_GLSpec_Log
+WHERE GROUPID = 10 AND remark = '99911';
 
+第三部分：名單異動更新、下架（軟刪除）與重啟驗證
+TC-LIFECYCLE-01：資料更新（Update）
+ * Before： 已存在於 OFAC_GLSpec（GROUPID = 10, remark = '99911'）。將來源端 DJ_List_Data_A.UpdatedDate 改為 '20260901'。
+ * 執行： 執行 SP
+ * After：
+   * OFAC_GLSpec 的 updated_date 更新為 '20260901'。
+   * OFAC_GLSpec_Log 新增一筆 ActionCD = '02'（更新）。
+TC-LIFECYCLE-02：名單下架（Soft Delete）
+ * Before： 將來源端 DJ_IdentificationTypeInfo（EntityId = 99911）的 Deleted 更新為 1（模擬來源移除證件）。
+ * 執行： 執行 SP
+ * After：
+   * OFAC_GLSpec 的 DInd 變更為 'Y'，DelUserID = 'System Admin'，DelDate 有值。
+   * OFAC_GLSpec_Log 新增一筆 ActionCD = '03'（刪除）。
+TC-LIFECYCLE-03：名單重新上架（Re-activate）
+ * Before： 將來源端 DJ_IdentificationTypeInfo（EntityId = 99911）的 Deleted 恢復為 0。
+ * 執行： 執行 SP
+ * After：
+   * OFAC_GLSpec 的 DInd 變更回 'N'，DelUserID 與 DelDate 清空為 NULL。
+   * OFAC_GLSpec_Log 新增一筆 ActionCD = '01'（重新啟用視同新增/上架）。
+-- ============================================================
+-- 第三部分生命週期與 Log 完整軌跡查詢 SQL
+-- ============================================================
+-- 檢查主表狀態
+SELECT spec_name, remark, GROUPID, DInd, updated_date, DelUserID, DelDate
+FROM BSADB.dbo.OFAC_GLSpec
+WHERE GROUPID = 10 AND remark = '99911';
 
+-- 檢查 Log 歷程（應能依序看到 01 -> 02 -> 03 -> 01）
+SELECT ent_num, spec_name, remark, DInd, ActionCD, ActionDt, updated_date
+FROM BSADB.dbo.OFAC_GLSpec_Log
+WHERE GROUPID = 10 AND remark = '99911'
+ORDER BY ActionDt ASC;
 
-
-
-
-我巨集選擇2 OCCUP 但出現格式錯誤
-
-我的資料可能哪裡錯了?
