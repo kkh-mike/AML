@@ -1,4 +1,9 @@
-SELECT TOP 1
+依據你挑選真實資料（Deceased = 1）的查詢邏輯，以下為直接使用既有資料進行 Before / After / 反向驗證 的完整測試案例流程與驗證腳本：
+TC-JP-01：已故人員（Deceased = 1）納入日本名單驗證
+ * 測試目的： 驗證已故實體若具備 Japanese Finance 標籤，無論其是否在 DJ_List_Data_A 擁有本名，皆能透過新增邏輯同步至 GROUPID = 5。
+ * Before（尋找測試目標）：
+   執行以下 SQL 挑出一筆符合條件的 EntityId（記為 @TestEntNum_Dead），並確認目標表目前無此資料或非有效狀態：
+   SELECT TOP 1
     E.EntityId AS EntNum,
     E.FullName AS DJ_Entity_FullName,
     L.SdnName  AS DJ_Primary_SdnName,
@@ -8,13 +13,11 @@ SELECT TOP 1
     REF.SanctionReferences
 FROM BSADB.dbo.DJ_Entity E WITH (NOLOCK)
 LEFT JOIN (
-    -- 取得主要姓名 (BitCode & 1 > 0)
     SELECT EntNum, SdnName
     FROM BSADB.dbo.DJ_List_Data_A WITH (NOLOCK)
     WHERE NamePropertyBitCode & 1 > 0
 ) L ON E.EntityId = L.EntNum
 OUTER APPLY (
-    -- 聚合所有制裁清單參考資訊
     SELECT STUFF((
         SELECT ';' + R.SanctionListReference
         FROM BSADB.dbo.DJ_SanctionListReference R WITH (NOLOCK)
@@ -22,12 +25,91 @@ OUTER APPLY (
         FOR XML PATH(''), TYPE
     ).value('.', 'nvarchar(max)'), 1, 1, '') AS SanctionReferences
 ) REF
-WHERE E.Deceased = 1;
+WHERE E.Deceased = 1
+  AND REF.SanctionReferences LIKE '%Japanese Finance%';
 
+ * 執行： 執行預存程序
+   EXEC [dbo].[GLSPEC_SyncDJToInternalList] @GroupId = 1;
 
+ * After（預期結果）：
+   * BSADBJP..OFAC_SPEC 成功寫入該筆資料（GROUPID = 5, DInd = 'N', remark = @TestEntNum_Dead）。
+   * spec_name 對應 DJ_Entity.FullName。
+   * BSADBJP.dbo.OFAC_SPEC_LOG 寫入 ActionCD = '01'。
+TC-JP-02：反向驗證 — 已故但「非日本金融制裁」
+ * 測試目的： 驗證已故實體若未包含 Japanese Finance 標籤，系統不可將其誤撈至 GROUPID = 5。
+ * Before（尋找反向測試目標）：
+   挑選 Deceased = 1 但無日本金融制裁的實體（記為 @TestEntNum_NotJP）：
+   SELECT TOP 1
+    E.EntityId AS EntNum,
+    E.FullName,
+    REF.SanctionReferences
+FROM BSADB.dbo.DJ_Entity E WITH (NOLOCK)
+OUTER APPLY (
+    SELECT STUFF((
+        SELECT ';' + R.SanctionListReference
+        FROM BSADB.dbo.DJ_SanctionListReference R WITH (NOLOCK)
+        WHERE R.EntityId = E.EntityId
+        FOR XML PATH(''), TYPE
+    ).value('.', 'nvarchar(max)'), 1, 1, '') AS SanctionReferences
+) REF
+WHERE E.Deceased = 1
+  AND (REF.SanctionReferences NOT LIKE '%Japanese Finance%' OR REF.SanctionReferences IS NULL);
 
+ * 執行： 執行預存程序
+   EXEC [dbo].[GLSPEC_SyncDJToInternalList] @GroupId = 1;
 
+ * After（預期結果）：
+   * BSADBJP..OFAC_SPEC 查無 該筆資料（筆數為 0）。
+TC-JP-03：反向驗證 — 未死亡（Deceased = 0）且僅為「別名」
+ * 測試目的： 驗證存活者若僅在別名清單中（NamePropertyBitCode & 1 = 0），即使有日本金融標籤，也不可被第二段邏輯誤寫入。
+ * Before（尋找反向測試目標）：
+   挑選未死亡且僅為別名的實體（記為 @TestEntNum_Alias）：
+   SELECT TOP 1
+    E.EntityId AS EntNum,
+    E.FullName
+FROM BSADB.dbo.DJ_Entity E WITH (NOLOCK)
+JOIN BSADB.dbo.DJ_SanctionListReference R WITH (NOLOCK) ON E.EntityId = R.EntityId
+WHERE E.Deceased = 0
+  AND R.SanctionListReference LIKE '%Japanese Finance%'
+  AND NOT EXISTS (
+      SELECT 1 FROM BSADB.dbo.DJ_List_Data_A A WITH (NOLOCK)
+      WHERE A.EntNum = E.EntityId AND A.NamePropertyBitCode & 1 > 0
+  );
 
-我是這樣撈死人名單的
+ * 執行： 執行預存程序
+   EXEC [dbo].[GLSPEC_SyncDJToInternalList] @GroupId = 1;
 
-你可以幫我重寫我的TC 流程?
+ * After（預期結果）：
+   * BSADBJP..OFAC_SPEC 查無 該筆資料（筆數為 0）。
+測試驗證查詢腳本（執行後驗證專用）：
+-- 1. 正向驗證：檢查已故日本制裁名單是否成功進榜
+SELECT 
+    ent_num, 
+    spec_name, 
+    remark, 
+    GROUPID, 
+    DInd, 
+    SOURCE, 
+    updated_date
+FROM BSADBJP..OFAC_SPEC
+WHERE GROUPID = 5 
+  AND remark = '<填入 @TestEntNum_Dead>';
+
+-- 2. 反向驗證：非日本制裁已故者 / 存活別名 不可進榜（結果必須為 0）
+SELECT COUNT(1) AS ShouldBeZero
+FROM BSADBJP..OFAC_SPEC
+WHERE GROUPID = 5 
+  AND remark IN ('<填入 @TestEntNum_NotJP>', '<填入 @TestEntNum_Alias>');
+
+-- 3. Log 歷程驗證：檢查是否記錄 ActionCD = '01'
+SELECT TOP 5 
+    ent_num, 
+    spec_name, 
+    remark, 
+    ActionCD, 
+    ActionDT_UTC
+FROM BSADBJP.dbo.OFAC_SPEC_LOG
+WHERE GROUPID = 5 
+  AND remark = '<填入 @TestEntNum_Dead>'
+ORDER BY ActionDT_UTC DESC;
+
