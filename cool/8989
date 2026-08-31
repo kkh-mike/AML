@@ -1,3 +1,31 @@
+
+
+直接在 SSMS 執行以下查詢，確認你目前 BSADBJP.dbo.OFAC_SPEC 中這批名單的 ent_num 是否全部都是 NULL：
+SELECT 
+    COUNT(*) AS Total_Count,
+    COUNT(ent_num) AS Has_Value_Count,
+    COUNT(*) - COUNT(ent_num) AS Null_Count
+FROM BSADBJP.dbo.OFAC_SPEC
+WHERE GROUPID = 11;
+
+如果想看明細資料，可以執行：
+SELECT TOP 20 
+    ent_num, 
+    spec_name, 
+    GROUPID, 
+    SOURCE, 
+    updated_date_UTC
+FROM BSADBJP.dbo.OFAC_SPEC
+WHERE GROUPID = 11
+ORDER BY updated_date_UTC DESC;
+
+判斷方式：
+ * 若 Null_Count 等於 Total_Count（或明細中的 ent_num 欄位全部呈現黃底/灰底的 NULL），就證實了這整批資料在寫入時因為取號邏輯失效，導致 ent_num 沒有成功賦予流水號。
+
+
+
+
+
 直接在 SSMS 執行以下三段語法，逐一驗證這三點：
 1. 驗證 ent_num 是否全部重複
 SELECT ent_num, COUNT(*) AS cnt, MAX(spec_name) AS sample_name
