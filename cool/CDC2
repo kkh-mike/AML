@@ -1,10 +1,211 @@
-為你精簡成好讀、好複製的簡潔版：
+ /*
+        ============================================================
+        第三段：Sanctions IDs 同步（GROUPID = 10）
+        來源：Dow Jones Sanctions IDs → BSADB.dbo.OFAC_GLSpec
+        ============================================================
+    */
+
+    IF OBJECT_ID('tempdb..#tempDJBlacklistSID') IS NOT NULL
+        DROP TABLE #tempDJBlacklistSID;
+
+    IF OBJECT_ID('tempdb..#tempDJBlacklistDetailsSID') IS NOT NULL
+        DROP TABLE #tempDJBlacklistDetailsSID;
+
+    CREATE TABLE #tempDJBlacklistSID
+    (
+        EntNum               INT NOT NULL,
+        IdentificationType   NVARCHAR(100) NOT NULL,
+        IdentificationNumber NVARCHAR(350) NOT NULL,
+        UpdatedDate          VARCHAR(8) NOT NULL
+    );
+
+    CREATE TABLE #tempDJBlacklistDetailsSID
+    (
+        EntNum               INT NOT NULL,
+        IdentificationNumber NVARCHAR(350) NOT NULL,
+        IdentificationType   NVARCHAR(350) NOT NULL,
+        UpdatedDate          VARCHAR(8) NOT NULL,
+        Address              NVARCHAR(400),
+        City                 NVARCHAR(200),
+        Country              NVARCHAR(100),
+        IdentType            VARCHAR(2),
+        IdentNumber          NVARCHAR(44),
+        DOB                  VARCHAR(8)
+    );
+
+    -- 取得符合條件的 Sanctions ID
+    INSERT INTO #tempDJBlacklistSID (EntNum, IdentificationType, IdentificationNumber, UpdatedDate)
+    SELECT 
+        A.EntityId,
+        D.IdentificationType,
+        D.IdentificationNumber,
+        MAX(C.UpdatedDate) AS UpdatedDate
+    FROM BSADB.dbo.DJ_Entity A
+    JOIN BSADB.dbo.DJ_ListCategory B          ON A.EntityId = B.EntityId
+    JOIN BSADB.dbo.DJ_List_Data_A C           ON A.EntityId = C.EntNum
+    LEFT JOIN BSADB.dbo.DJ_IdentificationTypeInfo D ON A.EntityId = D.EntityId
+    WHERE A.PersonStatus <> 'Inactive'
+      AND (
+            B.Description2 = 'Sanctions Lists'
+         OR B.Description3 IN (
+                'OFAC Related - Majority Owned',
+                'OFAC Related - Control',
+                'OFAC - Regional Sanctions Related - Majority Owned',
+                'OFAC - Regional Sanctions Related - Control',
+                'EU Related - Majority Owned',
+                'EU Related - Control',
+                'EU - Regional Sanctions Related - Majority Owned',
+                'EU - Regional Sanctions Related - Control'
+            )
+          )
+      AND B.Deleted = 0
+      AND D.IdentificationType IN (
+            'Aircraft Construction, Line, Fleet or Serial Number',
+            'Aircraft Manufacturer''s Serial Number (MSN)',
+            'Bank Identifier Code (BIC)',
+            'Central Registration Depository (CRD)',
+            'Company Identification No.',
+            'Driving Licence No.',
+            'DUNS Number',
+            'International Maritime Organization (IMO) Ship No.',
+            'International Securities Identification Number (ISIN)',
+            'Legal Entity Identifier (LEI)',
+            'National ID',
+            'National Provider Identifier (NPI)',
+            'National Tax No.',
+            'Others',
+            'Passport No.',
+            'Social Security No.',
+            'Email',
+            'Fax',
+            'Phone'
+          )
+      AND D.Deleted = 0
+    GROUP BY 
+        A.EntityId, 
+        D.IdentificationType, 
+        D.IdentificationNumber;
+
+    -- 準備明細資料（將 IdentificationType 存入 ADDRESS 欄位供後續比對）
+    INSERT INTO #tempDJBlacklistDetailsSID
+        (EntNum, IdentificationNumber, IdentificationType, UpdatedDate, Address)
+    SELECT 
+        A.EntNum,
+        A.IdentificationNumber,
+        A.IdentificationType,
+        A.UpdatedDate,
+        A.IdentificationType + '; Please go to Dowjones website for more detail'
+    FROM #tempDJBlacklistSID A;
+
+    -- MERGE
+    ;WITH TargetTable AS
+    (
+        SELECT 
+            A.*,
+            REPLACE(A.ADDRESS, '; Please go to Dowjones website for more detail', '') AS IdentificationType
+        FROM BSADB.dbo.OFAC_GLSpec A
+        WHERE A.GROUPID = 10
+    )
+    MERGE TargetTable AS T
+    USING
+    (
+        SELECT 
+            EntNum, IdentificationNumber, IdentificationType, UpdatedDate, Address,
+            City, Country, IdentType, IdentNumber, DOB
+        FROM #tempDJBlacklistDetailsSID
+    ) AS S
+    ON T.spec_name = S.IdentificationNumber
+   AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+   AND T.IdentificationType = S.IdentificationType
+
+    WHEN NOT MATCHED BY TARGET THEN
+        INSERT (spec_name, updated_date, remark, TaxID, IDENT, IDENTO, TaxIDCD, IDNUM, IssBy, DInd,
+                creUserID, STATE, ADDRESS, COUNTRY, GROUPID, SOURCE, EnterFlag,
+                ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate,
+                creDate, updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, creDate_UTC, DOB)
+        VALUES (S.IdentificationNumber, S.UpdatedDate, S.EntNum, '', S.IdentType, S.IdentNumber, '', '', '',
+                'N', 'System Admin', ISNULL(S.City, ''), S.Address, S.Country, '10', 'Sanctions IDs', 'D',
+                'System Admin', GETDATE(), NULL, NULL, NULL, NULL,
+                GETDATE(), GETUTCDATE(), GETUTCDATE(), NULL, NULL, GETUTCDATE(), S.DOB)
+
+    WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN
+        UPDATE SET 
+            T.DInd = 'Y',
+            T.DelUserID = 'System Admin',
+            T.DelDate = GETDATE(),
+            T.ApproveDelUserID = 'System Admin',
+            T.ApproveDelDate = GETDATE(),
+            T.DelDate_UTC = GETUTCDATE()
+
+    WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN
+        UPDATE SET 
+            T.DInd = 'N',
+            T.updated_date = S.UpdatedDate,
+            T.DelUserID = NULL,
+            T.DelDate = NULL,
+            T.ApproveDelUserID = NULL,
+            T.ApproveDelDate = NULL,
+            T.DelDate_UTC = NULL,
+            T.EnterFlag = 'D',
+            T.updated_date_UTC = GETUTCDATE(),
+            T.ADDRESS = S.Address,
+            T.STATE = ISNULL(S.City, ''),
+            T.COUNTRY = S.Country,
+            T.IDENT = S.IdentType,
+            T.IDNUM = S.IdentNumber,
+            T.DOB = S.DOB
+
+    OUTPUT 
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ent_num ELSE Deleted.ent_num END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.spec_name ELSE Deleted.spec_name END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date ELSE Deleted.updated_date END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.remark ELSE Deleted.remark END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DInd ELSE Deleted.DInd END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creUserID ELSE Deleted.creUserID END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENTO ELSE Deleted.IDENTO END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.STATE ELSE Deleted.STATE END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ADDRESS ELSE Deleted.ADDRESS END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.COUNTRY ELSE Deleted.COUNTRY END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.GROUPID ELSE Deleted.GROUPID END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENT ELSE Deleted.IDENT END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDNUM ELSE Deleted.IDNUM END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DOB ELSE Deleted.DOB END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.EnterFlag ELSE Deleted.EnterFlag END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedBy ELSE Deleted.ApprovedBy END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate ELSE Deleted.ApprovedDate END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelUserID ELSE Deleted.DelUserID END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate ELSE Deleted.DelDate END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelUserID ELSE Deleted.ApproveDelUserID END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate ELSE Deleted.ApproveDelDate END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creDate ELSE Deleted.creDate END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date_UTC ELSE Deleted.updated_date_UTC END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate_UTC ELSE Deleted.ApprovedDate_UTC END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate_UTC ELSE Deleted.DelDate_UTC END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate_UTC ELSE Deleted.ApproveDelDate_UTC END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creDate_UTC ELSE Deleted.creDate_UTC END,
+        CASE 
+            WHEN $ACTION = 'INSERT' OR ($ACTION = 'UPDATE' AND Deleted.DInd = 'Y' AND Inserted.DInd = 'N') THEN '01'
+            WHEN $ACTION = 'UPDATE' AND Inserted.DInd = 'Y' THEN '03'
+            ELSE '02'
+        END,
+        GETUTCDATE()
+    INTO BSADB.dbo.OFAC_GLSpec_Log
+        (ent_num, spec_name, updated_date, remark, DInd, creUserID, IDENTO, STATE, ADDRESS, COUNTRY, GROUPID,
+         IDENT, IDNUM, DOB, EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID,
+         ApproveDelDate, CreationDate, updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC,
+         CreationDate_UTC, ActionCD, ActionDt);
+
+
+所以code 部分我該怎麼寫根據
+
 TC-SAN-01：全新新增 (INSERT)
- * 測試目的：符合 OFAC/EU 制裁且具備 19 類證件的有效實體，能成功新增至目標表（GROUPID = 10）。
- * Before：來源端符合條件（Active 人員、制裁名單、19類證件且未刪除），目標表無此資料。
- * After：目標表成功新增，spec_name（證號）、remark（EntityId）、ADDRESS（證件類型+說明）及 updated_date 皆寫入正確。
+測試目的：符合 OFAC/EU 制裁且具備 19 類證件的有效實體，能成功新增至目標表（GROUPID = 10）。
+Before：來源端符合條件（Active 人員、制裁名單、19類證件且未刪除），目標表無此資料。
+After：目標表成功新增，spec_name（證號）、remark（EntityId）、ADDRESS（證件類型+說明）及 updated_date 皆寫入正確。
+
+
 TC-SAN-02：重新上架 (UPDATE - DInd = 'Y')
- * 測試目的：曾被標記下架（DInd = 'Y'）的資料，重新符合條件時能還原上架。
+測試目的：曾被標記下架（DInd = 'Y'）的資料，重新符合條件時能還原上架。
  * Before：來源端符合條件，目標表已有此資料但 DInd = 'Y'。
  * After：目標表該筆資料 DInd 變更為 'N'（或未刪除狀態），且 updated_date 更新為最新時間。
 TC-SAN-03：日期更新 (UPDATE - Date)
