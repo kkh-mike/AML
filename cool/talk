@@ -1,88 +1,98 @@
+USE [BSADBJP]
+GO
+/****** Object:  StoredProcedure [dbo].[NMCHK_InitiateNewAcctTables]    Script Date: 2026/8/31 下午 01:20:21 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER PROC [dbo].[NMCHK_InitiateNewAcctTables]
+@RANDNUM				NVARCHAR(20),
+@NAME					NVARCHAR(350),
+@DOB					NVARCHAR(10) = '',
+@Nationality			NVARCHAR(50) = '',
+@RELATIONSHIP			NVARCHAR(50),
+@TaxID					NVARCHAR(50) = '', 
+@UserID					NVARCHAR(50),
+@Address		NVARCHAR(160) = '',
+@City			NVARCHAR(50) = '',
+@Country		NVARCHAR(50) = '',
+@CombineKey     INTEGER,
+@Gender			NVARCHAR(2) = '',
+@IdentificationNumber NVARCHAR(MAX) = '',
+@NameCategory INTEGER, 
+@VesselIMONo NVARCHAR(MAX) = ''
+
+AS 
+BEGIN
+
+DECLARE
+@OFAC_NEW_ACCT_NAMES_TABLE	NVARCHAR(50),
+@EXTRA_NAME					NVARCHAR(350),
+@RELATIONSHIP2				NVARCHAR(100),
+@NSTRSQL NVARCHAR(MAX)
 
 
---BEFORE
-SELECT *
-FROM OAAML.AML_REPORT_ADD_ROLE
-WHERE EMPNO IN (
-'1151695','1090115','942095'
-);
+SET NOCOUNT ON
 
---INSERT
--------
-INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','TAOCHU','','','1151695');
-INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','CHUNGCHANG','','','1151695');
+SELECT @OFAC_NEW_ACCT_NAMES_TABLE = 'OFAC_NEW_ACCT_NAMES_' + @RANDNUM, 
+		@DOB = CASE ISNULL(@DOB,'') WHEN '' THEN NULL ELSE CONVERT(VARCHAR, CONVERT(DATETIME,@DOB),112) END,
+		@Nationality = ISNULL(@Nationality,''), 
+		@TaxID = ISNULL(@TaxID, '') , 
+		@IdentificationNumber = ISNULL(LTRIM(RTRIM(@IdentificationNumber)), '')
 
-INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','TAOCHU','','','1090115');
-INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','CHUNGCHANG','','','1090115');
+IF OBJECT_ID(@OFAC_NEW_ACCT_NAMES_TABLE, 'U') IS NOT NULL
+	EXEC('DROP TABLE ' + @OFAC_NEW_ACCT_NAMES_TABLE + ' ')
 
-INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','TAOCHU','','','942095');
-INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','CHUNGCHANG','','','942095');
+EXEC('
+CREATE TABLE [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(
+	[new_acct_key]  [int] NULL,
+	[new_acct_name] [NVARCHAR] (350) COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS NULL , 
+	[relationship]  [NVARCHAR] (50) NULL , 
+	[NameSource] [NVARCHAR] (20) NULL, 
+	[Nationality] NVARCHAR(50),
+	[DOB] NVARCHAR(10), 
+	[TAXID] NVARCHAR(50),
+	[Address] NVARCHAR(160),
+	[City]	NVARCHAR(50),
+	[Country] NVARCHAR(50),
+	[CombineKey] INTEGER, 
+	[Gender] NVARCHAR(2),
+	[IdentificationNumber] NVARCHAR(MAX), 
+	[NameCategory] INTEGER,
+	[VesselIMONo] NVARCHAR(MAX))')
+	
+/*Added Name Source table to determine the source of the name is from English Name Column or Non English Name column*/
+SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
+																	Address, City, Country, CombineKey, 
+																	Gender, IdentificationNumber, NameCategory, VesselIMONo)
+	VALUES(''1'', @NAME , @RELATIONSHIP, ''EnglishName'', @Nationality, @DOB, @TaxID, @Address, @City, @Country, @CombineKey, 
+			@Gender, @IdentificationNumber, @NameCategory, @VesselIMONo)'
 
+EXEC SP_EXECUTESQL @NSTRSQL, N'@NAME NVARCHAR(350), @RELATIONSHIP NVARCHAR(100), @Nationality NVARCHAR(50), @DOB NVARCHAR(16), @TaxID NVARCHAR(50),
+								@Address NVARCHAR(160), @City NVARCHAR(50), @Country NVARCHAR(50), @CombineKey INTEGER, 
+								@Gender NVARCHAR(2), @IdentificationNumber NVARCHAR(MAX), @NameCategory INTEGER, @VesselIMONo NVARCHAR(MAX)', 
+								@NAME, @RELATIONSHIP, @Nationality, @DOB, @TaxID, @Address, @City, @Country, @CombineKey, 
+								@Gender, @IdentificationNumber, @NameCategory, @VesselIMONo
 
-COMMIT;
+SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
+																	Address, City, Country, CombineKey, 
+																	Gender, IdentificationNumber, NameCategory, VesselIMONo)
+				SELECT 1 + ROW_NUMBER() OVER(ORDER BY Id), EXTRA_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
+					   Address, City, Country, CombineKey, Gender, IdentificationNumber, NameCategory, VesselIMONo
+				FROM dbo.NMCHK_MultipleList_TMP WITH(NOLOCK) 
+				WHERE USERID = @UserID '
+EXEC SP_EXECUTESQL @NSTRSQL, N'@UserID NVARCHAR(50)', @UserID 
 
---AFTER
-SELECT *
-FROM OAAML.AML_REPORT_ADD_ROLE
-WHERE EMPNO IN (
-'1151695','1090115','942095'
-);
-
-
-
-
-
--------------------
-
-Connected to Oracle Database 19c Enterprise Edition Release 19.0.0.0.0 
-Connected as OAAML
- 
-SQL> 
- 
-OVS_CD     ROLE_TYPE            ACC_DEP_COD          DEPT_CD_FUNC         EMPNO
----------- -------------------- -------------------- -------------------- --------------------
-TW         CHIANAN                                                        942095
-TW         KAOPIN                                                         942095
-TW         CHIANAN                                                        1090115
-TW         KAOPIN                                                         1090115
-TW         CHIANAN                                                        1151695
-TW         KAOPIN                                                         1151695
- 
-6 rows selected
- 
-1 row inserted
- 
-1 row inserted
- 
-1 row inserted
- 
-1 row inserted
- 
-1 row inserted
- 
-1 row inserted
- 
-Commit complete
- 
-OVS_CD     ROLE_TYPE            ACC_DEP_COD          DEPT_CD_FUNC         EMPNO
----------- -------------------- -------------------- -------------------- --------------------
-TW         CHIANAN                                                        942095
-TW         KAOPIN                                                         942095
-TW         CHIANAN                                                        1090115
-TW         KAOPIN                                                         1090115
-TW         CHIANAN                                                        1151695
-TW         KAOPIN                                                         1151695
-TW         TAOCHU                                                         1151695
-TW         CHUNGCHANG                                                     1151695
-TW         TAOCHU                                                         1090115
-TW         CHUNGCHANG                                                     1090115
-TW         TAOCHU                                                         942095
-TW         CHUNGCHANG                                                     942095
- 
-12 rows selected
- 
-SQL> 
+END
 
 
-我跑出來的這樣log 有對?
 
+給我註解一下這ˋ段code
+然後
+SELECT * FROM BSADBJP..OFAC_NEW_ACCT_NAMES_202672
+
+new_acct_key	new_acct_name	relationship	NameSource	Nationality	DOB	TAXID	Address	City	Country	CombineKey	Gender	IdentificationNumber	NameCategory	VesselIMONo
+1	Rahmani, Arsalan	CustomerName	EnglishName		NULL					0			0	
+
+
+這個能幹嘛
