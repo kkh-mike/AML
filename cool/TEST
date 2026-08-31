@@ -1,3 +1,12 @@
+
+
+USE [BSADBJP];
+SELECT name 
+FROM sys.procedures 
+WHERE name LIKE 'NMCHK_%'
+ORDER BY name;
+
+
 USE [BSADBJP];
 
 -- 1. 執行比對程序（將隨機碼傳入比對 SP）
