@@ -1,2 +1,8 @@
+SELECT name, create_date FROM BSADB.sys.tables WHERE name LIKE 'OFAC_NEW_ACCT_NAMES_%' ORDER BY create_date DESC;
+SELECT name, create_date FROM BSADBJP.sys.tables WHERE name LIKE 'OFAC_NEW_ACCT_NAMES_%' ORDER BY create_date DESC;
+
+
+
+
 訊息 208，層級 16，狀態 1，行 8
 無效的物件名稱 'BSADBJP.dbo.NMCK_REVIEW_MAIN'。
