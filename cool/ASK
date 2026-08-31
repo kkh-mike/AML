@@ -1,123 +1,149 @@
-Add-Type -AssemblyName System.IO.Compression.FileSystem
+可以，這份查詢腳本將第二段（日本金融名單）與第三段（Sanctions IDs）的所有篩選條件拆解成獨立的欄位標籤（Flag）。
+執行後可以直接從欄位一眼看出每一筆資料是「符合哪一條條件才被寫入」：
+1. 檢視「日本金融名單（GROUPID = 5）」寫入條件與明細
+DECLARE @OtherIdentMthCode VARCHAR(2);
+SELECT @OtherIdentMthCode = IDENTCODE FROM dbo.IDENTMTHD_DIM WHERE OTHIND = 'Y';
 
-# 1. 取得執行路徑下的第一個 .xlsx 檔案
-$currentDir = Get-Location
-$excelFile = Get-ChildItem -Path $currentDir -Filter *.xlsx | Select-Object -First 1
+;WITH RawBlacklistJP AS (
+    -- 條件 A：存活本名
+    SELECT 
+        A.EntNum, 
+        A.SdnName, 
+        MAX(A.UpdatedDate) AS UpdatedDate,
+        'Y' AS [Cond_Is_Primary_Name],
+        'N' AS [Cond_Is_Deceased_Scan],
+        '本名符合 (BitCode & 1 > 0)' AS [Trigger_Reason]
+    FROM BSADB.dbo.DJ_List_Data_A A WITH (NOLOCK)
+    JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) ON A.EntNum = B.EntityId
+    WHERE A.NamePropertyBitCode & 1 > 0
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+    GROUP BY A.EntNum, A.SdnName
 
-if (-not $excelFile) {
-    Write-Host "[錯誤] 在目錄中找不到任何 .xlsx 檔案！" -ForegroundColor Red
-    Pause
-    Exit
-}
+    UNION ALL
 
-Write-Host "正在檢查檔案: $($excelFile.Name)" -ForegroundColor Cyan
+    -- 條件 B：已故掃描（本次新增）
+    SELECT 
+        A.EntityId AS EntNum, 
+        A.FullName AS SdnName, 
+        MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate,
+        'N' AS [Cond_Is_Primary_Name],
+        'Y' AS [Cond_Is_Deceased_Scan],
+        '死亡名單掃描 (Deceased = 1)' AS [Trigger_Reason]
+    FROM BSADB.dbo.DJ_Entity A WITH (NOLOCK)
+    JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) ON A.EntityId = B.EntityId
+    WHERE A.Deceased = 1
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+      AND NOT EXISTS (
+          SELECT 1 
+          FROM BSADB.dbo.DJ_List_Data_A X WITH (NOLOCK)
+          JOIN BSADB.dbo.DJ_SanctionListReference Y WITH (NOLOCK) ON X.EntNum = Y.EntityId
+          WHERE X.EntNum = A.EntityId 
+            AND X.NamePropertyBitCode & 1 > 0
+            AND Y.SanctionListReference LIKE '%Japanese Finance%'
+      )
+    GROUP BY A.EntityId, A.FullName
+)
+SELECT 
+    CASE 
+        WHEN T.remark IS NULL THEN '預計 INSERT (全新新增)'
+        WHEN T.DInd = 'Y' THEN '預計 UPDATE (重新上架)'
+        WHEN A.UpdatedDate <> T.updated_date THEN '預計 UPDATE (日期更新)'
+        ELSE '資料一致 (不異動)'
+    END AS [Expected_Action],
+    A.[Trigger_Reason]                  AS [觸發寫入原因],
+    A.[Cond_Is_Deceased_Scan]           AS [條件:死亡掃描(Y/N)],
+    A.[Cond_Is_Primary_Name]             AS [條件:存活本名(Y/N)],
+    'Y'                                 AS [條件:含Japanese Finance標籤],
+    A.EntNum                            AS [remark(EntityId)],
+    A.SdnName                           AS [spec_name(姓名)],
+    A.UpdatedDate                       AS [updated_date],
+    T.DInd                              AS [目前Target表DInd],
+    T.ent_num                           AS [既有ent_num]
+FROM RawBlacklistJP A
+LEFT JOIN BSADBJP..OFAC_SPEC T WITH (NOLOCK) 
+       ON T.GROUPID = 5 
+      AND T.spec_name = A.SdnName 
+      AND T.remark = CAST(A.EntNum AS VARCHAR(100))
+ORDER BY A.[Cond_Is_Deceased_Scan] DESC, [Expected_Action] DESC, A.EntNum;
 
-# 2. 解壓縮讀取 .xlsx 內部 XML 資料
-$tempFolder = Join-Path $env:TEMP ([System.Guid]::NewGuid().ToString())
-
-try {
-    [System.IO.Compression.ZipFile]::ExtractToDirectory($excelFile.FullName, $tempFolder)
+2. 檢視「Sanctions IDs（GROUPID = 10）」寫入條件與明細
+SELECT 
+    CASE 
+        WHEN T.remark IS NULL THEN '預計 INSERT (全新新增)'
+        WHEN T.DInd = 'Y' THEN '預計 UPDATE (重新上架)'
+        WHEN MAX(C.UpdatedDate) <> T.updated_date THEN '預計 UPDATE (日期更新)'
+        ELSE '資料一致 (不異動)'
+    END AS [Expected_Action],
     
-    # 讀取共用字串表 (SharedStrings.xml)
-    $sharedStrings = @()
-    $sstPath = Join-Path $tempFolder "xl\sharedStrings.xml"
-    if (Test-Path $sstPath) {
-        [xml]$sstXml = Get-Content $sstPath -Encoding UTF8
-        foreach ($si in $sstXml.sst.si) {
-            if ($si.t) {
-                $sharedStrings += [string]$si.t.InnerText
-            } elseif ($si.r) {
-                $richText = ($si.r | ForEach-Object { [string]$_.t.InnerText }) -join ""
-                $sharedStrings += $richText
-            } else {
-                $sharedStrings += ""
-            }
-        }
-    }
+    -- 寫入條件檢核欄位
+    A.PersonStatus                      AS [條件:人員狀態(Active/Inactive)],
+    CASE 
+        WHEN B.Description2 = 'Sanctions Lists' THEN 'Sanctions Lists (主清單)'
+        ELSE B.Description3 
+    END                                 AS [條件:符合制裁分類],
+    D.IdentificationType                AS [條件:19類證件類型],
+    D.IdentificationNumber              AS [spec_name(證照/通訊碼)],
+    A.EntityId                          AS [remark(EntityId)],
+    MAX(C.UpdatedDate)                  AS [updated_date],
+    
+    -- 預計寫入目標表的組合欄位
+    D.IdentificationType + '; Please go to Dowjones website for more detail' AS [預計寫入ADDRESS欄位],
+    T.DInd                              AS [目前Target表DInd]
+FROM BSADB.dbo.DJ_Entity A WITH (NOLOCK)
+JOIN BSADB.dbo.DJ_ListCategory B WITH (NOLOCK) ON A.EntityId = B.EntityId
+JOIN BSADB.dbo.DJ_List_Data_A C WITH (NOLOCK) ON A.EntityId = C.EntNum
+JOIN BSADB.dbo.DJ_IdentificationTypeInfo D WITH (NOLOCK) ON A.EntityId = D.EntityId
+LEFT JOIN BSADB.dbo.OFAC_GLSpec T WITH (NOLOCK)
+       ON T.GROUPID = 10
+      AND T.spec_name = D.IdentificationNumber
+      AND T.remark = CAST(A.EntityId AS VARCHAR(100))
+      AND REPLACE(T.ADDRESS, '; Please go to Dowjones website for more detail', '') = D.IdentificationType
+WHERE A.PersonStatus <> 'Inactive'
+  AND (
+        B.Description2 = 'Sanctions Lists'
+     OR B.Description3 IN (
+            'OFAC Related - Majority Owned',
+            'OFAC Related - Control',
+            'OFAC - Regional Sanctions Related - Majority Owned',
+            'OFAC - Regional Sanctions Related - Control',
+            'EU Related - Majority Owned',
+            'EU Related - Control',
+            'EU - Regional Sanctions Related - Majority Owned',
+            'EU - Regional Sanctions Related - Control'
+        )
+      )
+  AND B.Deleted = 0
+  AND D.IdentificationType IN (
+        'Aircraft Construction, Line, Fleet or Serial Number',
+        'Aircraft Manufacturer''s Serial Number (MSN)',
+        'Bank Identifier Code (BIC)',
+        'Central Registration Depository (CRD)',
+        'Company Identification No.',
+        'Driving Licence No.',
+        'DUNS Number',
+        'International Maritime Organization (IMO) Ship No.',
+        'International Securities Identification Number (ISIN)',
+        'Legal Entity Identifier (LEI)',
+        'National ID',
+        'National Provider Identifier (NPI)',
+        'National Tax No.',
+        'Others',
+        'Passport No.',
+        'Social Security No.',
+        'Email',
+        'Fax',
+        'Phone'
+      )
+  AND D.Deleted = 0
+GROUP BY 
+    A.EntityId, 
+    A.PersonStatus,
+    B.Description2,
+    B.Description3,
+    D.IdentificationType, 
+    D.IdentificationNumber,
+    T.remark,
+    T.DInd,
+    T.updated_date
+ORDER BY [Expected_Action] DESC, A.EntityId;
 
-    # 讀取 Sheet1
-    $sheetPath = Join-Path $tempFolder "xl\worksheets\sheet1.xml"
-    if (-not (Test-Path $sheetPath)) {
-        Write-Host "[錯誤] 找不到工作表資料 (sheet1.xml)" -ForegroundColor Red
-        Pause
-        Exit
-    }
-
-    [xml]$sheetXml = Get-Content $sheetPath -Encoding UTF8
-    $rows = $sheetXml.worksheet.sheetData.row
-
-    # 3. 取得 B 欄規格清單與暫存 A 欄資料
-    $validSpecs = [System.Collections.Generic.HashSet[string]]::new()
-    $aDataList = [System.Collections.Generic.List[psobject]]::new()
-
-    foreach ($row in $rows) {
-        $rowNum = [int]$row.r
-        if ($rowNum -eq 1) { continue } # 跳過標題列
-
-        foreach ($c in $row.c) {
-            $cellRef = [string]$c.r
-            $val = ""
-
-            if ($c.v) {
-                $vText = [string]$c.v.InnerText
-                if ($c.t -eq "s") {
-                    $index = [int]$vText
-                    if ($index -ge 0 -and $index -lt $sharedStrings.Count) {
-                        $val = $sharedStrings[$index]
-                    }
-                } else {
-                    $val = $vText
-                }
-            }
-            
-            $val = ([string]$val).Trim()
-
-            # 解析 B 欄規格
-            if ($cellRef -match "^B\d+$" -and -not [string]::IsNullOrEmpty($val)) {
-                $padB = $val.PadLeft(4, '0')
-                [void]$validSpecs.Add($padB)
-            }
-
-            # 暫存 A 欄資料
-            if ($cellRef -match "^A\d+$" -and -not [string]::IsNullOrEmpty($val)) {
-                $aDataList.Add([PSCustomObject]@{
-                    Row = $rowNum
-                    Raw = $val
-                })
-            }
-        }
-    }
-
-    Write-Host "已載入 $($validSpecs.Count) 筆 B 欄規格代碼。" -ForegroundColor Green
-    Write-Host "--------------------------------------------------------"
-
-    # 4. 檢核 A 欄資料
-    $errorCount = 0
-    foreach ($item in $aDataList) {
-        $raw = $item.Raw
-        $code = if ($raw.Length -ge 4) { $raw.Substring(0, 4) } else { $raw }
-
-        if (-not $validSpecs.Contains($code)) {
-            $errorCount++
-            Write-Host "[列 $($item.Row) 格式錯誤] " -ForegroundColor Red -NoNewline
-            Write-Host "原始值: '$raw' | 檢查碼: '$code' (未在 B 欄規格中找到)" -ForegroundColor Yellow
-        }
-    }
-
-    Write-Host "--------------------------------------------------------"
-    if ($errorCount -eq 0) {
-        Write-Host "檢查完成：所有 A 欄資料前 4 碼皆符合 B 欄規格！" -ForegroundColor Green
-    } else {
-        Write-Host "檢查完成：共發現 $errorCount 筆格式不符資料。" -ForegroundColor Red
-    }
-
-} catch {
-    Write-Host "[執行異常] $($_.Exception.Message)" -ForegroundColor Red
-} finally {
-    if (Test-Path $tempFolder) {
-        Remove-Item -Path $tempFolder -Recurse -Force -ErrorAction SilentlyContinue
-    }
-}
-
-Write-Host ""
-Pause
