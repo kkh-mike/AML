@@ -1,3 +1,33 @@
+既然這筆 Rahmani, Arsalan 的 ent_num (721314) 是有值的，那就完全排除了主鍵為空的問題。
+在主表有值的情況下，系統依然判定「分數低於預設門檻（RC lower than default RC）」，問題就聚焦在名單狀態標記或比對群組設定。請直接執行以下兩段查詢來鎖定原因：
+1. 檢查這筆資料的狀態欄位（是否被標記刪除或未審核）
+Patriot Officer 比對時會強制過濾特定狀態（例如 DInd = 'N' 代表未刪除、EnterFlag 等）。請在 SSMS 執行：
+SELECT 
+    ent_num,
+    spec_name,
+    GROUPID,
+    SOURCE,
+    DInd,        -- 是否有效/未刪除（正常應為 'N'）
+    EnterFlag,   -- 狀態標記（若是 'D' 可能是草稿或刪除）
+    ApprovedBy,  -- 是否已放行審核
+    DelUserID    -- 刪除人員（若有值代表被軟刪除）
+FROM BSADBJP.dbo.OFAC_SPEC
+WHERE spec_name = 'Rahmani, Arsalan' AND GROUPID = 11;
+
+ * 判斷標準：若 DInd = 'Y' 或 DelUserID IS NOT NULL，比對引擎會直接忽略這筆名單。
+2. 檢查比對模組是否沒有把 GROUPID = 11 算進去
+如果比對設定只看標準名單（例如 GROUPID 1 或 5），GROUPID 11 的名單在計算 RC 分數時會被賦予 0 權重 或直接跳過。
+請執行查詢目前 Name Check 模組啟用的群組設定：
+-- 查詢 NMCK 模組目前啟用的 GROUPID 與門檻設定
+SELECT * 
+FROM BSADB.dbo.NMCK_DETECTION_SETTINGS 
+WHERE MODULE_NAME = 'NMCK';
+
+(若該表在 BSADBJP，請切換至 BSADBJP.dbo.NMCK_DETECTION_SETTINGS 查詢)
+ * 判斷標準：查看回傳的清單中是否有包含 GROUPID = 11。若清單內只有 1、5 或其他群組，代表前端點擊 Name Check 時根本沒有比對 GROUPID 11 的資料。
+
+
+
 
 
 直接在 SSMS 執行以下查詢，確認你目前 BSADBJP.dbo.OFAC_SPEC 中這批名單的 ent_num 是否全部都是 NULL：
