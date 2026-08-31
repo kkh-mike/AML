@@ -1,88 +1,23 @@
-USE [BSADBJP]
+USE [BSADBJP];
 GO
-/****** Object:  StoredProcedure [dbo].[NMCHK_InitiateNewAcctTables]    Script Date: 2026/8/31 下午 01:20:21 ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROC [dbo].[NMCHK_InitiateNewAcctTables]
-@RANDNUM				NVARCHAR(20),
-@NAME					NVARCHAR(350),
-@DOB					NVARCHAR(10) = '',
-@Nationality			NVARCHAR(50) = '',
-@RELATIONSHIP			NVARCHAR(50),
-@TaxID					NVARCHAR(50) = '', 
-@UserID					NVARCHAR(50),
-@Address		NVARCHAR(160) = '',
-@City			NVARCHAR(50) = '',
-@Country		NVARCHAR(50) = '',
-@CombineKey     INTEGER,
-@Gender			NVARCHAR(2) = '',
-@IdentificationNumber NVARCHAR(MAX) = '',
-@NameCategory INTEGER, 
-@VesselIMONo NVARCHAR(MAX) = ''
 
-AS 
-BEGIN
+-- 定義測試用隨機碼
+DECLARE @RAND NVARCHAR(20) = 'TEST' + REPLACE(CONVERT(VARCHAR(8), GETDATE(), 112), ':', '') + '01';
 
-DECLARE
-@OFAC_NEW_ACCT_NAMES_TABLE	NVARCHAR(50),
-@EXTRA_NAME					NVARCHAR(350),
-@RELATIONSHIP2				NVARCHAR(100),
-@NSTRSQL NVARCHAR(MAX)
+-- 步驟 1：初始化並寫入輸入名字
+EXEC dbo.NMCHK_InitiateNewAcctTables
+    @RANDNUM              = @RAND,
+    @NAME                 = N'Rahmani, Arsalan',
+    @RELATIONSHIP         = 'Primary',
+    @UserID               = 'SYSTEM',
+    @CombineKey           = 0,
+    @NameCategory         = 1; -- 1: Individual, 2: Entity
 
+-- 步驟 2：呼叫比對引擎主程序進行比對
+EXEC dbo.NMCHK_AUTOMATION @RANDNUM = @RAND;
 
-SET NOCOUNT ON
-
-SELECT @OFAC_NEW_ACCT_NAMES_TABLE = 'OFAC_NEW_ACCT_NAMES_' + @RANDNUM, 
-		@DOB = CASE ISNULL(@DOB,'') WHEN '' THEN NULL ELSE CONVERT(VARCHAR, CONVERT(DATETIME,@DOB),112) END,
-		@Nationality = ISNULL(@Nationality,''), 
-		@TaxID = ISNULL(@TaxID, '') , 
-		@IdentificationNumber = ISNULL(LTRIM(RTRIM(@IdentificationNumber)), '')
-
-IF OBJECT_ID(@OFAC_NEW_ACCT_NAMES_TABLE, 'U') IS NOT NULL
-	EXEC('DROP TABLE ' + @OFAC_NEW_ACCT_NAMES_TABLE + ' ')
-
-EXEC('
-CREATE TABLE [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(
-	[new_acct_key]  [int] NULL,
-	[new_acct_name] [NVARCHAR] (350) COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS NULL , 
-	[relationship]  [NVARCHAR] (50) NULL , 
-	[NameSource] [NVARCHAR] (20) NULL, 
-	[Nationality] NVARCHAR(50),
-	[DOB] NVARCHAR(10), 
-	[TAXID] NVARCHAR(50),
-	[Address] NVARCHAR(160),
-	[City]	NVARCHAR(50),
-	[Country] NVARCHAR(50),
-	[CombineKey] INTEGER, 
-	[Gender] NVARCHAR(2),
-	[IdentificationNumber] NVARCHAR(MAX), 
-	[NameCategory] INTEGER,
-	[VesselIMONo] NVARCHAR(MAX))')
-	
-/*Added Name Source table to determine the source of the name is from English Name Column or Non English Name column*/
-SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
-																	Address, City, Country, CombineKey, 
-																	Gender, IdentificationNumber, NameCategory, VesselIMONo)
-	VALUES(''1'', @NAME , @RELATIONSHIP, ''EnglishName'', @Nationality, @DOB, @TaxID, @Address, @City, @Country, @CombineKey, 
-			@Gender, @IdentificationNumber, @NameCategory, @VesselIMONo)'
-
-EXEC SP_EXECUTESQL @NSTRSQL, N'@NAME NVARCHAR(350), @RELATIONSHIP NVARCHAR(100), @Nationality NVARCHAR(50), @DOB NVARCHAR(16), @TaxID NVARCHAR(50),
-								@Address NVARCHAR(160), @City NVARCHAR(50), @Country NVARCHAR(50), @CombineKey INTEGER, 
-								@Gender NVARCHAR(2), @IdentificationNumber NVARCHAR(MAX), @NameCategory INTEGER, @VesselIMONo NVARCHAR(MAX)', 
-								@NAME, @RELATIONSHIP, @Nationality, @DOB, @TaxID, @Address, @City, @Country, @CombineKey, 
-								@Gender, @IdentificationNumber, @NameCategory, @VesselIMONo
-
-SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
-																	Address, City, Country, CombineKey, 
-																	Gender, IdentificationNumber, NameCategory, VesselIMONo)
-				SELECT 1 + ROW_NUMBER() OVER(ORDER BY Id), EXTRA_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
-					   Address, City, Country, CombineKey, Gender, IdentificationNumber, NameCategory, VesselIMONo
-				FROM dbo.NMCHK_MultipleList_TMP WITH(NOLOCK) 
-				WHERE USERID = @UserID '
-EXEC SP_EXECUTESQL @NSTRSQL, N'@UserID NVARCHAR(50)', @UserID 
-
-END
-
-那我可不可以自己用這個來測看看會不會命中?
+-- 步驟 3：查看比對引擎產生了哪些結果暫存表
+SELECT name, create_date 
+FROM sys.tables 
+WHERE name LIKE '%' + @RAND + '%'
+ORDER BY create_date DESC;
