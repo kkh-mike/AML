@@ -7,3 +7,14 @@ EXEC sp_MSforeachdb '
     IF OBJECT_ID(''NMCK_Detection_CombineResults'') IS NOT NULL
         SELECT DB_NAME() AS Found_In_DB, name, type_desc FROM sys.objects WHERE name = ''NMCK_Detection_CombineResults'';
 ';
+
+
+
+SELECT TOP 5 
+    INPUT_NAME, 
+    MATCH_NAME, 
+    RC_SCORE, 
+    GROUPID, 
+    CREATE_TIME
+FROM BSADBJP.dbo.NMCK_REVIEW_MAIN
+ORDER BY CREATE_TIME DESC;
