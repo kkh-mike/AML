@@ -1,3 +1,16 @@
+USE [BSADBJP];
+
+-- 1. 執行比對程序（將隨機碼傳入比對 SP）
+-- PATRIOT OFFICER 常見的比對主程序通常是 NMCHK_Process 或 NMCHK_RunAllProcess
+EXEC dbo.NMCHK_Process @RANDNUM = 'TEST0831'; 
+
+-- 2. 查詢比對結果暫存表（通常命名為 OFAC_NEW_ACCT_MATCH_... 或 NMCHK_HIT_...）
+-- 檢查是否有產生 Match 暫存表
+SELECT name FROM sys.tables WHERE name LIKE '%TEST0831%';
+
+
+
+
 SELECT name, create_date FROM BSADB.sys.tables WHERE name LIKE 'OFAC_NEW_ACCT_NAMES_%' ORDER BY create_date DESC;
 SELECT name, create_date FROM BSADBJP.sys.tables WHERE name LIKE 'OFAC_NEW_ACCT_NAMES_%' ORDER BY create_date DESC;
 
