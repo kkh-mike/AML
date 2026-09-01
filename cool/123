@@ -1,40 +1,65 @@
-D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\EXE\TriggerDataLoad.exe TW 5 
-DataLoad process has been started.
-Executing Preload Data.
-Executing Data Load.
-Sending statistic.
-DataLoad process has been completed
-2026/8/31 下午 09:43:36 : UpdateAllChangedAddresses
-執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。
+USE [BSADBHK]
+GO
+/****** Object:  StoredProcedure [dbo].[NMCHK_SENDMAIL]    Script Date: 2026/9/1 上午 10:23:05 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER PROC [dbo].[NMCHK_SENDMAIL]
+@UID NVARCHAR(80),
+@NAMEKEY NVARCHAR(20),
+@REFNO NVARCHAR(20),
+@USERID NVARCHAR(60),
+@ROLE VARCHAR(10),
+@ACTION NVARCHAR(10)
+AS
+BEGIN
+DECLARE
+@CUST_NAME NVARCHAR(350),
+@BRANCH NVARCHAR(50),
+@NMCHK_TEMP_EMAIL NVARCHAR(100),
+@SOURCE_IND CHAR(1)
 
-未處理的例外狀況: System.Data.SqlClient.SqlException: 執行逾時到期。在作業完成之前超過逾時等待的時間\
-，或是伺服器未回應。 ---> System.ComponentModel.Win32Exception: 等候操作已逾時。
-   --- 內部例外狀況堆疊追蹤的結尾 ---
-   於 System.Data.SqlClient.SqlConnection.OnError(SqlException exception, Boolean breakConnection, Action`1 wrapCloseInAction)
-   於 System.Data.SqlClient.TdsParser.ThrowExceptionAndWarning(TdsParserStateObject stateObj, Boolean callerHasConnectionLock, Boo\
-lean asyncClose)
-   於 System.Data.SqlClient.TdsParser.TryRun(RunBehavior runBehavior, SqlCommand cmdHandler, SqlDataReader dataStream, BulkCopySim\
-pleResultSet bulkCopyHandler, TdsParserStateObject stateObj, Boolean& dataReady)
-   於 System.Data.SqlClient.SqlDataReader.TryConsumeMetaData()
-   於 System.Data.SqlClient.SqlDataReader.get_MetaData()
-   於 System.Data.SqlClient.SqlCommand.FinishExecuteReader(SqlDataReader ds, RunBehavior runBehavior, String resetOptionsString, B\
-oolean isInternal, Boolean forDescribeParameterEncryption, Boolean shouldCacheForAlwaysEncrypted)
-   於 System.Data.SqlClient.SqlCommand.RunExecuteReaderTds(CommandBehavior cmdBehavior, RunBehavior runBehavior, Boolean returnStr\
-eam, Boolean async, Int32 timeout, Task& task, Boolean asyncWrite, Boolean inRetry, SqlDataReader ds, Boolean describeParameterEncr\
-yptionRequest)
-   於 System.Data.SqlClient.SqlCommand.RunExecuteReader(CommandBehavior cmdBehavior, RunBehavior runBehavior, Boolean returnStream\
-, String method, TaskCompletionSource`1 completion, Int32 timeout, Task& task, Boolean& usedCache, Boolean asyncWrite, Boolean inRe\
-try)
-   於 System.Data.SqlClient.SqlCommand.RunExecuteReader(CommandBehavior cmdBehavior, RunBehavior runBehavior, Boolean returnStream\
-, String method)
-   於 System.Data.SqlClient.SqlCommand.ExecuteReader(CommandBehavior behavior, String method)
-   於 System.Data.SqlClient.SqlCommand.ExecuteReader()
-   於 TriggerDataLoad.AddressGrouping.UpdateAllChangedAddresses()
-   於 TriggerDataLoad.AddressGrouping.ProcessAddress()
-   於 TriggerDataLoad.Program.Main(String[] Param)
+	SELECT @SOURCE_IND = Source_IND FROM dbo.NMCHK_CustInfo WITH(NOLOCK) WHERE uid = @UID AND new_acct_key = @NAMEKEY
+	
+	IF @SOURCE_IND IN ('W','O','B')
+		SELECT @NAMEKEY = '1'
 
-     Job Object statistics
+	SELECT @NMCHK_TEMP_EMAIL = 'NMCHK_TEMP_EMAIL_' + @USERID
+	
+	IF OBJECT_ID(@NMCHK_TEMP_EMAIL, 'U') IS NOT NULL
+		EXEC('DROP TABLE  dbo.[' + @NMCHK_TEMP_EMAIL + ']')
+			
+	EXEC('CREATE TABLE dbo.[' + @NMCHK_TEMP_EMAIL + '] (
+			[ID] INT IDENTITY(1,1),
+			[UID] NVARCHAR(80),
+			[NAME_KEY] NVARCHAR(20),
+			[REFNO] NVARCHAR(20),
+			[SRC] NVARCHAR(20),
+			[CUST_NAME] NVARCHAR(350),
+			[BRANCH] NVARCHAR(50),
+			[HANDLEDBY] NVARCHAR(40),
+			[TYPE] NVARCHAR(20),
+			[ROLE] VARCHAR(10)
+	)')
+	
+	IF @ACTION IN ('Release','Reject') AND CONVERT(INT,@ROLE) > 1
+		EXEC('INSERT INTO dbo.[' + @NMCHK_TEMP_EMAIL + '](UID, NAME_KEY, REFNO, SRC, CUST_NAME, BRANCH, HANDLEDBY, TYPE, ROLE)
+		SELECT ''' + @UID + ''', ''' + @NAMEKEY + ''', ''' + @REFNO + ''', ''NAME'', B.new_acct_name, B.user_brnch_nbr, ''' + @USERID + ''', ''' + @ACTION + ''', ''' + @ROLE + '''
+		FROM dbo.NMCHK_Review_Main A WITH(NOLOCK) LEFT JOIN dbo.NMCHK_CustInfo B WITH(NOLOCK) ON A.uid = B.uid AND A.name_key = B.new_acct_key 
+		WHERE A.uid = ''' + @UID + ''' AND A.name_key = ''' + @NAMEKEY + '''')
+		
+	EXEC('INSERT INTO dbo.[' + @NMCHK_TEMP_EMAIL + '](UID, NAME_KEY, REFNO, SRC, CUST_NAME, BRANCH, HANDLEDBY, TYPE, ROLE)
+	SELECT ''' + @UID + ''', ''' + @NAMEKEY + ''', ''' + @REFNO + ''', ''NAME'', B.new_acct_name, B.user_brnch_nbr, HANDLEDBY, ''NEW'', ROLE
+	FROM dbo.NMCHK_Review_Main A WITH(NOLOCK) LEFT JOIN dbo.NMCHK_CustInfo B WITH(NOLOCK) ON A.uid = B.uid AND A.name_key = B.new_acct_key 
+	WHERE A.uid = ''' + @UID + ''' AND A.name_key = ''' + @NAMEKEY + ''' AND A.STATUS <> ''3''')
+    
 
+EXEC dbo.NMCHK_PROCESSEMAIL @USERID
 
+IF OBJECT_ID(@NMCHK_TEMP_EMAIL, 'U') IS NOT NULL
+	EXEC('DROP TABLE  dbo.[' + @NMCHK_TEMP_EMAIL + ']')
 
-可能什麼問題
+END
+
+幫我註解一下 我要知道這隻再幹嘛
