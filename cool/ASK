@@ -1,30 +1,26 @@
-這支 SP DBCHK_ProcessDetectionResults 是**資料庫批次掃描（Database Batch Check）**用來處理比對後的結果、做 RC 扣分與性別/實體過濾的。
-從 SP 的邏輯中可以發現一個關鍵卡點：
-1. 核心卡點：比對分數門檻（RC 門檻）
-在 SP 中，所有命中紀錄寫入結果表的條件是：
--- 只有相似度分數大於門檻值才會寫入命中結果表
-INSERT INTO [dbo].[DBCHK_ResultGroups] ...
-SELECT ... FROM DBCHK_NameDetectionResults 
-WHERE relative_correlation > @DBCHK_CHOOSEN_RC
+這張截圖證實了問題的根本來源：
+DBCHK_NameDetectionResults 裡面完全是空的（0 筆）。
+這代表：負責算名字相似度分數（Fuzzy Match）的比對引擎程式，在載入黑名單母表時，根本沒有把 OFAC_SPEC（GROUPID = 5）載入進去比對！
+原因解析
+系統的比對流程通常分為兩大步：
+ * 第一步（比對演算程式 / 演算法執行）：比對引擎（可能是 C# 服務、獨立的比對執行檔或是特定的準備 SP）從黑名單母表中載入名單，與客戶名單計算相似度（RC），並將結果寫入 DBCHK_NameDetectionResults。
+ * 第二步（後處理 SP）：由剛才那支 DBCHK_ProcessDetectionResults 進行 RC 扣分、性別過濾，最後寫入正式結果表。
+現在第一步產出的 DBCHK_NameDetectionResults 裡面連一筆 sdn_grp_num = 5 都沒有，代表比對引擎在讀取黑名單時，漏掉了 OFAC_SPEC 或特定的黑名單 Buffer 表。
+排查與定位步驟
+請依序在 SSMS 執行以下查詢，找出比對引擎到底讀了哪張黑名單快取表：
+步驟 1：檢查黑名單暫存快取表 DBCHK_BlackListData_Buffer
+在剛才的 SP 裡有這行宣告：FROM [dbo].[DBCHK_BlackListData_Buffer]。請檢查這張快取表裡面有沒有日本名單（GROUPID = 5）：
+SELECT TOP 10 * 
+FROM BSADBJP.dbo.DBCHK_BlackListData_Buffer 
+WHERE sdn_grp_num = 5 OR sdn_type = 'SPEC';
 
- * 預設門檻值 @DBCHK_CHOOSEN_RC = 80（或依設定檔而定）。
- * 如果送檢的名字（例如拼音、別名或格式）算出來的相似度分數 \le 80，它會被歸類在 DBCHK_ResultGroups_Filter_RC（未命中表），而不會出現在正式的檢核結果中。
-2. 死亡名單的性別 / 實體類別過濾（Gender & EntityType Filter）
-如果系統有開啟過濾（@DBCHK_NAMECATEGORY_FILTER = 'Y' 或 @DBCHK_GENDER_FILTER = 'Y'）：
- * SP 內針對 EU、OFAC、UKHMT、UN、DJ、WC、AC 等名單有串接性別過濾（CTE_GENDER）。
- * 但對於 sdn_type = 'SPEC'（包含 Group 5 日本自訂名單），這裡完全沒有納入性別對照。
- * 如果客戶被設定了 Entity Type（例如自然人 P 或法人 N），而 OFAC_SPEC 的 Name_Cat 欄位沒有匹配（NAME_CAT & 1 <> 1），比對結果會在前面的 DELETE A 被整筆砍掉。
-3. 排查步驟
-請直接在 SSMS 執行以下查詢，確認比對引擎在底層算出的原始結果：
--- 1. 查看比對引擎底層所有暫存結果（包含低於門檻或被過濾的）
-SELECT * 
-FROM BSADBJP.dbo.DBCHK_NameDetectionResults
-WHERE sdn_name LIKE '%Kisoni%' OR sdn_name LIKE '%Kambale%' OR sdn_grp_num = 5;
+ * 如果這張表查出來是 0 筆：真相大白！系統比對引擎是去讀取 DBCHK_BlackListData_Buffer，而這張表裡目前只有國際名單，沒有把 OFAC_SPEC (GROUPID = 5) 同步進來。
+步驟 2：找出填寫 DBCHK_BlackListData_Buffer 的前置 SP
+如果步驟 1 查出來是 0 筆，請搜尋是哪支 SP 負責準備這張快取表：
+SELECT OBJECT_NAME(id) AS SP_Name
+FROM syscomments
+WHERE text LIKE '%DBCHK_BlackListData_Buffer%'
+  AND text LIKE '%INSERT INTO%'
+GROUP BY OBJECT_NAME(id);
 
--- 2. 查看被判定為未命中的暫存表記錄
-SELECT * 
-FROM BSADBJP.dbo.DBCHK_ResultGroups_Filter_RC
-WHERE sdn_name LIKE '%Kisoni%' OR sdn_name LIKE '%Kambale%' OR SdnGrpNum = 5;
-
- * 如果出現在 DBCHK_ResultGroups_Filter_RC：代表有比對到，但分數（relative_correlation）太低，被門檻擋下了。
- * 如果 DBCHK_NameDetectionResults 完全為 0 筆：代表負責「執行模糊比對演算（產出 DBCHK_NameDetectionResults）」的前置程式，在掃描黑名單母表時根本沒有把 OFAC_SPEC (GROUPID = 5) 載入比對記憶體/暫存區。
+只要執行/修改這支前置 SP，把 OFAC_SPEC 的 72,086 筆日本名單寫入 DBCHK_BlackListData_Buffer，比對引擎就能正常掃描到死亡名單與日本名單了！
