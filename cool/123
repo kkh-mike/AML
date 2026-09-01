@@ -1,25 +1,32 @@
-這兩隻 Stored Procedure（NMCHK_SENDMAIL 與 NMCHK_GetResultFilter）所引用的資料庫物件（實體資料表、系統/使用者表、暫存表）整理如下：
-實體資料表 (Physical Tables)
-| 資料表名稱 | 用途說明 | 出現的 Stored Procedure |
-|---|---|---|
-| dbo.NMCHK_Review_Main | 姓名檢核審核主表（存放案件 UID、狀態、關卡 Role、負責人 HandledBy 等） | NMCHK_SENDMAIL
-NMCHK_GetResultFilter |
-| dbo.NMCHK_CustInfo | 客戶檢核基本資料表（客戶名稱 new_acct_name、分行 user_brnch_nbr、來源指標 Source_IND 等） | NMCHK_SENDMAIL
-NMCHK_GetResultFilter |
-| dbo.NMCHK_ResultHistory | 檢核比對結果歷程表（透過 NamePropertyBitCode & 1 = 1 判斷是否命中黑名單） | NMCHK_GetResultFilter |
-| dbo.NMCHK_Review_Diagram | 審核流程軌跡/簽核歷程表記錄（用於歷史查詢情境 C，檢查特定人員是否曾審核過該案件） | NMCHK_GetResultFilter |
-| dbo.NMCHK_SOURCE_DIM | 業務來源管道維度表（提供多語系的來源說明 SOURCE_DESC） | NMCHK_GetResultFilter |
-| dbo.WORKFLOW_MGMT_STATUS | 工作流程狀態維度表（提供多語系的狀態名稱 STATUS_DESC） | NMCHK_GetResultFilter |
-| dbo.WORKFLOW_MGMT_ROLE | 工作流程角色維度表（提供多語系的角色名稱 ROLE_DESC） | NMCHK_GetResultFilter |
-| dbo.WORKFLOW_MGMT_QUEUE | 工作隊列/派工池定義表（隊列名稱 QUEUENAME） | NMCHK_GetResultFilter |
-| dbo.WORKFLOW_MGMT_USERS | 隊列與使用者/角色關聯權限表（定義使用者可存取哪些隊列及角色） | NMCHK_GetResultFilter |
-| dbo.UserAccounts | 系統使用者基本資料表（查詢操作者與審核者的中英文全名 FirstName + LastName） | NMCHK_GetResultFilter |
-動態表 / 暫存表 (Dynamic & Temporary Tables)
-| 表格名稱 / 變數 | 類型 | 用途說明 | 出現的 Stored Procedure |
-|---|---|---|---|
-| dbo.[NMCHK_TEMP_EMAIL_<USERID>] | 實體動態暫存表 | 依據當前操作者 ID 動態建立，暫存待發送郵件的案件清單，供後續發信 SP 讀取後隨即 DROP 刪除。 | NMCHK_SENDMAIL |
-| #tempQueue | 區域暫存表 (TempDB) | 存放呼叫 dbo.NMCHK_GetQueue 所回傳該使用者有權限查閱的歷史隊列清單（僅用於情境 C）。 | NMCHK_GetResultFilter |
-| CTE_Blacklist | 通用資料表表達式 (CTE) | 暫時彙整出命中黑名單的 uid 清單，用於 LEFT JOIN 標記 BLACKLIST = 'Y'/'N'。 | NMCHK_GetResultFilter |
-相關呼叫的 Stored Procedure (關聯程式)
- * dbo.NMCHK_PROCESSEMAIL：在 NMCHK_SENDMAIL 中被呼叫，讀取動態暫存表執行實際發信。
- * dbo.NMCHK_GetQueue：在 NMCHK_GetResultFilter 的情境 C 中被呼叫，獲取該使用者的可查閱隊列清單。
+USE [BSADBJP]
+GO
+/****** Object:  StoredProcedure [dbo].[NMCHK_GetNMCHKAttachment]    Script Date: 2026/9/1 上午 10:40:54 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER PROC [dbo].[NMCHK_GetNMCHKAttachment]
+@UID NVARCHAR(80),
+@NAMEKEY NVARCHAR(20),
+@BANKNO VARCHAR(10)
+AS
+DECLARE
+@LowRiskListGroup BIGINT,
+@SOURCE_IND CHAR(1)
+
+	SELECT @SOURCE_IND = Source_IND FROM dbo.NMCHK_CustInfo WITH(NOLOCK) WHERE uid = @UID AND new_acct_key = @NAMEKEY
+	
+	IF @SOURCE_IND IN ('W','O','B')
+		SELECT @NAMEKEY = '1'
+
+BEGIN
+	EXEC(N'SELECT DESCR, FILENAME, MODIFIED_FILENAME, PATH, 
+		UPLOADEDBY, (SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM UserLicense' + @BANKNO + '.dbo.UserAccounts WHERE USERID = UPLOADEDBY AND Deleted <> ''1'') UPLOADEDBY_UserName, UPLOADED_DATE
+		FROM dbo.NMCHK_ATTACH A WITH (NOLOCK)
+		WHERE A.BANKNO = ' + '''' + @BANKNO + ''' AND FLAG = ''N''  AND UID = ' + '''' + @UID + ''' AND NAME_KEY = ''' + @NAMEKEY + ''' ORDER BY UPLOADED_DATE DESC')
+END
+
+
+幫我註解一下
+然後列出他有用到的table
+然後說一下這支sp再幹嘛
