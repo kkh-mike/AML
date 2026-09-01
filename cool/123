@@ -1,3 +1,6 @@
+這是一隻在 黑名單/姓名檢核（Name Checking, NMCHK）系統 中，負責準備並觸發發送郵件通知的 Stored Procedure。
+當主管或審核人員對某筆檢核資料執行操作（例如：放行 Release、退件 Reject 或產生新待辦案件）時，此 SP 會建立一張暫存資料表來整理收件相關資訊，最後呼叫 NMCHK_PROCESSEMAIL 將信件寄出並清理暫存表。
+完整註解程式碼
 USE [BSADBHK]
 GO
 /****** Object:  StoredProcedure [dbo].[NMCHK_SENDMAIL]    Script Date: 2026/9/1 上午 10:23:05 ******/
@@ -5,61 +8,85 @@ SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
+
 ALTER PROC [dbo].[NMCHK_SENDMAIL]
-@UID NVARCHAR(80),
-@NAMEKEY NVARCHAR(20),
-@REFNO NVARCHAR(20),
-@USERID NVARCHAR(60),
-@ROLE VARCHAR(10),
-@ACTION NVARCHAR(10)
+    @UID NVARCHAR(80),       -- 案件唯一識別碼 (客戶/案件 UID)
+    @NAMEKEY NVARCHAR(20),   -- 帳戶/姓名鍵值 (Account/Name Key)
+    @REFNO NVARCHAR(20),     -- 參考編號 (Reference Number)
+    @USERID NVARCHAR(60),    -- 目前操作人員的 User ID
+    @ROLE VARCHAR(10),       -- 目前操作人員的角色權限層級 (數值字串，如 '1', '2', '3')
+    @ACTION NVARCHAR(10)     -- 執行的動作 (例如: 'Release', 'Reject', 'Submit' 等)
 AS
 BEGIN
-DECLARE
-@CUST_NAME NVARCHAR(350),
-@BRANCH NVARCHAR(50),
-@NMCHK_TEMP_EMAIL NVARCHAR(100),
-@SOURCE_IND CHAR(1)
+    -- 宣告內部變數
+    DECLARE
+        @CUST_NAME NVARCHAR(350),          -- 客戶名稱 (未在此處直接賦值，透過 SQL 組字串使用)
+        @BRANCH NVARCHAR(50),             -- 分行代碼 (未在此處直接賦值，透過 SQL 組字串使用)
+        @NMCHK_TEMP_EMAIL NVARCHAR(100),   -- 動態暫存表名稱 (依 UserID 區分)
+        @SOURCE_IND CHAR(1)               -- 資料來源指標 (Source Indicator)
 
-	SELECT @SOURCE_IND = Source_IND FROM dbo.NMCHK_CustInfo WITH(NOLOCK) WHERE uid = @UID AND new_acct_key = @NAMEKEY
+    -- 1. 查詢該客戶的資料來源型態
+    SELECT @SOURCE_IND = Source_IND 
+    FROM dbo.NMCHK_CustInfo WITH(NOLOCK) 
+    WHERE uid = @UID AND new_acct_key = @NAMEKEY
 	
-	IF @SOURCE_IND IN ('W','O','B')
-		SELECT @NAMEKEY = '1'
+    -- 2. 若資料來源為特定管道 ('W', 'O', 'B')，強制將 @NAMEKEY 覆寫重設為 '1'
+    IF @SOURCE_IND IN ('W','O','B')
+        SELECT @NAMEKEY = '1'
 
-	SELECT @NMCHK_TEMP_EMAIL = 'NMCHK_TEMP_EMAIL_' + @USERID
+    -- 3. 以 UserID 命名實體暫存表 (避免多位審核人員同時執行時發生資料衝突)
+    SELECT @NMCHK_TEMP_EMAIL = 'NMCHK_TEMP_EMAIL_' + @USERID
 	
-	IF OBJECT_ID(@NMCHK_TEMP_EMAIL, 'U') IS NOT NULL
-		EXEC('DROP TABLE  dbo.[' + @NMCHK_TEMP_EMAIL + ']')
+    -- 若舊的暫存表仍存在，先將其刪除
+    IF OBJECT_ID(@NMCHK_TEMP_EMAIL, 'U') IS NOT NULL
+        EXEC('DROP TABLE dbo.[' + @NMCHK_TEMP_EMAIL + ']')
 			
-	EXEC('CREATE TABLE dbo.[' + @NMCHK_TEMP_EMAIL + '] (
-			[ID] INT IDENTITY(1,1),
-			[UID] NVARCHAR(80),
-			[NAME_KEY] NVARCHAR(20),
-			[REFNO] NVARCHAR(20),
-			[SRC] NVARCHAR(20),
-			[CUST_NAME] NVARCHAR(350),
-			[BRANCH] NVARCHAR(50),
-			[HANDLEDBY] NVARCHAR(40),
-			[TYPE] NVARCHAR(20),
-			[ROLE] VARCHAR(10)
-	)')
+    -- 建立用於存放待發送郵件清單的暫存表
+    EXEC('CREATE TABLE dbo.[' + @NMCHK_TEMP_EMAIL + '] (
+            [ID] INT IDENTITY(1,1),
+            [UID] NVARCHAR(80),
+            [NAME_KEY] NVARCHAR(20),
+            [REFNO] NVARCHAR(20),
+            [SRC] NVARCHAR(20),
+            [CUST_NAME] NVARCHAR(350),
+            [BRANCH] NVARCHAR(50),
+            [HANDLEDBY] NVARCHAR(40),
+            [TYPE] NVARCHAR(20),
+            [ROLE] VARCHAR(10)
+    )')
 	
-	IF @ACTION IN ('Release','Reject') AND CONVERT(INT,@ROLE) > 1
-		EXEC('INSERT INTO dbo.[' + @NMCHK_TEMP_EMAIL + '](UID, NAME_KEY, REFNO, SRC, CUST_NAME, BRANCH, HANDLEDBY, TYPE, ROLE)
-		SELECT ''' + @UID + ''', ''' + @NAMEKEY + ''', ''' + @REFNO + ''', ''NAME'', B.new_acct_name, B.user_brnch_nbr, ''' + @USERID + ''', ''' + @ACTION + ''', ''' + @ROLE + '''
-		FROM dbo.NMCHK_Review_Main A WITH(NOLOCK) LEFT JOIN dbo.NMCHK_CustInfo B WITH(NOLOCK) ON A.uid = B.uid AND A.name_key = B.new_acct_key 
-		WHERE A.uid = ''' + @UID + ''' AND A.name_key = ''' + @NAMEKEY + '''')
+    -- 4. 判斷是否為高階審核人員 (Role > 1) 執行放行或退件
+    -- 若是，寫入一筆郵件記錄：TYPE 為當前動作 (@ACTION，如 Release/Reject)，HANDLEDBY 為目前操作者
+    IF @ACTION IN ('Release','Reject') AND CONVERT(INT, @ROLE) > 1
+        EXEC('INSERT INTO dbo.[' + @NMCHK_TEMP_EMAIL + '](UID, NAME_KEY, REFNO, SRC, CUST_NAME, BRANCH, HANDLEDBY, TYPE, ROLE)
+        SELECT ''' + @UID + ''', ''' + @NAMEKEY + ''', ''' + @REFNO + ''', ''NAME'', B.new_acct_name, B.user_brnch_nbr, ''' + @USERID + ''', ''' + @ACTION + ''', ''' + @ROLE + '''
+        FROM dbo.NMCHK_Review_Main A WITH(NOLOCK) 
+        LEFT JOIN dbo.NMCHK_CustInfo B WITH(NOLOCK) 
+            ON A.uid = B.uid AND A.name_key = B.new_acct_key 
+        WHERE A.uid = ''' + @UID + ''' AND A.name_key = ''' + @NAMEKEY + '''')
 		
-	EXEC('INSERT INTO dbo.[' + @NMCHK_TEMP_EMAIL + '](UID, NAME_KEY, REFNO, SRC, CUST_NAME, BRANCH, HANDLEDBY, TYPE, ROLE)
-	SELECT ''' + @UID + ''', ''' + @NAMEKEY + ''', ''' + @REFNO + ''', ''NAME'', B.new_acct_name, B.user_brnch_nbr, HANDLEDBY, ''NEW'', ROLE
-	FROM dbo.NMCHK_Review_Main A WITH(NOLOCK) LEFT JOIN dbo.NMCHK_CustInfo B WITH(NOLOCK) ON A.uid = B.uid AND A.name_key = B.new_acct_key 
-	WHERE A.uid = ''' + @UID + ''' AND A.name_key = ''' + @NAMEKEY + ''' AND A.STATUS <> ''3''')
+    -- 5. 寫入需要通知下一關或指派人員的待辦記錄
+    -- 條件：狀態不為 ''3'' (3 通常代表已結案/已完成)，TYPE 標註為 ''NEW''
+    EXEC('INSERT INTO dbo.[' + @NMCHK_TEMP_EMAIL + '](UID, NAME_KEY, REFNO, SRC, CUST_NAME, BRANCH, HANDLEDBY, TYPE, ROLE)
+    SELECT ''' + @UID + ''', ''' + @NAMEKEY + ''', ''' + @REFNO + ''', ''NAME'', B.new_acct_name, B.user_brnch_nbr, HANDLEDBY, ''NEW'', ROLE
+    FROM dbo.NMCHK_Review_Main A WITH(NOLOCK) 
+    LEFT JOIN dbo.NMCHK_CustInfo B WITH(NOLOCK) 
+        ON A.uid = B.uid AND A.name_key = B.new_acct_key 
+    WHERE A.uid = ''' + @UID + ''' AND A.name_key = ''' + @NAMEKEY + ''' AND A.STATUS <> ''3''')
     
+    -- 6. 呼叫發信主程式，讀取該暫存表並執行實際的 SMTP 發信邏輯
+    EXEC dbo.NMCHK_PROCESSEMAIL @USERID
 
-EXEC dbo.NMCHK_PROCESSEMAIL @USERID
-
-IF OBJECT_ID(@NMCHK_TEMP_EMAIL, 'U') IS NOT NULL
-	EXEC('DROP TABLE  dbo.[' + @NMCHK_TEMP_EMAIL + ']')
+    -- 7. 清理暫存表，釋放資料庫空間
+    IF OBJECT_ID(@NMCHK_TEMP_EMAIL, 'U') IS NOT NULL
+        EXEC('DROP TABLE dbo.[' + @NMCHK_TEMP_EMAIL + ']')
 
 END
 
-幫我註解一下 我要知道這隻再幹嘛
+關鍵執行流程摘要
+ * 參數修正：根據 Source_IND 判斷是否調整 NAMEKEY。
+ * 動態建表：建立 NMCHK_TEMP_EMAIL_<USERID> 作為跨程序傳遞資料的暫存池。
+ * 組裝發信名單：
+   * 審核結果通知：若為主管放行/退件（Role > 1 且動作為 Release/Reject），記錄操作者與動作。
+   * 新待辦通知：若案件尚未結案（STATUS <> '3'），記錄負責人（HANDLEDBY）以發送待審核通知。
+ * 派送與清理：觸發核心發信程序 NMCHK_PROCESSEMAIL 後將動態暫存表 Drop 刪除。
