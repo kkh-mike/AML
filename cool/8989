@@ -1,32 +1,124 @@
-要確認檢核結果（NMCHK_ResultHistory）命中的名單是否來自 GROUPID = 5，關鍵在於比對 ent_num 或 sdn_name，以及比對 sdn_type。
-方法 1：直接透過 ent_num 與 sdn_name 關聯回 OFAC_SPEC（最精準）
-檢核表中的 ent_num 對應的就是 OFAC_SPEC 的 ent_num：
-SELECT 
-    R.uid,
-    R.new_acct_key,
-    R.sdn_name,
-    R.sdn_type,
-    R.ent_num,
-    O.GROUPID,
-    O.SOURCE,
-    O.remark AS DJ_EntityId
-FROM NMCHK_ResultHistory R
-JOIN BSADBJP..OFAC_SPEC O 
-  ON R.ent_num = O.ent_num 
- AND R.sdn_name = O.spec_name
-WHERE R.uid = '202694'
-  AND O.GROUPID = 5;
+USE [BSADBJP]
+GO
+/****** Object:  StoredProcedure [dbo].[NMCHK_GetRCMatchesByKey]    Script Date: 2026/9/1 下午 05:17:40 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER PROCEDURE [dbo].[NMCHK_GetRCMatchesByKey]
+@RANDNUM NVARCHAR(80),
+@KEY	 NVARCHAR(20),
+@Type	 NVARCHAR(5) = NULL --= 'Q'
+AS
+DECLARE @BankNo VARCHAR(10), @Culture CHAR(5)
+SELECT @BankNo = REPLACE(DB_NAME(), 'BSADB', '')
+SELECT @Culture = ISNULL((SELECT CULTURE FROM GCMAINDB..BankDBProfile WITH (NOLOCK) WHERE BNK_NBR = @BankNo), '')		
+		
+	IF EXISTS(SELECT 1 FROM dbo.NMCHK_ResultHistory WITH(NOLOCK) WHERE UID = @RANDNUM AND new_acct_key = @KEY)
+	BEGIN
+		SELECT A.uid,userid,rel_corr_chosen,A.new_acct_key,relationship,address,city,country,new_acct_name,
+		relative_correlation,alt_num,ent_num, sdn_type, 
+		sdn_name,OFACMatch,OFACNotMatch,Reason,user_brnch_nbr,TAXID,IDENT,IDENTO,ISSBY,
+		IDNUM,REMARK,SECTION,DOB,ISNULL(Reduction_IND,'') 'Reduction_IND',ISNULL(Ori_RC,'') 'Ori_RC',B.last_updated_date, B.DETECTED, A.sdn_grp_num, ISNULL(A.NamePropertyBitCode, 0) 'NamePropertyBitCode', 
+		(CASE WHEN ISNULL(OFACNotMatch,'') = 'Y' THEN dbo.GetResourceString('Matched') 
+			  WHEN ISNULL(OFACMatch,'') = 'Y' THEN dbo.GetResourceString('NotMatched') ELSE '-' END) AS IsMatchWithBlacklist, 
+		CASE WHEN EXISTS (SELECT 1 FROM UN_SANCTIONS_LIST C WITH (NOLOCK) JOIN UN_Program_DIM D ON D.ProgramCode = C.UN_LIST_TYPE
+							WHERE A.sdn_type IN ('UN', 'UN ALT') AND A.ent_num = C.ENT_NUM AND D.IsTerroristFinancing = 1  AND C.DEL_IND = 'N')
+				OR EXISTS(SELECT 1 FROM dbo.UN_Vessel_List C WITH(NOLOCK) JOIN dbo.UN_Program_DIM D ON D.ProgramCode = C.UN_List_Type
+							WHERE A.sdn_type IN ('UN', 'UN ALT') AND A.ent_num = C.EntNum AND D.IsTerroristFinancing = 1 AND C.IsDeleted = 0)
+				OR EXISTS (SELECT 1 FROM OFAC_SPEC E WITH (NOLOCK)
+							JOIN lowrisklistgroups F WITH (NOLOCK) ON E.GROUPID = F.GROUPID
+							JOIN dbo.OFAC_SpecType_Dim G WITH (NOLOCK) ON F.SpecType = G.ID
+							WHERE A.sdn_type = 'SPEC'
+							AND A.ent_num = E.ent_num
+							AND A.sdn_grp_num = E.GROUPID
+							AND E.DInd = 'N'
+							AND G.SpecType = 'TW Sanctions List'
+						   ) 
+		THEN 
+			CASE WHEN @Culture = 'zh-TW' 
+			THEN 
+				CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'
+					WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'
+				ELSE '' END + N' (資恐)' 
+			ELSE 
+				CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'
+					WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'
+				ELSE '' END + N' (Terrorist Financing List)' 
+			END 
+		ELSE 
+			CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'
+				WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'
+			END 
+		END AS GROUPDESCR 
+		FROM dbo.NMCHK_ResultHistory A WITH(NOLOCK) 
+		JOIN dbo.NMCHK_CustInfo B WITH(NOLOCK) ON A.UID = B.UID AND A.new_acct_key = B.new_acct_key
+		LEFT JOIN dbo.lowrisklistgroups C WITH(NOLOCK) ON A.sdn_type IN('SPEC', 'SPEC_CN') AND A.sdn_grp_num = C.GROUPID
+		LEFT JOIN BSADB.dbo.lowrisklistgroups D WITH(NOLOCK) ON A.sdn_type IN('GLSPEC', 'GLSPEC_CN') AND A.sdn_grp_num = D.GROUPID
+		LEFT JOIN BlackList_PriorityList_dim E WITH (NOLOCK) ON A.sdn_type = E.List
+		WHERE A.UID = @RANDNUM 
+		AND A.NEW_ACCT_KEY = @KEY
+		ORDER BY A.RELATIVE_CORRELATION DESC, E.Priority, A.sdn_name
+	END
+	ELSE
+	BEGIN
+		;WITH CTE_FILTER_RC AS (
+			SELECT A.uid,userid,rel_corr_chosen,A.new_acct_key,relationship,address,city,country,new_acct_name,
+			relative_correlation,alt_num,ent_num, sdn_type, 
+			sdn_name,OFACMatch,OFACNotMatch,Reason,user_brnch_nbr,TAXID,IDENT,IDENTO,ISSBY,
+			IDNUM,REMARK,SECTION,DOB,ISNULL(Reduction_IND,'') 'Reduction_IND',ISNULL(Ori_RC,'') 'Ori_RC',B.last_updated_date, B.DETECTED, A.sdn_grp_num, ISNULL(A.NamePropertyBitCode, 0) 'NamePropertyBitCode', 
+			(CASE WHEN ISNULL(OFACNotMatch,'') = 'Y' THEN 'Yes' 
+			  WHEN ISNULL(OFACMatch,'') = 'Y' THEN 'No' ELSE '-' END) AS IsMatchWithBlacklist, 
+			CASE WHEN EXISTS (SELECT 1 FROM UN_SANCTIONS_LIST C WITH (NOLOCK) 
+								JOIN UN_Program_DIM D ON D.ProgramCode = C.UN_LIST_TYPE
+								WHERE A.sdn_type IN ('UN', 'UN ALT')
+								AND A.ent_num = C.ENT_NUM
+								AND D.IsTerroristFinancing = 1 
+								AND C.DEL_IND = 'N')
+					OR EXISTS(SELECT 1 FROM dbo.UN_Vessel_List C WITH(NOLOCK) JOIN dbo.UN_Program_DIM D ON D.ProgramCode = C.UN_List_Type
+							WHERE A.sdn_type IN ('UN', 'UN ALT') AND A.ent_num = C.EntNum AND D.IsTerroristFinancing = 1 AND C.IsDeleted = 0)
+					OR EXISTS (SELECT 1 FROM OFAC_SPEC E WITH (NOLOCK)
+								JOIN lowrisklistgroups F WITH (NOLOCK) ON E.GROUPID = F.GROUPID
+								JOIN dbo.OFAC_SpecType_Dim G WITH (NOLOCK) ON F.SpecType = G.ID
+								WHERE A.sdn_type = 'SPEC'
+								AND A.ent_num = E.ent_num
+								AND A.sdn_grp_num = E.GROUPID
+								AND E.DInd = 'N'
+								AND G.SpecType = 'TW Sanctions List'
+							   ) 
+			THEN 
+				CASE WHEN @Culture = 'zh-TW' 
+				THEN 
+					CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'
+						WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'
+					ELSE '' END + N' (資恐)' 
+				ELSE 
+					CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'
+						WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'
+					ELSE '' END + N' (Terrorist Financing List)' 
+				END 
+			ELSE 
+				CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'
+					WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'
+				END 
+			END AS GROUPDESCR, 
+			DENSE_RANK() OVER(ORDER BY A.relative_correlation DESC) AS RowDense
+			FROM dbo.NMCHK_ResultHistory_FILTER_RC A WITH(NOLOCK)
+			JOIN dbo.NMCHK_CustInfo B WITH(NOLOCK) ON A.UID = B.UID AND A.new_acct_key = B.new_acct_key
+			LEFT JOIN dbo.lowrisklistgroups C WITH(NOLOCK) ON A.sdn_type IN('SPEC', 'SPEC_CN') AND A.sdn_grp_num = C.GROUPID
+			LEFT JOIN BSADB.dbo.lowrisklistgroups D WITH(NOLOCK) ON A.sdn_type IN('GLSPEC', 'GLSPEC_CN') AND A.sdn_grp_num = D.GROUPID
+			WHERE A.UID = @RANDNUM 
+			AND A.NEW_ACCT_KEY = @KEY
+		)
+		SELECT A.* FROM CTE_FILTER_RC A
+		LEFT JOIN BlackList_PriorityList_dim E WITH (NOLOCK) ON A.sdn_type = E.List
+		WHERE A.RowDense = 1
+		ORDER BY E.Priority, A.sdn_name 
+			
+	END
 
- * 如果有查出資料：表示命中的紀錄就是從 GROUPID = 5（日本金融制裁）來的。
- * 如果為 0 筆：表示該比對命中結果來自其他名單群組。
-方法 2：觀察 sdn_type 欄位
-從你的截圖中可以看到現有比對結果的 sdn_type 分別是：
- * UN / UN ALT（聯合國制裁）
- * EU / EU ALT（歐盟制裁）
- * UKHMT / UKHMT ALT（英國財政部制裁）
- * OFAC / OFAC ALT（美國財政部制裁）
-在你們寫入 OFAC_SPEC 的 SP 邏輯中，SOURCE 欄位被填入 'JP FINANCE'：
-INSERT INTO ... (..., GROUPID, SOURCE, ...)
-VALUES (..., '5', 'JP FINANCE', ...)
 
-因此，如果檢核引擎產生的 sdn_type 是對應來源名單，只要看到 sdn_type 帶有 JP 或 JP FINANCE，即代表來自 GROUPID = 5。截圖中的這 22 筆目前全部都屬於 UN、EU、UKHMT 與 OFAC，沒有包含日本名單（GROUPID = 5）。
+
+
+
+我要怎麼檢查 為什麼都沒中
