@@ -1,19 +1,27 @@
-select * from BSADBJP..lowrisklistgroups
+可以使用以下 SQL 語法來執行刪除與更新操作：
+-- 1. 刪除 GROUPID = 11 的資料
+DELETE FROM BSADBJP..lowrisklistgroups
+WHERE BANKNO = 'JP' AND GROUPID = 11;
 
+-- 2. 將 GROUPID = 5 的名稱 (GROUPDESCR) 改為 'Japanese Finance'
+UPDATE BSADBJP..lowrisklistgroups
+SET GROUPDESCR = 'Japanese Finance'
+WHERE BANKNO = 'JP' AND GROUPID = 5;
 
-No	BANKNO	GROUPID	GROUPDESCR	SOURCE	CreatedBy	Created_Date	LowRiskListGroup	Created_Date_UTC	CycleDate	SpecType	NamePropertyBitCode	NameCategoryBitCode
-1	JP	1	警視庁		941069              	2016-09-30 12:30:42.960	3	2016-09-30 03:30:42.960		1	0	16
-2	JP	2	日本反		1040628             	2016-12-09 10:07:26.997	3	2016-12-09 01:07:26.997		1	1	16
-3	JP	3	Test test		1040628             	2016-12-09 12:01:52.637	3	2016-12-09 03:01:52.637		1	1	16
-4	JP	4	0213		1040628             	2017-02-13 10:47:12.627	3	2017-02-13 01:47:12.627		1	0	16
-5	JP	5	0217		1040628             	2017-02-17 10:08:33.027	3	2017-02-17 01:08:33.027		1	0	16
-6	JP	6	本行高風險國家名單		1041348             	2018-03-07 14:21:38.483	3	2018-03-07 05:21:38.483		2	0	48
-7	JP	7	Police station	全銀協ー警察庁凍結口座リスト	1061592             	2019-10-16 14:55:55.997	3	2019-10-16 05:55:55.997		1	1	16
-8	JP	8	日本凍結帳戶名單	全銀協提供	1061592             	2019-10-25 17:03:01.500	3	2019-10-25 08:03:01.500	20191025	1	1	16
-9	JP	9	20191204		1071562             	2019-12-04 10:24:06.773	3	2019-12-04 01:24:06.773		1	0	16
-10	JP	10	GB2B CDC Testing		1061592             	2023-02-20 17:28:18.950	3	2023-02-20 08:28:18.950		1	1	16
-11	JP	11	Japan Finance	Japan Finance	1091707	2023-05-08 19:22:25.723	3	2023-05-08 10:22:25.723		1	1	16
+注意事項：
+ * 建議在正式環境執行前先包裹 Transaction（交易機制），確認異動筆數正確後再進行 COMMIT：
+BEGIN TRAN;
 
+DELETE FROM BSADBJP..lowrisklistgroups
+WHERE BANKNO = 'JP' AND GROUPID = 11;
 
-我想要把groupid = 11 刪除掉
-然後把 groupid = 5 名稱改成 Japanese Finance
+UPDATE BSADBJP..lowrisklistgroups
+SET GROUPDESCR = 'Japanese Finance'
+WHERE BANKNO = 'JP' AND GROUPID = 5;
+
+-- 檢查結果無誤後提交：
+-- COMMIT TRAN;
+
+-- 若有問題則還原：
+-- ROLLBACK TRAN;
+
