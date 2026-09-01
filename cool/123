@@ -1,3 +1,28 @@
+這支 Stored Procedure 的核心功能是用於黑名單/姓名檢核（Name Check, NMCHK）工作流程中，查詢並取得「可指派的主管或同仁清單」。
+一、使用的資料表與自訂函數
+ * 實體資料表（Tables）：
+   * [dbo].[WORKFLOW_MGMT_USERS]：使用者在各工作佇列（Queue）中的角色配置關聯表。
+   * [dbo].[WORKFLOW_MGMT_QUEUE]：工作佇列定義檔（包含來源 SRC 屬性）。
+   * [dbo].[WORKFLOW_MGMT_ROLE]：工作流程角色代碼檔（包含角色描述及多國語系欄位）。
+   * [dbo].[UserAccounts]：系統帳號主檔（包含使用者姓名、是否停用 Disabled、是否刪除 Deleted 等狀態）。
+ * 自訂函數 / 依賴預存程序（Functions & SPs）：
+   * [dbo].[fnStringSplitter]：字串分割函數（將以 | 分隔的 QueueID 字串拆成表格資料列）。
+   * [dbo].[GetQueueAndActionSettings]：外部預存程序，用於檢查當前使用者對特定 Queue 是否具有指派權限（AssignQueue）。
+二、這支 SP 在做什麼？
+這支預存程序會依據是否傳入 @QueueID / @UserNMCHKRole，分為兩大查詢分支：
+ * 多佇列指派模式（傳入 @QueueID 或 @UserNMCHKRole）：
+   * 將 @QueueID 拆解並使用 Cursor 逐一調用 dbo.GetQueueAndActionSettings 檢查指派權限。
+   * 只有在所有目標佇列中均具備 AssignQueue = 1 權限時才放行。
+   * 透過 HAVING COUNT(A.ROLE_DESC) = @QueueCount，**只篩選出「同時存在於所有指定佇列中」**的合格對象。
+   * 支援依 @CultureName 輸出中文或英文角色名稱，且回傳的 ROLE_VALUE 分隔符號為 @@$$@。
+ * 單一/預設使用者佇列模式（未傳入 @QueueID 與 @UserNMCHKRole）：
+   * 自動以當前傳入的 @USERID 所屬的 NAME 來源佇列作為範圍。
+   * 回傳的 ROLE_VALUE 分隔符號為 NCHAR(196)（即 Ä）。
+ * 四種指派情境（@TYPE 參數）：
+   * A / B（向上呈報或指派）： 查詢角色等級相符或更高（A.[ROLE] <= @ROLE 或 A.[ROLE] = @ROLE）的使用者。
+   * C（同級同仁交辦/指派）： 查詢角色同級（A.[ROLE] = @ROLE）、排除自己（A.[USERID] <> @USERID）且帳號未停用（Disabled = 0）的使用者。
+   * D（佇列全體人員）： 查詢同一佇列中所有未刪除的使用者，不限角色等級。
+三、加上詳細註解的 SQL 代碼
 USE [BSADBJP]
 GO
 /****** Object:  StoredProcedure [dbo].[NMCHK_GetAssignSupervisor]    Script Date: 2026/9/1 上午 10:49:39 ******/
@@ -6,18 +31,22 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 ALTER PROC [dbo].[NMCHK_GetAssignSupervisor]
-	@USERID NVARCHAR(60),
-	@ROLE INT,
-	@TYPE CHAR(1),
-	@CultureName VARCHAR(5) = NULL,
-	@QueueID VARCHAR(MAX) = NULL,
-	@UserNMCHKRole INT = NULL
+	@USERID NVARCHAR(60),          -- 當前操作人員的 UserID
+	@ROLE INT,                     -- 當前操作人員的角色代碼或目標角色代碼
+	@TYPE CHAR(1),                 -- 查詢類型：A/B (呈報/指派), C (同級移轉), D (佇列全員)
+	@CultureName VARCHAR(5) = NULL, -- 語系代碼（如 'en-US'，控制角色描述的多國語系）
+	@QueueID VARCHAR(MAX) = NULL,  -- 以 '|' 分隔的多個工作佇列代碼字串（例如 '101|102'）
+	@UserNMCHKRole INT = NULL      -- 使用者在 NMCHK 系統中的角色 ID（用於權限檢查）
 AS
 BEGIN
 	SET NOCOUNT ON;
 	
+	-------------------------------------------------------------------------
+	-- 區塊 1：解析傳入的 @QueueID 並透過 Cursor 檢查各佇列的指派權限設定
+	-------------------------------------------------------------------------
 	IF @QueueID <> '' OR @QueueID IS NOT NULL 
 	BEGIN 
+		-- 將傳入的字串以 '|' 拆分，存入暫存表
 		DECLARE @TempQueueId TABLE(QueueId INT NOT NULL PRIMARY KEY)
 		INSERT INTO @TempQueueId ( QueueId )
 		SELECT DISTINCT Value FROM dbo.fnStringSplitter(@QueueID,'|') WHERE ISNULL(Value,'') <> '' AND ISNUMERIC(Value) = 1;
@@ -25,17 +54,20 @@ BEGIN
 		DECLARE @QueueCount INT = 0 ;
 		SELECT @QueueCount = COUNT(1) FROM @TempQueueId;
 		
-		DECLARE @Settings TABLE(ROLE_DESC NVARCHAR(100), UserRole INT, [Return] BIT, Escalate BIT, FalseMatch BIT, TrueMatch BIT, Accept BIT, 
+		-- 存放各佇列權限動作設定的暫存表
+		DECLARE @Settings TABLE(
+			ROLE_DESC NVARCHAR(100), UserRole INT, [Return] BIT, Escalate BIT, FalseMatch BIT, TrueMatch BIT, Accept BIT, 
 			ApproveToFile BIT, DoNoFile BIT, FileSAR BIT, ReadOnlyQuestionnaire BIT, AssignQueue BIT, DoNotFileBulk BIT, EscalateBulk BIT,
-			CaseReporter BIT)
+			CaseReporter BIT
+		)
 		DECLARE @CursorQueueID INT 
 
+		-- 建立 Cursor 逐一跑各個 QueueID 取得權限
 		DECLARE TARGETTABLE_CUR CURSOR LOCAL FORWARD_ONLY READ_ONLY FOR
 		SELECT QueueId FROM @TempQueueId
 
 		OPEN TARGETTABLE_CUR
-		FETCH TARGETTABLE_CUR
-		INTO @CursorQueueID
+		FETCH TARGETTABLE_CUR INTO @CursorQueueID
 
 		IF (@@FETCH_STATUS <> 0)
 		BEGIN
@@ -44,171 +76,168 @@ BEGIN
 			RETURN
 		END
 
+		-- 逐一呼叫預存程序確認該使用者對各 Queue 的操作權限
 		WHILE (@@FETCH_STATUS = 0)
 		BEGIN	
-			INSERT INTO @Settings EXEC dbo.GetQueueAndActionSettings @USERID,@CursorQueueID,@UserNMCHKRole,'NAME';
-			FETCH TARGETTABLE_CUR
-			INTO @CursorQueueID
+			INSERT INTO @Settings EXEC dbo.GetQueueAndActionSettings @USERID, @CursorQueueID, @UserNMCHKRole, 'NAME';
+			FETCH TARGETTABLE_CUR INTO @CursorQueueID
 		END	
 
 		CLOSE TARGETTABLE_CUR
 		DEALLOCATE TARGETTABLE_CUR
 	END
 	
+	-------------------------------------------------------------------------
+	-- 區塊 2：未指定佇列清單與 NMCHK 角色時的預設邏輯（依登入者自身所屬佇列查詢）
+	-------------------------------------------------------------------------
 	IF ISNULL(@QueueID,'') = '' AND ISNULL(@UserNMCHKRole,'') = ''
 	BEGIN
+		-- 情境 A / B：查詢角色等級大於等於目前角色（數值 ROLE <= @ROLE）的人員清單
 		IF @TYPE = 'A' OR @TYPE = 'B'
 		BEGIN
 			;WITH CTE_QueueId AS(
+				-- 取得登入者在 'NAME' 模組下所屬的所有佇列
 				SELECT [A].[QUEUEID]
 				FROM [dbo].[WORKFLOW_MGMT_USERS] A
-				JOIN [dbo].[WORKFLOW_MGMT_QUEUE] B
-				ON A.[QUEUEID] = B.[QUEUEID]
-				WHERE B.[SRC] = 'NAME' AND 
-					A.[USERID] = @USERID AND A.[ROLE] = @ROLE
+				JOIN [dbo].[WORKFLOW_MGMT_QUEUE] B ON A.[QUEUEID] = B.[QUEUEID]
+				WHERE B.[SRC] = 'NAME' AND A.[USERID] = @USERID AND A.[ROLE] = @ROLE
 			)
-			SELECT DISTINCT /*user may have same role on different queue, so we remove the duplicate user id for diff queue*/
-				A.[USERID], A.[ROLE], 
+			SELECT DISTINCT
+				A.[USERID], 
+				A.[ROLE], 
 				A.[USERID] + ' [' + ISNULL(B.[FirstName],'') + ' ' + ISNULL(B.[LastName],'')  + '] ' +  
-				' - (' + C.[ROLE_DESC] + ')' ROLE_DESC,  
-				A.[USERID] + NCHAR(196) +  CONVERT(NVARCHAR(8),A.[ROLE]) ROLE_VALUE  
+				' - (' + C.[ROLE_DESC] + ')' AS ROLE_DESC,  
+				A.[USERID] + NCHAR(196) + CONVERT(NVARCHAR(8), A.[ROLE]) AS ROLE_VALUE  
 			FROM [dbo].[WORKFLOW_MGMT_USERS] A
-			JOIN [dbo].[UserAccounts] B
-			ON A.[USERID] = B.[UserID]
-			JOIN [dbo].[WORKFLOW_MGMT_ROLE] C
-			ON A.[ROLE] = C.[ID]
-			JOIN [CTE_QueueId] D
-			ON A.[QUEUEID] = D.[QUEUEID]
-			WHERE B.[Deleted] = 'FALSE' AND
-				A.[ROLE] <= @ROLE
+			JOIN [dbo].[UserAccounts] B ON A.[USERID] = B.[UserID]
+			JOIN [dbo].[WORKFLOW_MGMT_ROLE] C ON A.[ROLE] = C.[ID]
+			JOIN [CTE_QueueId] D ON A.[QUEUEID] = D.[QUEUEID]
+			WHERE B.[Deleted] = 'FALSE' AND A.[ROLE] <= @ROLE
 		END
+		-- 情境 C：同角色同仁指派（排除自己、必須未停用）
 		ELSE IF @TYPE = 'C'
 		BEGIN
 			;WITH CTE_QueueId AS(
 				SELECT [A].[QUEUEID]
 				FROM [dbo].[WORKFLOW_MGMT_USERS] A
-				JOIN [dbo].[WORKFLOW_MGMT_QUEUE] B
-				ON A.[QUEUEID] = B.[QUEUEID]
-				WHERE B.[SRC] = 'NAME' AND 
-					A.[USERID] = @USERID AND A.[ROLE] = @ROLE
+				JOIN [dbo].[WORKFLOW_MGMT_QUEUE] B ON A.[QUEUEID] = B.[QUEUEID]
+				WHERE B.[SRC] = 'NAME' AND A.[USERID] = @USERID AND A.[ROLE] = @ROLE
 			)
 			SELECT DISTINCT
-				A.[USERID], A.[ROLE], 
+				A.[USERID], 
+				A.[ROLE], 
 				A.[USERID] + ' [' + ISNULL(B.[FirstName],'') + ' ' + ISNULL(B.[LastName],'')  + '] ' +  
-				' - (' + C.[ROLE_DESC] + ')' ROLE_DESC,  
-				A.[USERID] + NCHAR(196) +  CONVERT(NVARCHAR(8),A.[ROLE]) ROLE_VALUE  
+				' - (' + C.[ROLE_DESC] + ')' AS ROLE_DESC,  
+				A.[USERID] + NCHAR(196) + CONVERT(NVARCHAR(8), A.[ROLE]) AS ROLE_VALUE  
 			FROM [dbo].[WORKFLOW_MGMT_USERS] A
-			JOIN [dbo].[UserAccounts] B
-			ON A.[USERID] = B.[UserID]
-			JOIN [dbo].[WORKFLOW_MGMT_ROLE] C
-			ON A.[ROLE] = C.[ID]
-			JOIN [CTE_QueueId] D
-			ON A.[QUEUEID] = D.[QUEUEID]
-			WHERE B.[Deleted] = 'FALSE' AND
-				A.[ROLE] = @ROLE AND
-				A.[USERID] <> @USERID AND
-				B.Disabled = 0
+			JOIN [dbo].[UserAccounts] B ON A.[USERID] = B.[UserID]
+			JOIN [dbo].[WORKFLOW_MGMT_ROLE] C ON A.[ROLE] = C.[ID]
+			JOIN [CTE_QueueId] D ON A.[QUEUEID] = D.[QUEUEID]
+			WHERE B.[Deleted] = 'FALSE' 
+				AND A.[ROLE] = @ROLE 
+				AND A.[USERID] <> @USERID 
+				AND B.Disabled = 0
 		END
+		-- 情境 D：查詢同一佇列下的所有人員（不限角色與停用狀態，僅排除已刪除帳號）
 		ELSE IF @TYPE = 'D'
 		BEGIN
 			;WITH CTE_QueueId AS(
 				SELECT [A].[QUEUEID]
 				FROM [dbo].[WORKFLOW_MGMT_USERS] A
-				JOIN [dbo].[WORKFLOW_MGMT_QUEUE] B
-				ON A.[QUEUEID] = B.[QUEUEID]
-				WHERE B.[SRC] = 'NAME' AND 
-					A.[USERID] = @USERID
+				JOIN [dbo].[WORKFLOW_MGMT_QUEUE] B ON A.[QUEUEID] = B.[QUEUEID]
+				WHERE B.[SRC] = 'NAME' AND A.[USERID] = @USERID
 			)
 			SELECT DISTINCT
-				A.[USERID], A.[ROLE], 
+				A.[USERID], 
+				A.[ROLE], 
 				A.[USERID] + ' [' + ISNULL(B.[FirstName],'') + ' ' + ISNULL(B.[LastName],'')  + '] ' +  
-				' - (' + C.[ROLE_DESC] + ')' ROLE_DESC,  
-				A.[USERID] + NCHAR(196) +  CONVERT(NVARCHAR(8),A.[ROLE]) ROLE_VALUE  
+				' - (' + C.[ROLE_DESC] + ')' AS ROLE_DESC,  
+				A.[USERID] + NCHAR(196) + CONVERT(NVARCHAR(8), A.[ROLE]) AS ROLE_VALUE  
 			FROM [dbo].[WORKFLOW_MGMT_USERS] A
-			JOIN [dbo].[UserAccounts] B
-			ON A.[USERID] = B.[UserID]
-			JOIN [dbo].[WORKFLOW_MGMT_ROLE] C
-			ON A.[ROLE] = C.[ID]
-			JOIN [CTE_QueueId] D
-			ON A.[QUEUEID] = D.[QUEUEID]
+			JOIN [dbo].[UserAccounts] B ON A.[USERID] = B.[UserID]
+			JOIN [dbo].[WORKFLOW_MGMT_ROLE] C ON A.[ROLE] = C.[ID]
+			JOIN [CTE_QueueId] D ON A.[QUEUEID] = D.[QUEUEID]
 			WHERE B.[Deleted] = 'FALSE'
 		END
 	END
+	-------------------------------------------------------------------------
+	-- 區塊 3：有指定多佇列或指定 NMCHK 角色時的處理邏輯（需具備 AssignQueue 權限）
+	-------------------------------------------------------------------------
 	ELSE
 	BEGIN
+		-- 情境 A / B：指派符合特定角色之人員，且必須跨存在於所有選取的 Queue 中
 		IF @TYPE = 'A' OR @TYPE = 'B'
 		BEGIN
+			-- 必須在所有選取的佇列中都有 AssignQueue 權限
 			IF NOT EXISTS (SELECT 1 FROM @Settings WHERE AssignQueue IS NULL OR AssignQueue = 0)
 			BEGIN 
 				WITH CTE_USER AS (
-				SELECT 
-					A.[USERID], A.[ROLE], 
-					A.[USERID] + ' [' + ISNULL(B.[FirstName],'') + ' ' + ISNULL(B.[LastName],'')  + '] ' +  
-					' - (' + (CASE WHEN @CultureName='en-US' THEN C.[ROLE_DESC] ELSE C.[ROLE_DESC_zh_TW] END) + ')' ROLE_DESC,  
-					A.[USERID] + '@@$$@' +  CONVERT(NVARCHAR(8),A.[ROLE]) ROLE_VALUE  
-				FROM [dbo].[WORKFLOW_MGMT_USERS] A
-				JOIN [dbo].[UserAccounts] B ON A.[USERID] = B.[UserID]
-				JOIN [dbo].[WORKFLOW_MGMT_ROLE] C ON A.[ROLE] = C.[ID]
-				JOIN @TempQueueId D ON D.QueueId = A.QUEUEID
-				WHERE B.[Deleted] = 'FALSE' AND
-					A.[ROLE] = @ROLE	
+					SELECT 
+						A.[USERID], 
+						A.[ROLE], 
+						A.[USERID] + ' [' + ISNULL(B.[FirstName],'') + ' ' + ISNULL(B.[LastName],'')  + '] ' +  
+						' - (' + (CASE WHEN @CultureName='en-US' THEN C.[ROLE_DESC] ELSE C.[ROLE_DESC_zh_TW] END) + ')' AS ROLE_DESC,  
+						A.[USERID] + '@@$$@' + CONVERT(NVARCHAR(8), A.[ROLE]) AS ROLE_VALUE  
+					FROM [dbo].[WORKFLOW_MGMT_USERS] A
+					JOIN [dbo].[UserAccounts] B ON A.[USERID] = B.[UserID]
+					JOIN [dbo].[WORKFLOW_MGMT_ROLE] C ON A.[ROLE] = C.[ID]
+					JOIN @TempQueueId D ON D.QueueId = A.QUEUEID
+					WHERE B.[Deleted] = 'FALSE' AND A.[ROLE] = @ROLE	
 				)
-				/*SELECT ONLY USERS WITH CERTAIN ROLES THAT EXISTS IN ALL SELECTED QUEUE*/
-				SELECT * FROM CTE_USER A GROUP BY A.USERID,A.ROLE,A.ROLE_DESC,A.ROLE_VALUE HAVING COUNT(A.ROLE_DESC) = @QueueCount
+				-- 確保該人員在所有被勾選的 QueueID 都有權限
+				SELECT * FROM CTE_USER A 
+				GROUP BY A.USERID, A.ROLE, A.ROLE_DESC, A.ROLE_VALUE 
+				HAVING COUNT(A.ROLE_DESC) = @QueueCount
 			END 
 		END
+		-- 情境 C：同角色同仁指派（排除自己、排除停用帳號，且必須跨存在於所有選取的 Queue）
 		ELSE IF @TYPE = 'C'
 		BEGIN
 			IF NOT EXISTS (SELECT 1 FROM @Settings WHERE AssignQueue IS NULL OR AssignQueue = 0)
 			BEGIN 
 				WITH CTE_User AS (
-				SELECT 
-					A.[USERID], A.[ROLE], 
-					A.[USERID] + ' [' + ISNULL(B.[FirstName],'') + ' ' + ISNULL(B.[LastName],'')  + '] ' +  
-					' - (' + (CASE WHEN @CultureName='en-US' THEN C.[ROLE_DESC] ELSE C.[ROLE_DESC_zh_TW] END) + ')' ROLE_DESC,  
-					A.[USERID] + '@@$$@' +  CONVERT(NVARCHAR(8),A.[ROLE]) ROLE_VALUE  
-				FROM [dbo].[WORKFLOW_MGMT_USERS] A
-				JOIN [dbo].[UserAccounts] B ON A.[USERID] = B.[UserID]
-				JOIN [dbo].[WORKFLOW_MGMT_ROLE] C ON A.[ROLE] = C.[ID]
-				JOIN @TempQueueId D ON D.QueueId = A.QUEUEID
-				WHERE B.[Deleted] = 'FALSE' AND
-					A.[ROLE] = @ROLE AND
-					A.[USERID] <> @USERID AND
-					B.Disabled = 0
+					SELECT 
+						A.[USERID], 
+						A.[ROLE], 
+						A.[USERID] + ' [' + ISNULL(B.[FirstName],'') + ' ' + ISNULL(B.[LastName],'')  + '] ' +  
+						' - (' + (CASE WHEN @CultureName='en-US' THEN C.[ROLE_DESC] ELSE C.[ROLE_DESC_zh_TW] END) + ')' AS ROLE_DESC,  
+						A.[USERID] + '@@$$@' + CONVERT(NVARCHAR(8), A.[ROLE]) AS ROLE_VALUE  
+					FROM [dbo].[WORKFLOW_MGMT_USERS] A
+					JOIN [dbo].[UserAccounts] B ON A.[USERID] = B.[UserID]
+					JOIN [dbo].[WORKFLOW_MGMT_ROLE] C ON A.[ROLE] = C.[ID]
+					JOIN @TempQueueId D ON D.QueueId = A.QUEUEID
+					WHERE B.[Deleted] = 'FALSE' 
+						AND A.[ROLE] = @ROLE 
+						AND A.[USERID] <> @USERID 
+						AND B.Disabled = 0
 				)
-				/*SELECT ONLY USERS WITH CERTAIN ROLES THAT EXISTS IN ALL SELECTED QUEUE*/
-				SELECT * FROM CTE_USER A GROUP BY A.USERID,A.ROLE,A.ROLE_DESC,A.ROLE_VALUE HAVING COUNT(A.ROLE_DESC) = @QueueCount
+				-- 確保該人員在所有被勾選的 QueueID 都有權限
+				SELECT * FROM CTE_USER A 
+				GROUP BY A.USERID, A.ROLE, A.ROLE_DESC, A.ROLE_VALUE 
+				HAVING COUNT(A.ROLE_DESC) = @QueueCount
 			END 
 		END
+		-- 情境 D：查詢同一佇列下的所有人員
 		ELSE IF @TYPE = 'D'
 		BEGIN
 			;WITH CTE_QueueId AS(
 				SELECT [A].[QUEUEID]
 				FROM [dbo].[WORKFLOW_MGMT_USERS] A
-				JOIN [dbo].[WORKFLOW_MGMT_QUEUE] B
-				ON A.[QUEUEID] = B.[QUEUEID]
-				WHERE B.[SRC] = 'NAME' AND 
-					A.[USERID] = @USERID
+				JOIN [dbo].[WORKFLOW_MGMT_QUEUE] B ON A.[QUEUEID] = B.[QUEUEID]
+				WHERE B.[SRC] = 'NAME' AND A.[USERID] = @USERID
 			)
 			SELECT DISTINCT
-				A.[USERID], A.[ROLE], 
+				A.[USERID], 
+				A.[ROLE], 
 				A.[USERID] + ' [' + ISNULL(B.[FirstName],'') + ' ' + ISNULL(B.[LastName],'')  + '] ' +  
-				' - (' + C.[ROLE_DESC] + ')' ROLE_DESC,  
-				A.[USERID] + NCHAR(196) +  CONVERT(NVARCHAR(8),A.[ROLE]) ROLE_VALUE  
+				' - (' + C.[ROLE_DESC] + ')' AS ROLE_DESC,  
+				A.[USERID] + NCHAR(196) + CONVERT(NVARCHAR(8), A.[ROLE]) AS ROLE_VALUE  
 			FROM [dbo].[WORKFLOW_MGMT_USERS] A
-			JOIN [dbo].[UserAccounts] B
-			ON A.[USERID] = B.[UserID]
-			JOIN [dbo].[WORKFLOW_MGMT_ROLE] C
-			ON A.[ROLE] = C.[ID]
-			JOIN [CTE_QueueId] D
-			ON A.[QUEUEID] = D.[QUEUEID]
+			JOIN [dbo].[UserAccounts] B ON A.[USERID] = B.[UserID]
+			JOIN [dbo].[WORKFLOW_MGMT_ROLE] C ON A.[ROLE] = C.[ID]
+			JOIN [CTE_QueueId] D ON A.[QUEUEID] = D.[QUEUEID]
 			WHERE B.[Deleted] = 'FALSE'
 		END
 	END 
 END
 
-
-
-幫我註解一下
-然後他有用到什麼table
-然後這支sp 再幹嘛
