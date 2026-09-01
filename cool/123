@@ -1,72 +1,214 @@
-這支 Stored Procedure（預存程序）的主要功能是依據案件識別碼（@UID）查詢黑名單/姓名檢核（Name Check）的審核歷程與備註紀錄（Remark Log），並將角色、動作與操作人員 ID 轉換為易讀的描述文字與姓名，最後依照更新時間由新到舊排序輸出。
-使用到的資料表與自訂函式
- * 資料表 (Tables)
-   * dbo.NMCHK_REMARKLOG：核心紀錄表，存放審核備註、動作代碼、角色與更新時間等歷程資料。
-   * WORKFLOW_MGMT_ROLE：流程角色設定表，用於將角色的 ID 轉換為多語系的角色描述（ROLE_DESC）。
-   * dbo.WORKFLOW_MGMT_ACTION：流程動作設定表，用於將動作 ID 轉換為動作名稱（ACTION_DESC）。
-   * dbo.UserAccounts：使用者帳號表，用於將更新人員 ID（UPDATEDBY）關聯出真實姓名（FirstName + LastName）。
- * 自訂函式 (User-Defined Functions)
-   * dbo.GetResourceString(...)：多語系或系統資源字串轉換函式（轉換 FalseMatch、TrueMatch）。
-帶詳細註解的 SQL 程式碼
 USE [BSADBJP]
 GO
-/****** Object:  StoredProcedure [dbo].[NMCHK_GetNMCHKRemarkLog]    Script Date: 2026/9/1 上午 10:45:07 ******/
+/****** Object:  StoredProcedure [dbo].[NMCHK_GetAssignSupervisor]    Script Date: 2026/9/1 上午 10:49:39 ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
-ALTER PROC [dbo].[NMCHK_GetNMCHKRemarkLog] 
-    @UID NVARCHAR(80),             -- 案件/比對記錄的唯一識別碼
-    @Name_Key NVARCHAR(20),        -- 姓名鍵值 (注意：下方 WHERE 條件目前寫死為 1)
-    @CultureName VARCHAR(5) = NULL -- 語系代碼 (例如 'zh-TW'，預設 NULL)
+ALTER PROC [dbo].[NMCHK_GetAssignSupervisor]
+	@USERID NVARCHAR(60),
+	@ROLE INT,
+	@TYPE CHAR(1),
+	@CultureName VARCHAR(5) = NULL,
+	@QueueID VARCHAR(MAX) = NULL,
+	@UserNMCHKRole INT = NULL
 AS
+BEGIN
+	SET NOCOUNT ON;
+	
+	IF @QueueID <> '' OR @QueueID IS NOT NULL 
+	BEGIN 
+		DECLARE @TempQueueId TABLE(QueueId INT NOT NULL PRIMARY KEY)
+		INSERT INTO @TempQueueId ( QueueId )
+		SELECT DISTINCT Value FROM dbo.fnStringSplitter(@QueueID,'|') WHERE ISNULL(Value,'') <> '' AND ISNUMERIC(Value) = 1;
 
-SELECT 
-    A.UID, 
-    
-    -- 1. 轉換角色名稱：若語系為繁中則取 ROLE_DESC_zh_TW，否則取預設 ROLE_DESC
-    (SELECT CASE 
-                WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW 
-                ELSE ROLE_DESC 
-            END 
-     FROM WORKFLOW_MGMT_ROLE 
-     WHERE A.[ROLE] = ID) AS [ROLE],
-    
-    -- 2. 轉換動作名稱：
-    --    - Action = 1: 取得 'FalseMatch' (誤辨/非名單) 多語系字串
-    --    - Action = 2: 取得 'TrueMatch' (命中/確定為名單) 多語系字串
-    --    - 其他 Action: 從工作流程動作表查詢對應描述
-    (SELECT CASE 
-                WHEN A.Action = 1 THEN dbo.GetResourceString('FalseMatch')
-                WHEN A.Action = 2 THEN dbo.GetResourceString('TrueMatch')
-                ELSE (
-                    SELECT CASE 
-                               WHEN @CultureName = 'zh-TW' THEN ACTION_DESC 
-                               ELSE ACTION_DESC 
-                           END 
-                    FROM dbo.WORKFLOW_MGMT_ACTION 
-                    WHERE A.[ACTION] = ID
-                ) 
-            END) AS [ACTION],
-            
-    A.UPDATEDBY, 
-    
-    -- 3. 取得更新人員全名：串接未刪除使用者的 FirstName 與 LastName
-    (SELECT ISNULL(FirstName, '') + ' ' + ISNULL(LastName, '') 
-     FROM UserAccounts 
-     WHERE USERID = A.UPDATEDBY AND Deleted = 0) AS UpdatedBy_UserName, 
-    
-    A.UPDATED_DATE,          -- 紀錄更新時間
-    A.REMARK,                -- 審核備註內容
-    A.Id AS RemarkLogId,     -- 備註紀錄的主鍵 ID
-    A.[ACTION] AS ActionId,  -- 動作原始代碼
-    A.ExtendedReviewDate     -- 展延審查日期
-FROM dbo.NMCHK_REMARKLOG A WITH (NOLOCK)
-WHERE A.UID = @UID 
-  AND A.Name_Key = 1         -- 篩選 Name_Key 為 1 的紀錄
-ORDER BY UPDATED_DATE DESC   -- 依更新時間由新到舊排序
+		DECLARE @QueueCount INT = 0 ;
+		SELECT @QueueCount = COUNT(1) FROM @TempQueueId;
+		
+		DECLARE @Settings TABLE(ROLE_DESC NVARCHAR(100), UserRole INT, [Return] BIT, Escalate BIT, FalseMatch BIT, TrueMatch BIT, Accept BIT, 
+			ApproveToFile BIT, DoNoFile BIT, FileSAR BIT, ReadOnlyQuestionnaire BIT, AssignQueue BIT, DoNotFileBulk BIT, EscalateBulk BIT,
+			CaseReporter BIT)
+		DECLARE @CursorQueueID INT 
 
-程式碼潛在問題提醒
- * 參數未被使用：傳入的 @Name_Key 參數在查詢條件中被寫死為 AND A.Name_Key = 1，這會導致傳入其他 @Name_Key 值時無法生效。若需動態過濾，應改為 AND A.Name_Key = @Name_Key。
- * 多語系動作欄位疑點：在 WORKFLOW_MGMT_ACTION 的子查詢中，WHEN @CultureName = 'zh-TW' 與 ELSE 都是回傳 ACTION_DESC，繁中分支疑似少寫了 _zh_TW 欄位（例如 ACTION_DESC_zh_TW）。
+		DECLARE TARGETTABLE_CUR CURSOR LOCAL FORWARD_ONLY READ_ONLY FOR
+		SELECT QueueId FROM @TempQueueId
+
+		OPEN TARGETTABLE_CUR
+		FETCH TARGETTABLE_CUR
+		INTO @CursorQueueID
+
+		IF (@@FETCH_STATUS <> 0)
+		BEGIN
+			CLOSE TARGETTABLE_CUR
+			DEALLOCATE TARGETTABLE_CUR
+			RETURN
+		END
+
+		WHILE (@@FETCH_STATUS = 0)
+		BEGIN	
+			INSERT INTO @Settings EXEC dbo.GetQueueAndActionSettings @USERID,@CursorQueueID,@UserNMCHKRole,'NAME';
+			FETCH TARGETTABLE_CUR
+			INTO @CursorQueueID
+		END	
+
+		CLOSE TARGETTABLE_CUR
+		DEALLOCATE TARGETTABLE_CUR
+	END
+	
+	IF ISNULL(@QueueID,'') = '' AND ISNULL(@UserNMCHKRole,'') = ''
+	BEGIN
+		IF @TYPE = 'A' OR @TYPE = 'B'
+		BEGIN
+			;WITH CTE_QueueId AS(
+				SELECT [A].[QUEUEID]
+				FROM [dbo].[WORKFLOW_MGMT_USERS] A
+				JOIN [dbo].[WORKFLOW_MGMT_QUEUE] B
+				ON A.[QUEUEID] = B.[QUEUEID]
+				WHERE B.[SRC] = 'NAME' AND 
+					A.[USERID] = @USERID AND A.[ROLE] = @ROLE
+			)
+			SELECT DISTINCT /*user may have same role on different queue, so we remove the duplicate user id for diff queue*/
+				A.[USERID], A.[ROLE], 
+				A.[USERID] + ' [' + ISNULL(B.[FirstName],'') + ' ' + ISNULL(B.[LastName],'')  + '] ' +  
+				' - (' + C.[ROLE_DESC] + ')' ROLE_DESC,  
+				A.[USERID] + NCHAR(196) +  CONVERT(NVARCHAR(8),A.[ROLE]) ROLE_VALUE  
+			FROM [dbo].[WORKFLOW_MGMT_USERS] A
+			JOIN [dbo].[UserAccounts] B
+			ON A.[USERID] = B.[UserID]
+			JOIN [dbo].[WORKFLOW_MGMT_ROLE] C
+			ON A.[ROLE] = C.[ID]
+			JOIN [CTE_QueueId] D
+			ON A.[QUEUEID] = D.[QUEUEID]
+			WHERE B.[Deleted] = 'FALSE' AND
+				A.[ROLE] <= @ROLE
+		END
+		ELSE IF @TYPE = 'C'
+		BEGIN
+			;WITH CTE_QueueId AS(
+				SELECT [A].[QUEUEID]
+				FROM [dbo].[WORKFLOW_MGMT_USERS] A
+				JOIN [dbo].[WORKFLOW_MGMT_QUEUE] B
+				ON A.[QUEUEID] = B.[QUEUEID]
+				WHERE B.[SRC] = 'NAME' AND 
+					A.[USERID] = @USERID AND A.[ROLE] = @ROLE
+			)
+			SELECT DISTINCT
+				A.[USERID], A.[ROLE], 
+				A.[USERID] + ' [' + ISNULL(B.[FirstName],'') + ' ' + ISNULL(B.[LastName],'')  + '] ' +  
+				' - (' + C.[ROLE_DESC] + ')' ROLE_DESC,  
+				A.[USERID] + NCHAR(196) +  CONVERT(NVARCHAR(8),A.[ROLE]) ROLE_VALUE  
+			FROM [dbo].[WORKFLOW_MGMT_USERS] A
+			JOIN [dbo].[UserAccounts] B
+			ON A.[USERID] = B.[UserID]
+			JOIN [dbo].[WORKFLOW_MGMT_ROLE] C
+			ON A.[ROLE] = C.[ID]
+			JOIN [CTE_QueueId] D
+			ON A.[QUEUEID] = D.[QUEUEID]
+			WHERE B.[Deleted] = 'FALSE' AND
+				A.[ROLE] = @ROLE AND
+				A.[USERID] <> @USERID AND
+				B.Disabled = 0
+		END
+		ELSE IF @TYPE = 'D'
+		BEGIN
+			;WITH CTE_QueueId AS(
+				SELECT [A].[QUEUEID]
+				FROM [dbo].[WORKFLOW_MGMT_USERS] A
+				JOIN [dbo].[WORKFLOW_MGMT_QUEUE] B
+				ON A.[QUEUEID] = B.[QUEUEID]
+				WHERE B.[SRC] = 'NAME' AND 
+					A.[USERID] = @USERID
+			)
+			SELECT DISTINCT
+				A.[USERID], A.[ROLE], 
+				A.[USERID] + ' [' + ISNULL(B.[FirstName],'') + ' ' + ISNULL(B.[LastName],'')  + '] ' +  
+				' - (' + C.[ROLE_DESC] + ')' ROLE_DESC,  
+				A.[USERID] + NCHAR(196) +  CONVERT(NVARCHAR(8),A.[ROLE]) ROLE_VALUE  
+			FROM [dbo].[WORKFLOW_MGMT_USERS] A
+			JOIN [dbo].[UserAccounts] B
+			ON A.[USERID] = B.[UserID]
+			JOIN [dbo].[WORKFLOW_MGMT_ROLE] C
+			ON A.[ROLE] = C.[ID]
+			JOIN [CTE_QueueId] D
+			ON A.[QUEUEID] = D.[QUEUEID]
+			WHERE B.[Deleted] = 'FALSE'
+		END
+	END
+	ELSE
+	BEGIN
+		IF @TYPE = 'A' OR @TYPE = 'B'
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM @Settings WHERE AssignQueue IS NULL OR AssignQueue = 0)
+			BEGIN 
+				WITH CTE_USER AS (
+				SELECT 
+					A.[USERID], A.[ROLE], 
+					A.[USERID] + ' [' + ISNULL(B.[FirstName],'') + ' ' + ISNULL(B.[LastName],'')  + '] ' +  
+					' - (' + (CASE WHEN @CultureName='en-US' THEN C.[ROLE_DESC] ELSE C.[ROLE_DESC_zh_TW] END) + ')' ROLE_DESC,  
+					A.[USERID] + '@@$$@' +  CONVERT(NVARCHAR(8),A.[ROLE]) ROLE_VALUE  
+				FROM [dbo].[WORKFLOW_MGMT_USERS] A
+				JOIN [dbo].[UserAccounts] B ON A.[USERID] = B.[UserID]
+				JOIN [dbo].[WORKFLOW_MGMT_ROLE] C ON A.[ROLE] = C.[ID]
+				JOIN @TempQueueId D ON D.QueueId = A.QUEUEID
+				WHERE B.[Deleted] = 'FALSE' AND
+					A.[ROLE] = @ROLE	
+				)
+				/*SELECT ONLY USERS WITH CERTAIN ROLES THAT EXISTS IN ALL SELECTED QUEUE*/
+				SELECT * FROM CTE_USER A GROUP BY A.USERID,A.ROLE,A.ROLE_DESC,A.ROLE_VALUE HAVING COUNT(A.ROLE_DESC) = @QueueCount
+			END 
+		END
+		ELSE IF @TYPE = 'C'
+		BEGIN
+			IF NOT EXISTS (SELECT 1 FROM @Settings WHERE AssignQueue IS NULL OR AssignQueue = 0)
+			BEGIN 
+				WITH CTE_User AS (
+				SELECT 
+					A.[USERID], A.[ROLE], 
+					A.[USERID] + ' [' + ISNULL(B.[FirstName],'') + ' ' + ISNULL(B.[LastName],'')  + '] ' +  
+					' - (' + (CASE WHEN @CultureName='en-US' THEN C.[ROLE_DESC] ELSE C.[ROLE_DESC_zh_TW] END) + ')' ROLE_DESC,  
+					A.[USERID] + '@@$$@' +  CONVERT(NVARCHAR(8),A.[ROLE]) ROLE_VALUE  
+				FROM [dbo].[WORKFLOW_MGMT_USERS] A
+				JOIN [dbo].[UserAccounts] B ON A.[USERID] = B.[UserID]
+				JOIN [dbo].[WORKFLOW_MGMT_ROLE] C ON A.[ROLE] = C.[ID]
+				JOIN @TempQueueId D ON D.QueueId = A.QUEUEID
+				WHERE B.[Deleted] = 'FALSE' AND
+					A.[ROLE] = @ROLE AND
+					A.[USERID] <> @USERID AND
+					B.Disabled = 0
+				)
+				/*SELECT ONLY USERS WITH CERTAIN ROLES THAT EXISTS IN ALL SELECTED QUEUE*/
+				SELECT * FROM CTE_USER A GROUP BY A.USERID,A.ROLE,A.ROLE_DESC,A.ROLE_VALUE HAVING COUNT(A.ROLE_DESC) = @QueueCount
+			END 
+		END
+		ELSE IF @TYPE = 'D'
+		BEGIN
+			;WITH CTE_QueueId AS(
+				SELECT [A].[QUEUEID]
+				FROM [dbo].[WORKFLOW_MGMT_USERS] A
+				JOIN [dbo].[WORKFLOW_MGMT_QUEUE] B
+				ON A.[QUEUEID] = B.[QUEUEID]
+				WHERE B.[SRC] = 'NAME' AND 
+					A.[USERID] = @USERID
+			)
+			SELECT DISTINCT
+				A.[USERID], A.[ROLE], 
+				A.[USERID] + ' [' + ISNULL(B.[FirstName],'') + ' ' + ISNULL(B.[LastName],'')  + '] ' +  
+				' - (' + C.[ROLE_DESC] + ')' ROLE_DESC,  
+				A.[USERID] + NCHAR(196) +  CONVERT(NVARCHAR(8),A.[ROLE]) ROLE_VALUE  
+			FROM [dbo].[WORKFLOW_MGMT_USERS] A
+			JOIN [dbo].[UserAccounts] B
+			ON A.[USERID] = B.[UserID]
+			JOIN [dbo].[WORKFLOW_MGMT_ROLE] C
+			ON A.[ROLE] = C.[ID]
+			JOIN [CTE_QueueId] D
+			ON A.[QUEUEID] = D.[QUEUEID]
+			WHERE B.[Deleted] = 'FALSE'
+		END
+	END 
+END
+
+
+
+幫我註解一下
+然後他有用到什麼table
+然後這支sp 再幹嘛
