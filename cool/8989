@@ -1,9 +1,38 @@
-SELECT TOP 10 
-    spec_name, 
-    ent_num, 
-    remark AS EntityId, 
-    updated_date
-FROM BSADBJP..OFAC_SPEC
-WHERE GROUPID = 5 
-  AND DInd = 'N'
-  AND spec_name NOT IN (SELECT sdn_name FROM BSADBJP..OFAC_SDN);
+從 SQL Profiler 抓到的 SP 呼叫，可以清楚看到前端載入清單與案件明細的核心邏輯。
+UI 撈資料主要由以下兩支 SP 控制：
+ * NMCHK_GetResultFilter：負責載入審查清單 / 待辦案件 Grid。
+ * NMCHK_GetCustInfo / NMCHK_GetRCMatchesByKey：點進特定案件後，用來顯示比對明細。
+請依序執行以下 3 個步驟來排查：
+步驟 1：查看 NMCHK_GetResultFilter 的定義（為什麼清單撈不到案件）
+這是 Profiler 裡出現最多次的 SP，請在 SSMS 查看內容：
+sp_helptext 'NMCHK_GetResultFilter';
+
+重點檢查：
+ * 裡面是否有過濾 sdn_grp_num、sdn_type 或 LowRiskListGroup？
+ * 裡面是否有關聯 lowrisklistgroups 表？（若有的話，之前 lowrisklistgroups 的 NamePropertyBitCode 為 0 可能直接把該群組過濾掉了）。
+步驟 2：直接模擬執行 NMCHK_GetResultFilter
+拿 Profiler 抓到的參數在 SSMS 執行，確認它回傳了哪些案件：
+EXEC NMCHK_GetResultFilter 
+    @GRIDTYPE = 'A', 
+    @ROLE = '3', 
+    @HANDLEDBY = '', 
+    @HANDLEDBYROLE = '', 
+    @STATUS = '', 
+    @TRAN_DATEFR = '', 
+    @TRAN_DATETO = '', 
+    @REFNO = '', 
+    @Name_Key = '';
+
+ * 查看回傳的結果集中，有沒有包含你想測的那筆 UID。
+步驟 3：確認案件主表 NMCHK_Review_Main 與 NMCHK_CustInfo 是否有產出該 UID
+檢核命中後，系統會先在案件主表建案，前端 Grid 才會顯示。請確認該次比對是否有產生主表記錄：
+SELECT TOP 10 * 
+FROM BSADBJP.dbo.NMCHK_Review_Main 
+ORDER BY Created_Date DESC;
+
+SELECT TOP 10 * 
+FROM BSADBJP.dbo.NMCHK_CustInfo 
+ORDER BY last_updated_date DESC;
+
+ * 如果主表完全沒有產生新案件：表示「比對引擎批次 Job（Matching Engine）」在比對當下就沒有掃到，而不是前端 UI 顯示被濾掉。
+ * 如果主表有該 UID，但 UI 沒顯示：就是 NMCHK_GetResultFilter 內的權限、角色（@ROLE = '3'）或狀態過濾條件把資料卡住了。
