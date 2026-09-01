@@ -1,201 +1,42 @@
-CREATE PROC [dbo].[NMCHK_GetResultFilter]  
-@GRIDTYPE CHAR(1),  
-@ROLE INT,   
-@HANDLEDBY NVARCHAR(60),  
-@HANDLEDBYROLE INT,  
-@STATUS CHAR(2),  
-@TRAN_DATEFR DATETIME,  
-@TRAN_DATETO DATETIME,  
-@REFNO NVARCHAR(80),  
-@Name_key NVARCHAR(20),  
-@USERID NVARCHAR(60),  
-@QUEUEID INT,  
-@ACTION INT,  
-@Channel NVARCHAR(20),  
-@CustName NVARCHAR(350),  
-@QueueName NVARCHAR(100),  
-@CultureName VARCHAR(5) = NULL  
-AS  
-  
-SELECT @REFNO = LTRIM(RTRIM(@REFNO))  
-  
-IF ISNULL(@TRAN_DATEFR,'') <> '' AND ISNULL(@TRAN_DATETO,'') <> '' AND  @TRAN_DATETO >= @TRAN_DATEFR  
- SET @TRAN_DATETO = DATEADD(SECOND,-1,DATEADD(DAY,1,@TRAN_DATETO));  
-  
-IF @GRIDTYPE = 'A' /*Main Queue gridview*/  
-BEGIN  
- ;WITH CTE_Blacklist AS (  
-  SELECT uid FROM dbo.NMCHK_ResultHistory WITH (NOLOCK) WHERE NamePropertyBitCode & 1 = 1 GROUP BY uid  
- )  
- SELECT A.UID, A.Name_Key, D.new_acct_name, D.user_brnch_nbr, Created_Date, Created_UserId,   
- Last_Upd_UserId, HandledBy, Action, A.Role, G.QUEUENAME, HOLDBY, A.QUEUEID, A.Remark, LstUpdate_Remark, D.Source_IND, D.Channel, D.Ori_REFNO, D.REFNO,   
- (SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM UserAccounts WHERE USERID = HandledBy AND Deleted = 0) HandledBy_UserName,   
- CASE WHEN @CultureName = 'zh-TW' THEN F.STATUS_DESC_zh_TW ELSE STATUS_DESC END AS Status,   
- (SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE A.ROLE = ID) ROLE_DESC,   
- (SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM dbo.UserAccounts WHERE USERID = LstUpdate_Remark AND Deleted = 0) LstUpdate_Remark_UserName,  
- (SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE ID = (ISNULL(A.LstUpdate_Role,0))) PREVROLE_DESC,   
- CASE WHEN @CultureName = 'zh-TW' THEN E.SOURCE_DESC_zh_TW ELSE E.SOURCE_DESC END AS SOURCE_DESC, (CASE WHEN I.uid IS NOT NULL THEN 'Y' ELSE 'N' END) AS 'BLACKLIST',  
- A.ExtendedReviewDate  
- FROM dbo.NMCHK_Review_Main A WITH (NOLOCK)   
- JOIN NMCHK_CustInfo D WITH (NOLOCK) ON A.uid = D.uid AND A.name_key = D.new_acct_key  
- LEFT JOIN dbo.NMCHK_SOURCE_DIM E WITH (NOLOCK) ON D.Source_IND = E.Source_IND   
- LEFT JOIN WORKFLOW_MGMT_STATUS F WITH (NOLOCK) ON A.STATUS = F.ID  
- LEFT JOIN WORKFLOW_MGMT_QUEUE G WITH (NOLOCK) ON A.QueueID = G.QUEUEID AND G.SRC = 'NAME'  
- LEFT JOIN WORKFLOW_MGMT_USERS H WITH (NOLOCK) ON G.QUEUEID = H.QUEUEID   
- LEFT JOIN CTE_Blacklist I ON I.uid = A.uid  
- WHERE A.STATUS <> '3'  
- AND ((@HANDLEDBY = '' AND ISNULL(A.HandledBy,'') = '')  
-  OR (@HANDLEDBY <> '' AND A.HandledBy = @HANDLEDBY)  
-  )  
- AND (@HANDLEDBYROLE = 0  
-  OR (@HANDLEDBYROLE <> 0 AND @HANDLEDBYROLE = A.Role)  
-  )  
- AND ((A.ROLE = @ROLE AND A.ROLE = H.ROLE AND H.USERID = @USERID)   
-  OR (A.ROLE <= @ROLE AND H.ROLE = @ROLE AND H.USERID = @USERID)  
-  )  
- AND (@STATUS = ''   
-  OR (@STATUS <> '' AND A.Status = @STATUS)  
-  )  
- AND ((@TRAN_DATEFR = '' AND @TRAN_DATETO = '')   
-  OR (@TRAN_DATEFR <> '' AND @TRAN_DATETO <> '' AND Created_Date BETWEEN @TRAN_DATEFR AND @TRAN_DATETO)  
-  )  
- AND ((@QUEUEID = 0 AND A.QUEUEID IN (SELECT H.QUEUEID WHERE G.DEL_FLAG = 'N' AND H.USERID = @USERID))  
-  OR (@QUEUEID <> 0 AND A.QUEUEID = @QUEUEID)  
-  )  
- AND (@ACTION = 0  
-  OR (@ACTION <> 0 AND A.ACTION = @ACTION)  
-  )  
- AND (@REFNO = ''   
-  OR (@REFNO <> '' AND D.REFNO LIKE '%' + @REFNO + '%')  
-  )  
- AND (@Channel = ''   
-  OR (@Channel <> '' AND E.Source_IND = @Channel)  
-  )  
- AND (@CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS = ''   
-  OR (@CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS <> '' AND D.new_acct_name LIKE '%' + @CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS + '%')  
-  )  
- AND (@QueueName = ''   
-  OR (@QueueName <> '' AND G.QUEUENAME LIKE '%' + @QueueName + '%')  
-  )  
- ORDER BY ROLE DESC, Created_Date DESC, REFNO option(recompile)  
-END    
-ELSE IF @GRIDTYPE = 'B' /*Personal Queue gridview*/  
-BEGIN  
- ;WITH CTE_Blacklist AS (  
-  SELECT uid FROM dbo.NMCHK_ResultHistory WITH (NOLOCK) WHERE NamePropertyBitCode & 1 = 1 GROUP BY uid  
- )  
- SELECT DISTINCT A.UID, A.Name_Key, D.new_acct_name, D.user_brnch_nbr, Created_Date, Created_UserId,   
- Last_Upd_UserId, HandledBy, Action, A.Role, G.QUEUENAME, HOLDBY, A.QUEUEID, A.Remark, LstUpdate_Remark, D.Source_IND, D.Channel, D.Ori_REFNO, D.REFNO,   
- (SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM dbo.UserAccounts WHERE USERID = HandledBy AND Deleted = 0) HandledBy_UserName,   
- CASE WHEN @CultureName = 'zh-TW' THEN F.STATUS_DESC_zh_TW ELSE STATUS_DESC END AS Status,   
- (SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE A.ROLE = ID) ROLE_DESC,   
- (SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM dbo.UserAccounts WHERE USERID = LstUpdate_Remark AND Deleted = 0) LstUpdate_Remark_UserName,  
- (SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE ID = (ISNULL(A.LstUpdate_Role,0))) PREVROLE_DESC,   
- CASE WHEN @CultureName = 'zh-TW' THEN E.SOURCE_DESC_zh_TW ELSE E.SOURCE_DESC END AS SOURCE_DESC, (CASE WHEN I.uid IS NOT NULL THEN 'Y' ELSE 'N' END) AS 'BLACKLIST',  
- A.ExtendedReviewDate  
- FROM dbo.NMCHK_Review_Main A WITH (NOLOCK)   
- JOIN NMCHK_CustInfo D WITH (NOLOCK) ON A.uid = D.uid AND A.name_key = D.new_acct_key  
- LEFT JOIN dbo.NMCHK_SOURCE_DIM E WITH (NOLOCK) ON D.Source_IND = E.Source_IND   
- LEFT JOIN WORKFLOW_MGMT_STATUS F WITH (NOLOCK) ON A.STATUS = F.ID  
- LEFT JOIN WORKFLOW_MGMT_QUEUE G WITH (NOLOCK) ON A.QueueID = G.QUEUEID AND G.SRC = 'NAME'  
- LEFT JOIN WORKFLOW_MGMT_USERS H WITH (NOLOCK) ON G.QUEUEID = H.QUEUEID   
- LEFT JOIN CTE_Blacklist I ON I.uid = A.uid  
- WHERE STATUS <> '3'  
- AND (@HANDLEDBY = ''  
-  OR (@HANDLEDBY <> '' AND A.HandledBy = @HANDLEDBY)  
-  )  
- AND ((@ROLE = 3 AND A.ROLE = @ROLE AND A.ROLE = H.ROLE AND H.USERID = @USERID)  
-  OR (@ROLE <> 3 AND @ROLE <> 0  
-   AND ((A.ROLE = @ROLE AND A.ROLE = H.ROLE AND H.USERID = @USERID)  
-    OR (A.ROLE = @ROLE - 1 AND H.ROLE = @ROLE AND H.USERID = @USERID)  
-    )  
-   )  
-  )  
- --AND (@STATUS = ''   
- -- OR (@STATUS <> '' AND A.Status = @STATUS)  
- -- )  
- AND ((@TRAN_DATEFR = '' AND @TRAN_DATETO = '')   
-  OR (@TRAN_DATEFR <> '' AND @TRAN_DATETO <> '' AND Created_Date BETWEEN @TRAN_DATEFR AND @TRAN_DATETO)  
-  )  
- AND ((@QUEUEID = 0 AND A.QUEUEID IN (SELECT H.QUEUEID WHERE G.DEL_FLAG = 'N' AND H.USERID = @USERID))  
-  OR (@QUEUEID <> 0 AND A.QUEUEID = @QUEUEID)  
-  )  
- AND (@ACTION = 0  
-  OR (@ACTION <> 0 AND A.ACTION = @ACTION)  
-  )  
- AND (@REFNO = ''   
-  OR (@REFNO <> '' AND D.REFNO LIKE '%' + @REFNO + '%')  
-  )  
- AND (@Channel = ''   
-  OR (@Channel <> '' AND E.Source_IND = @Channel)  
-  )  
- AND (@CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS = ''   
-  OR (@CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS <> '' AND D.new_acct_name LIKE '%' + @CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS + '%')  
-  )  
- AND (@QueueName = ''   
-  OR (@QueueName <> '' AND G.QUEUENAME LIKE '%' + @QueueName + '%')  
-  )  
- ORDER BY Created_Date DESC, REFNO option(recompile)  
-END   
-ELSE IF @GRIDTYPE = 'C' /*History Screen gridview*/  
-BEGIN  
- IF OBJECT_ID('tempdb..#tempQueue') IS NOT NULL  
-  DROP TABLE #tempQueue  
-  
- CREATE TABLE #tempQueue (QUEUEID INT NOT NULL, DEL_FLAG VARCHAR(1) NULL, QUEUENAME NVARCHAR(120) NULL)  
-  
- INSERT INTO #tempQueue ( QUEUEID, DEL_FLAG, QUEUENAME )  
- EXEC dbo.NMCHK_GetQueue @USERID = @USERID, @TYPE = 'C'   
-  
- ;WITH CTE_Blacklist AS (  
-  SELECT uid FROM dbo.NMCHK_ResultHistory WITH (NOLOCK) WHERE NamePropertyBitCode & 1 = 1 GROUP BY uid  
- )  
- SELECT DISTINCT A.UID, A.Name_Key, D.new_acct_name, D.user_brnch_nbr, Created_Date, Created_UserId,   
- Last_Upd_UserId, HandledBy, Action, A.Role, G.QUEUENAME, HOLDBY, A.QUEUEID, A.Remark, LstUpdate_Remark, D.Source_IND, D.Channel, D.Ori_REFNO, D.REFNO,   
- (SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM UserAccounts WHERE USERID = HandledBy AND Deleted = 0) HandledBy_UserName,   
- CASE WHEN @CultureName = 'zh-TW' THEN F.STATUS_DESC_zh_TW ELSE STATUS_DESC END AS Status,   
- (SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE A.ROLE = ID) ROLE_DESC,   
- (SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM UserAccounts WHERE USERID = LstUpdate_Remark AND Deleted = 0) LstUpdate_Remark_UserName,  
- (SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE ID = (ISNULL(A.LstUpdate_Role,0))) PREVROLE_DESC,   
- CASE WHEN @CultureName = 'zh-TW' THEN E.SOURCE_DESC_zh_TW ELSE E.SOURCE_DESC END AS SOURCE_DESC, (CASE WHEN H.uid IS NOT NULL THEN 'Y' ELSE 'N' END) AS 'BLACKLIST',  
- A.ExtendedReviewDate  
- FROM dbo.NMCHK_Review_Main A WITH (NOLOCK)   
- JOIN NMCHK_CustInfo D WITH (NOLOCK) ON A.uid = D.uid AND A.name_key = D.new_acct_key  
- LEFT JOIN dbo.NMCHK_SOURCE_DIM E WITH (NOLOCK) ON D.Source_IND = E.Source_IND   
- LEFT JOIN WORKFLOW_MGMT_STATUS F WITH (NOLOCK) ON A.STATUS = F.ID  
- LEFT JOIN WORKFLOW_MGMT_QUEUE G WITH (NOLOCK) ON A.QueueID = G.QUEUEID AND G.SRC = 'NAME'  
- LEFT JOIN CTE_Blacklist H ON H.uid = A.uid  
- WHERE (@HANDLEDBY = ''  
-  OR (@HANDLEDBY <> '' AND EXISTS(SELECT 1 FROM dbo.NMCHK_Review_Diagram X WITH (NOLOCK)  
-         WHERE X.NAME_KEY = A.NAME_KEY AND A.UID = X.UID and X.HandledBy = @HANDLEDBY AND X.ROLE = @ROLE)  
-   )  
-  )  
- AND (@STATUS = ''   
-  OR (@STATUS <> '' AND A.Status = @STATUS)  
-  )  
- AND ((@TRAN_DATEFR = '' AND @TRAN_DATETO = '')   
-  OR (@TRAN_DATEFR <> '' AND @TRAN_DATETO <> '' AND Created_Date BETWEEN @TRAN_DATEFR AND @TRAN_DATETO)  
-  )  
- AND ((@QUEUEID = 0 AND A.QUEUEID IN (SELECT QUEUEID FROM #tempQueue))  
-  OR (@QUEUEID <> 0 AND A.QUEUEID = @QUEUEID)  
-  )  
- AND (@ACTION = 0  
-  OR (@ACTION <> 0 AND A.ACTION = @ACTION)  
-  )  
- AND (@REFNO = ''   
-  OR (@REFNO <> '' AND D.REFNO LIKE '%' + @REFNO + '%')  
-  )  
- AND (@Channel = ''   
-  OR (@Channel <> '' AND E.Source_IND = @Channel)  
-  )  
- AND (@CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS = ''   
-   OR D.new_acct_name LIKE '%' + @CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS + '%')  
- AND (@QueueName = ''   
-  OR (@QueueName <> '' AND G.QUEUENAME LIKE '%' + @QueueName + '%')  
-  )  
- ORDER BY Created_Date DESC, UID DESC, NAME_KEY DESC option(recompile)  
-  
-END  
-  
-  
-  
+lowrisklistgroups 的 NamePropertyBitCode 改成 1 之後，接下來需要依序完成以下 3 個動作，才能讓前端頁面與歷史表正常中獎：
+步驟 1：重新同步/重跑 Japan 名單 SP
+你一開始修改的 SP 會將名單寫入 OFAC_SPEC。請確認 OFAC_SPEC 裡面該筆資料或相關欄位已經是最新狀態。
+步驟 2：重新執行該筆客戶的「姓名檢核比對作業」
+修改參數只會影響「之後新跑的比對」。舊的 NMCHK_ResultHistory 裡面的 NamePropertyBitCode 還是舊值（0 或未命中），因此必須將該筆客戶重新送檢（或手動觸發比對 Batch/SP）。
+如果只是要快速驗證該筆歷史案件在畫面上的顯示效果，可以直接手動更新歷史紀錄測試：
+UPDATE BSADBJP.dbo.NMCHK_ResultHistory
+SET NamePropertyBitCode = 1
+WHERE uid = '202698'; -- 換成你的測試 UID
+
+步驟 3：驗證查詢結果
+1. 驗證歷史比對表是否判定為黑名單：
+SELECT 
+    uid, 
+    sdn_name, 
+    sdn_type, 
+    sdn_grp_num, 
+    NamePropertyBitCode,
+    CASE WHEN NamePropertyBitCode & 1 = 1 THEN 'Y (黑名單成立)' ELSE 'N' END AS Blacklist_Check
+FROM BSADBJP.dbo.NMCHK_ResultHistory
+WHERE uid = '202698';
+
+2. 模擬前端 SP 查詢，確認 BLACKLIST 欄位是否變成 'Y'：
+EXEC BSADBJP.dbo.NMCHK_GetResultFilter 
+    @GRIDTYPE = 'A', 
+    @ROLE = 3, 
+    @HANDLEDBY = '', 
+    @HANDLEDBYROLE = 0, 
+    @STATUS = '', 
+    @TRAN_DATEFR = NULL, 
+    @TRAN_DATETO = NULL, 
+    @REFNO = '', 
+    @Name_key = '', 
+    @USERID = '1061592', 
+    @QUEUEID = 0, 
+    @ACTION = 0, 
+    @Channel = '', 
+    @CustName = '', 
+    @QueueName = '', 
+    @CultureName = 'zh-TW';
+
+執行後查看回傳結果集，該筆案件的 BLACKLIST 欄位就會正確顯示為 Y，畫面上也能正常被黑名單條件過濾出來。
