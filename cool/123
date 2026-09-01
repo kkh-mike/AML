@@ -6,43 +6,61 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 ALTER PROC [dbo].[NMCHK_GetResultFilter]
-@GRIDTYPE CHAR(1),
-@ROLE INT, 
-@HANDLEDBY NVARCHAR(60),
-@HANDLEDBYROLE INT,
-@STATUS CHAR(2),
-@TRAN_DATEFR DATETIME,
-@TRAN_DATETO DATETIME,
-@REFNO NVARCHAR(80),
-@Name_key NVARCHAR(20),
-@USERID NVARCHAR(60),
-@QUEUEID INT,
-@ACTION INT,
-@Channel NVARCHAR(20),
-@CustName NVARCHAR(350),
-@QueueName NVARCHAR(100),
-@CultureName VARCHAR(5) = NULL
+@GRIDTYPE CHAR(1),               -- 畫面類型: 'A' = 主待辦清單 (Main Queue), 'B' = 個人待辦 (Personal Queue), 'C' = 歷史查詢 (History)
+@ROLE INT,                       -- 當前操作人員的角色等級 (Role ID)
+@HANDLEDBY NVARCHAR(60),         -- 案件目前處理人員 UserID (篩選條件)
+@HANDLEDBYROLE INT,              -- 案件目前處理人員的角色等級 (篩選條件)
+@STATUS CHAR(2),                 -- 案件狀態 (篩選條件)
+@TRAN_DATEFR DATETIME,           -- 建立日期起日 (Date From)
+@TRAN_DATETO DATETIME,           -- 建立日期迄日 (Date To)
+@REFNO NVARCHAR(80),             -- 參考編號/交易單號 (模糊查詢)
+@Name_key NVARCHAR(20),          -- 帳戶/姓名識別 Key (保留參數)
+@USERID NVARCHAR(60),            -- 當前登入人員的 UserID
+@QUEUEID INT,                    -- 工作隊列 ID (0 代表全部可存取的隊列)
+@ACTION INT,                     -- 審核動作狀態 (篩選條件)
+@Channel NVARCHAR(20),           -- 業務來源管道 / Source_IND
+@CustName NVARCHAR(350),         -- 客戶名稱 (支援中文筆畫排序規則模糊比對)
+@QueueName NVARCHAR(100),        -- 隊列名稱 (模糊查詢)
+@CultureName VARCHAR(5) = NULL   -- 多語系代碼 (例如 'zh-TW' 顯示繁中說明，其餘顯示英文)
 AS
 
+-- 去除參考編號前後空白
 SELECT @REFNO = LTRIM(RTRIM(@REFNO))
 
-IF ISNULL(@TRAN_DATEFR,'') <> '' AND ISNULL(@TRAN_DATETO,'') <> '' AND  @TRAN_DATETO >= @TRAN_DATEFR
+-- 日期防呆與補正：若有設定迄日，將迄日延伸至當天的 23:59:59
+IF ISNULL(@TRAN_DATEFR,'') <> '' AND ISNULL(@TRAN_DATETO,'') <> '' AND @TRAN_DATETO >= @TRAN_DATEFR
 	SET @TRAN_DATETO = DATEADD(SECOND,-1,DATEADD(DAY,1,@TRAN_DATETO));
 
-IF @GRIDTYPE = 'A' /*Main Queue gridview*/
+/* =========================================================================
+   情境 A: 主待辦隊列 (Main Queue Gridview)
+   - 排除已結案資料 (STATUS <> '3')
+   - 依使用者所屬隊列及角色權限 (可看同級或下層角色) 過濾
+   ========================================================================= */
+IF @GRIDTYPE = 'A'
 BEGIN
+	-- 利用 CTE 透過 Bit運算 (NamePropertyBitCode & 1 = 1) 抓出命中黑名單的 UID
 	;WITH CTE_Blacklist AS (
 		SELECT uid FROM dbo.NMCHK_ResultHistory WITH (NOLOCK) WHERE NamePropertyBitCode & 1 = 1 GROUP BY uid
 	)
-	SELECT A.UID, A.Name_Key, D.new_acct_name, D.user_brnch_nbr, Created_Date, Created_UserId, 
-	Last_Upd_UserId, HandledBy, Action,	A.Role, G.QUEUENAME, HOLDBY, A.QUEUEID, A.Remark, LstUpdate_Remark, D.Source_IND, D.Channel, D.Ori_REFNO, D.REFNO, 
-	(SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM UserAccounts WHERE USERID = HandledBy AND Deleted = 0) HandledBy_UserName,	
-	CASE WHEN @CultureName = 'zh-TW' THEN F.STATUS_DESC_zh_TW ELSE STATUS_DESC END AS Status, 
-	(SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE A.ROLE = ID) ROLE_DESC, 
-	(SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM dbo.UserAccounts WHERE USERID = LstUpdate_Remark AND Deleted = 0) LstUpdate_Remark_UserName,
-	(SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE ID = (ISNULL(A.LstUpdate_Role,0))) PREVROLE_DESC, 
-	CASE WHEN @CultureName = 'zh-TW' THEN E.SOURCE_DESC_zh_TW ELSE E.SOURCE_DESC END AS SOURCE_DESC, (CASE WHEN I.uid IS NOT NULL THEN 'Y' ELSE 'N' END) AS 'BLACKLIST',
-	A.ExtendedReviewDate
+	SELECT 
+		A.UID, A.Name_Key, D.new_acct_name, D.user_brnch_nbr, Created_Date, Created_UserId, 
+		Last_Upd_UserId, HandledBy, Action, A.Role, G.QUEUENAME, HOLDBY, A.QUEUEID, A.Remark, 
+		LstUpdate_Remark, D.Source_IND, D.Channel, D.Ori_REFNO, D.REFNO, 
+		-- 取得處理人員姓名
+		(SELECT ISNULL(FirstName,'') + ' ' + ISNULL(LastName,'') FROM UserAccounts WHERE USERID = HandledBy AND Deleted = 0) HandledBy_UserName,	
+		-- 多語系處理：狀態描述
+		CASE WHEN @CultureName = 'zh-TW' THEN F.STATUS_DESC_zh_TW ELSE STATUS_DESC END AS Status, 
+		-- 多語系處理：角色描述
+		(SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE A.ROLE = ID) ROLE_DESC, 
+		-- 取得最後備註更新人姓名
+		(SELECT ISNULL(FirstName,'') + ' ' + ISNULL(LastName,'') FROM dbo.UserAccounts WHERE USERID = LstUpdate_Remark AND Deleted = 0) LstUpdate_Remark_UserName,
+		-- 多語系處理：前一關角色描述
+		(SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE ID = (ISNULL(A.LstUpdate_Role,0))) PREVROLE_DESC, 
+		-- 多語系處理：來源管道描述
+		CASE WHEN @CultureName = 'zh-TW' THEN E.SOURCE_DESC_zh_TW ELSE E.SOURCE_DESC END AS SOURCE_DESC, 
+		-- 標記是否命中黑名單 (Y/N)
+		(CASE WHEN I.uid IS NOT NULL THEN 'Y' ELSE 'N' END) AS 'BLACKLIST',
+		A.ExtendedReviewDate
 	FROM dbo.NMCHK_Review_Main A WITH (NOLOCK) 
 	JOIN NMCHK_CustInfo D WITH (NOLOCK) ON A.uid = D.uid AND A.name_key = D.new_acct_key
 	LEFT JOIN dbo.NMCHK_SOURCE_DIM E WITH (NOLOCK) ON D.Source_IND = E.Source_IND 
@@ -50,56 +68,76 @@ BEGIN
 	LEFT JOIN WORKFLOW_MGMT_QUEUE G WITH (NOLOCK) ON A.QueueID = G.QUEUEID AND G.SRC = 'NAME'
 	LEFT JOIN WORKFLOW_MGMT_USERS H WITH (NOLOCK) ON G.QUEUEID = H.QUEUEID 
 	LEFT JOIN CTE_Blacklist I ON I.uid = A.uid
-	WHERE A.STATUS <> '3'
+	WHERE A.STATUS <> '3' -- 排除已結案案件
+	-- 處理人條件：未指定時抓無人處理的案件，有指定時抓對應處理人
 	AND ((@HANDLEDBY = '' AND ISNULL(A.HandledBy,'') = '')
 		OR (@HANDLEDBY <> '' AND A.HandledBy = @HANDLEDBY)
 		)
+	-- 處理人角色等級條件
 	AND (@HANDLEDBYROLE = 0
 		OR (@HANDLEDBYROLE <> 0 AND @HANDLEDBYROLE = A.Role)
 		)
+	-- 權限判斷：只能查同角色或下級角色的案件 (A.ROLE <= @ROLE)
 	AND ((A.ROLE = @ROLE AND A.ROLE = H.ROLE AND H.USERID = @USERID) 
 		OR (A.ROLE <= @ROLE AND H.ROLE = @ROLE AND H.USERID = @USERID)
 		)
+	-- 狀態篩選
 	AND (@STATUS = '' 
 		OR (@STATUS <> '' AND A.Status = @STATUS)
 		)
+	-- 建立日期區間篩選
 	AND ((@TRAN_DATEFR = '' AND @TRAN_DATETO = '') 
 		OR (@TRAN_DATEFR <> '' AND @TRAN_DATETO <> '' AND Created_Date BETWEEN @TRAN_DATEFR AND @TRAN_DATETO)
 		)
+	-- 隊列權限篩選：未指定隊列則查該使用者有權限的所有有效隊列
 	AND ((@QUEUEID = 0 AND A.QUEUEID IN (SELECT H.QUEUEID WHERE G.DEL_FLAG = 'N' AND H.USERID = @USERID))
 		OR (@QUEUEID <> 0 AND A.QUEUEID = @QUEUEID)
 		)
+	-- 審核動作篩選
 	AND (@ACTION = 0
 		OR (@ACTION <> 0 AND A.ACTION = @ACTION)
 		)
+	-- 參考編號模糊比對
 	AND (@REFNO = '' 
 		OR (@REFNO <> '' AND D.REFNO LIKE '%' + @REFNO + '%')
 		)
+	-- 管道來源篩選
 	AND (@Channel = '' 
 		OR (@Channel <> '' AND E.Source_IND = @Channel)
 		)
+	-- 客戶名稱模糊查詢 (指定繁體中文筆畫排序定序)
 	AND (@CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS = '' 
 		OR (@CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS <> '' AND D.new_acct_name LIKE '%' + @CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS + '%')
 		)
+	-- 隊列名稱模糊查詢
 	AND (@QueueName = '' 
 		OR (@QueueName <> '' AND G.QUEUENAME LIKE '%' + @QueueName + '%')
 		)
 	ORDER BY ROLE DESC, Created_Date DESC, REFNO option(recompile)
 END  
-ELSE IF @GRIDTYPE = 'B' /*Personal Queue gridview*/
+
+/* =========================================================================
+   情境 B: 個人待辦隊列 (Personal Queue Gridview)
+   - 排除已結案資料 (STATUS <> '3')
+   - 角色權限限制較嚴謹：通常查自身角色或前一層級 (@ROLE - 1) 的案件
+   ========================================================================= */
+ELSE IF @GRIDTYPE = 'B'
 BEGIN
 	;WITH CTE_Blacklist AS (
 		SELECT uid FROM dbo.NMCHK_ResultHistory WITH (NOLOCK) WHERE NamePropertyBitCode & 1 = 1 GROUP BY uid
 	)
-	SELECT DISTINCT A.UID, A.Name_Key, D.new_acct_name, D.user_brnch_nbr, Created_Date, Created_UserId, 
-	Last_Upd_UserId, HandledBy, Action,	A.Role, G.QUEUENAME, HOLDBY, A.QUEUEID, A.Remark, LstUpdate_Remark, D.Source_IND, D.Channel, D.Ori_REFNO, D.REFNO, 
-	(SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM dbo.UserAccounts WHERE USERID = HandledBy AND Deleted = 0) HandledBy_UserName,	
-	CASE WHEN @CultureName = 'zh-TW' THEN F.STATUS_DESC_zh_TW ELSE STATUS_DESC END AS Status, 
-	(SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE A.ROLE = ID) ROLE_DESC, 
-	(SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM dbo.UserAccounts WHERE USERID = LstUpdate_Remark AND Deleted = 0) LstUpdate_Remark_UserName,
-	(SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE ID = (ISNULL(A.LstUpdate_Role,0))) PREVROLE_DESC, 
-	CASE WHEN @CultureName = 'zh-TW' THEN E.SOURCE_DESC_zh_TW ELSE E.SOURCE_DESC END AS SOURCE_DESC, (CASE WHEN I.uid IS NOT NULL THEN 'Y' ELSE 'N' END) AS 'BLACKLIST',
-	A.ExtendedReviewDate
+	SELECT DISTINCT 
+		A.UID, A.Name_Key, D.new_acct_name, D.user_brnch_nbr, Created_Date, Created_UserId, 
+		Last_Upd_UserId, HandledBy, Action, A.Role, G.QUEUENAME, HOLDBY, A.QUEUEID, A.Remark, 
+		LstUpdate_Remark, D.Source_IND, D.Channel, D.Ori_REFNO, D.REFNO, 
+		(SELECT ISNULL(FirstName,'') + ' ' + ISNULL(LastName,'') FROM dbo.UserAccounts WHERE USERID = HandledBy AND Deleted = 0) HandledBy_UserName,	
+		CASE WHEN @CultureName = 'zh-TW' THEN F.STATUS_DESC_zh_TW ELSE STATUS_DESC END AS Status, 
+		(SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE A.ROLE = ID) ROLE_DESC, 
+		(SELECT ISNULL(FirstName,'') + ' ' + ISNULL(LastName,'') FROM dbo.UserAccounts WHERE USERID = LstUpdate_Remark AND Deleted = 0) LstUpdate_Remark_UserName,
+		(SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE ID = (ISNULL(A.LstUpdate_Role,0))) PREVROLE_DESC, 
+		CASE WHEN @CultureName = 'zh-TW' THEN E.SOURCE_DESC_zh_TW ELSE E.SOURCE_DESC END AS SOURCE_DESC, 
+		(CASE WHEN I.uid IS NOT NULL THEN 'Y' ELSE 'N' END) AS 'BLACKLIST',
+		A.ExtendedReviewDate
 	FROM dbo.NMCHK_Review_Main A WITH (NOLOCK) 
 	JOIN NMCHK_CustInfo D WITH (NOLOCK) ON A.uid = D.uid AND A.name_key = D.new_acct_key
 	LEFT JOIN dbo.NMCHK_SOURCE_DIM E WITH (NOLOCK) ON D.Source_IND = E.Source_IND 
@@ -108,9 +146,13 @@ BEGIN
 	LEFT JOIN WORKFLOW_MGMT_USERS H WITH (NOLOCK) ON G.QUEUEID = H.QUEUEID 
 	LEFT JOIN CTE_Blacklist I ON I.uid = A.uid
 	WHERE STATUS <> '3'
+	-- 處理人條件 (空值代表不限制處理人)
 	AND (@HANDLEDBY = ''
 		OR (@HANDLEDBY <> '' AND A.HandledBy = @HANDLEDBY)
 		)
+	-- 個人待辦角色判斷：
+	-- 若角色為 3 (最高階審核)，只看角色 3 的案件
+	-- 若非角色 3，可看同角色 (A.ROLE = @ROLE) 或前一關角色 (A.ROLE = @ROLE - 1)
 	AND ((@ROLE = 3 AND A.ROLE = @ROLE AND A.ROLE = H.ROLE AND H.USERID = @USERID)
 		OR (@ROLE <> 3 AND @ROLE <> 0
 			AND ((A.ROLE = @ROLE AND A.ROLE = H.ROLE AND H.USERID = @USERID)
@@ -118,9 +160,6 @@ BEGIN
 				)
 			)
 		)
-	--AND (@STATUS = '' 
-	--	OR (@STATUS <> '' AND A.Status = @STATUS)
-	--	)
 	AND ((@TRAN_DATEFR = '' AND @TRAN_DATETO = '') 
 		OR (@TRAN_DATEFR <> '' AND @TRAN_DATETO <> '' AND Created_Date BETWEEN @TRAN_DATEFR AND @TRAN_DATETO)
 		)
@@ -144,8 +183,16 @@ BEGIN
 		)
 	ORDER BY Created_Date DESC, REFNO option(recompile)
 END 
-ELSE IF @GRIDTYPE = 'C' /*History Screen gridview*/
+
+/* =========================================================================
+   情境 C: 歷史審核紀錄清單 (History Screen Gridview)
+   - 包含已結案與未結案的歷史案件
+   - 透過 NMCHK_GetQueue 抓取該人員歷史可檢視的 Queue 清單
+   - 透過 NMCHK_Review_Diagram 比對是否曾由 @HANDLEDBY 處理過
+   ========================================================================= */
+ELSE IF @GRIDTYPE = 'C'
 BEGIN
+	-- 建立暫存表存放該使用者有權限查閱的歷史隊列
 	IF OBJECT_ID('tempdb..#tempQueue') IS NOT NULL
 		DROP TABLE #tempQueue
 
@@ -157,32 +204,39 @@ BEGIN
 	;WITH CTE_Blacklist AS (
 		SELECT uid FROM dbo.NMCHK_ResultHistory WITH (NOLOCK) WHERE NamePropertyBitCode & 1 = 1 GROUP BY uid
 	)
-	SELECT DISTINCT A.UID, A.Name_Key, D.new_acct_name, D.user_brnch_nbr, Created_Date, Created_UserId, 
-	Last_Upd_UserId, HandledBy, Action,	A.Role, G.QUEUENAME, HOLDBY, A.QUEUEID, A.Remark, LstUpdate_Remark, D.Source_IND, D.Channel, D.Ori_REFNO, D.REFNO, 
-	(SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM UserAccounts WHERE USERID = HandledBy AND Deleted = 0) HandledBy_UserName, 
-	CASE WHEN @CultureName = 'zh-TW' THEN F.STATUS_DESC_zh_TW ELSE STATUS_DESC END AS Status, 
-	(SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE A.ROLE = ID) ROLE_DESC, 
-	(SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM UserAccounts WHERE USERID = LstUpdate_Remark AND Deleted = 0) LstUpdate_Remark_UserName,
-	(SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE ID = (ISNULL(A.LstUpdate_Role,0))) PREVROLE_DESC, 
-	CASE WHEN @CultureName = 'zh-TW' THEN E.SOURCE_DESC_zh_TW ELSE E.SOURCE_DESC END AS SOURCE_DESC, (CASE WHEN H.uid IS NOT NULL THEN 'Y' ELSE 'N' END) AS 'BLACKLIST',
-	A.ExtendedReviewDate
+	SELECT DISTINCT 
+		A.UID, A.Name_Key, D.new_acct_name, D.user_brnch_nbr, Created_Date, Created_UserId, 
+		Last_Upd_UserId, HandledBy, Action, A.Role, G.QUEUENAME, HOLDBY, A.QUEUEID, A.Remark, 
+		LstUpdate_Remark, D.Source_IND, D.Channel, D.Ori_REFNO, D.REFNO, 
+		(SELECT ISNULL(FirstName,'') + ' ' + ISNULL(LastName,'') FROM UserAccounts WHERE USERID = HandledBy AND Deleted = 0) HandledBy_UserName, 
+		CASE WHEN @CultureName = 'zh-TW' THEN F.STATUS_DESC_zh_TW ELSE STATUS_DESC END AS Status, 
+		(SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE A.ROLE = ID) ROLE_DESC, 
+		(SELECT ISNULL(FirstName,'') + ' ' + ISNULL(LastName,'') FROM UserAccounts WHERE USERID = LstUpdate_Remark AND Deleted = 0) LstUpdate_Remark_UserName,
+		(SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE ID = (ISNULL(A.LstUpdate_Role,0))) PREVROLE_DESC, 
+		CASE WHEN @CultureName = 'zh-TW' THEN E.SOURCE_DESC_zh_TW ELSE E.SOURCE_DESC END AS SOURCE_DESC, 
+		(CASE WHEN H.uid IS NOT NULL THEN 'Y' ELSE 'N' END) AS 'BLACKLIST',
+		A.ExtendedReviewDate
 	FROM dbo.NMCHK_Review_Main A WITH (NOLOCK) 
 	JOIN NMCHK_CustInfo D WITH (NOLOCK) ON A.uid = D.uid AND A.name_key = D.new_acct_key
 	LEFT JOIN dbo.NMCHK_SOURCE_DIM E WITH (NOLOCK) ON D.Source_IND = E.Source_IND 
 	LEFT JOIN WORKFLOW_MGMT_STATUS F WITH (NOLOCK) ON A.STATUS = F.ID
 	LEFT JOIN WORKFLOW_MGMT_QUEUE G WITH (NOLOCK) ON A.QueueID = G.QUEUEID AND G.SRC = 'NAME'
 	LEFT JOIN CTE_Blacklist H ON H.uid = A.uid
+	-- 若有指定處理人，則檢查流程軌跡表 (NMCHK_Review_Diagram) 是否曾由此人審核過
 	WHERE (@HANDLEDBY = ''
 		OR (@HANDLEDBY <> '' AND EXISTS(SELECT 1 FROM dbo.NMCHK_Review_Diagram X WITH (NOLOCK)
 									WHERE X.NAME_KEY = A.NAME_KEY AND A.UID = X.UID and X.HandledBy = @HANDLEDBY AND X.ROLE = @ROLE)
 			)
 		)
+	-- 狀態篩選 (歷史頁面不排除 STATUS = 3)
 	AND (@STATUS = '' 
 		OR (@STATUS <> '' AND A.Status = @STATUS)
 		)
+	-- 建立日期區間篩選
 	AND ((@TRAN_DATEFR = '' AND @TRAN_DATETO = '') 
 		OR (@TRAN_DATEFR <> '' AND @TRAN_DATETO <> '' AND Created_Date BETWEEN @TRAN_DATEFR AND @TRAN_DATETO)
 		)
+	-- 依據剛才取得的 #tempQueue 進行隊列權限過濾
 	AND ((@QUEUEID = 0 AND A.QUEUEID IN (SELECT QUEUEID FROM #tempQueue))
 		OR (@QUEUEID <> 0 AND A.QUEUEID = @QUEUEID)
 		)
@@ -206,5 +260,10 @@ END
 
 
 
-幫我註解一下
-我想知道這支sp 再幹嘛
+
+
+這是一隻在 黑名單/姓名檢核（Name Checking, NMCHK）系統 中，負責多條件動態查詢與權限過濾案件清單的核心 Stored Procedure。
+它根據前端頁面傳入的 ⁠@GRIDTYPE⁠ 參數，區分三種檢視模式：
+ ⁠A⁠ (Main Queue / 公用待辦清單)：查詢目前所有未結案案件（包含指派與未指派），供主管或具權限人員分派與檢視。
+ ⁠B⁠ (Personal Queue / 個人待辦清單)：查詢指派給特定人員或該人員角色層級（當前/前一層）可審核的未結案案件。
+ ⁠C⁠ (History Screen / 歷史查詢清單)：查詢已審核/結案的歷史紀錄（包含已結案 ⁠STATUS = '3'⁠），並會比對軌跡表（⁠NMCHK_Review_Diagram⁠）確認該人員是否曾經審核過。
