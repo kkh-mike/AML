@@ -1,6 +1,36 @@
+從 OFAC_SPEC（GROUPID = 5）反查哪些人是「死人」，直接透過 remark（即 EntityId）關聯回原始實體表 BSADB.dbo.DJ_Entity，篩選 Deceased = 1 即可：
+SELECT 
+    O.ent_num,
+    O.spec_name,
+    O.remark AS EntityId,
+    O.updated_date,
+    O.DOB,
+    E.Deceased,
+    E.FullName AS DJ_Entity_FullName
+FROM BSADBJP..OFAC_SPEC O
+JOIN BSADB.dbo.DJ_Entity E 
+  ON O.remark = CAST(E.EntityId AS VARCHAR(100))
+WHERE O.GROUPID = 5 
+  AND O.DInd = 'N'
+  AND E.Deceased = 1;
 
-那直接反推
+補充：如果想連同死亡日期一起抓出來
+若想確認 Dow Jones 登記的具體死亡日期，可以再串接 DJ_DateTypeInfo：
+SELECT 
+    O.ent_num,
+    O.spec_name,
+    O.remark AS EntityId,
+    O.updated_date,
+    E.Deceased,
+    D.InfoYear + '-' + ISNULL(D.InfoMonth, '00') + '-' + ISNULL(D.InfoDay, '00') AS DeceasedDate
+FROM BSADBJP..OFAC_SPEC O
+JOIN BSADB.dbo.DJ_Entity E 
+  ON O.remark = CAST(E.EntityId AS VARCHAR(100))
+LEFT JOIN BSADB.dbo.DJ_DateTypeInfo D 
+  ON E.EntityId = D.EntityId 
+ AND D.DateType LIKE '%Deceased%' 
+ AND D.Deleted = 0
+WHERE O.GROUPID = 5 
+  AND O.DInd = 'N'
+  AND E.Deceased = 1;
 
-怎麼從這裡找到死人
-  SELECT * FROM BSADBJP..OFAC_SPEC 
-WHERE GROUPID = 5
