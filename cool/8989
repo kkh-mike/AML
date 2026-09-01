@@ -1,22 +1,32 @@
-從搜尋結果來看，這 3 支 SP 都只是查詢用的（不是維護 OFAC_SDN 母表的程式）。這表示比對用的黑名單資料庫可能是透過 VIEW（檢視表） 串接，或是比對引擎直接查詢了不同的來源。
-請依序執行以下 3 個步驟來鎖定比對來源：
-步驟 1：確認 OFAC_SDN 到底是一張實體表還是 View
-在 SSMS 執行以下語句：
-SELECT type_desc, name 
-FROM sys.objects 
-WHERE name IN ('OFAC_SDN', 'OFAC_SPEC', 'OFAC_ALT');
+這張截圖把兩個關鍵設定完全攤開了：
+關鍵發現 1：lowrisklistgroups 設定異常（NamePropertyBitCode 設為 0）
+看第二張結果表格中的第 5 筆（GROUPID = 5）：
+ * GROUPID = 2 的 NamePropertyBitCode = 1
+ * GROUPID = 3 的 NamePropertyBitCode = 1
+ * GROUPID = 5 的 NamePropertyBitCode = 0
+ * GROUPID = 7 的 NamePropertyBitCode = 1
+ * GROUPID = 8 的 NamePropertyBitCode = 1
+ * GROUPID = 10 的 NamePropertyBitCode = 1
+問題所在：
+比對引擎在執行名單過濾時，通常會做位元運算檢核（例如 NamePropertyBitCode & 1 > 0 或比對設定檔）。GROUPID = 5 的設定值為 0，代表這個名單群組在參數設定上被關閉或判定為無效屬性，導致比對引擎直接忽略此群組！
+關鍵發現 2：OFAC_SDN 是一張實體表（USER_TABLE）
+第一張結果顯示 OFAC_SDN 是實體表。
+之前查詢 SELECT TOP 10 * FROM OFAC_SDN WHERE sdn_type = 'SPEC' 結果為 0 筆，這代表資料庫內各個自訂名單（SPEC）是獨立存在 OFAC_SPEC，而比對引擎在掃描 SPEC 時是直接讀取 OFAC_SPEC 並參考 lowrisklistgroups 的參數。
+建議處理與驗證步驟
+步驟 1：修正 lowrisklistgroups 中的參數設定
+將 GROUPID = 5 的 NamePropertyBitCode 更新為 1：
+UPDATE BSADBJP.dbo.lowrisklistgroups
+SET NamePropertyBitCode = 1
+WHERE GROUPID = 5;
 
- * 如果 OFAC_SDN 的 type_desc 是 VIEW，請接著執行：
-   sp_helptext 'OFAC_SDN';
-
-   查看 View 定義裡是不是只 UNION 了其他 GROUPID，而漏掉了 GROUPID = 5。
-步驟 2：直接查看比對引擎核心 SP NMCHK_GetDetectionResult
-剛才搜尋到的第 3 個 SP NMCHK_GetDetectionResult 就是產出比對結果的關鍵。請直接查看它的內容：
+步驟 2：確認比對 SP 的過濾邏輯
+查看比對 SP NMCHK_GetDetectionResult，確認它是否有關聯 lowrisklistgroups.NamePropertyBitCode：
 sp_helptext 'NMCHK_GetDetectionResult';
 
- * 在內容中搜尋 FROM、WHERE、GROUPID 或 OFAC_SPEC，看看它比對黑名單時到底關聯了哪幾張表與哪些過濾條件。
-步驟 3：確認比對引擎是否有對應的黑名單設定檔
-有些系統會有名單群組啟用開關或權重設定表，確認是否有開啟 Japan 名單的比對：
-SELECT * FROM BSADBJP.dbo.lowrisklistgroups;
+步驟 3：重新執行姓名檢核批次
+參數更新為 1 後，重新執行該筆客戶的姓名檢核比對作業，再查詢 NMCHK_ResultHistory：
+SELECT * 
+FROM BSADBJP.dbo.NMCHK_ResultHistory 
+WHERE uid = '202694';
 
-(確認第 1 步查到的 GROUPID = 5 那筆，裡面的 LowRiskListGroup 或相關開關欄位數值是否與其他正常命中的群組一致)
+此時 GROUPID = 5（sdn_type = 'SPEC', sdn_grp_num = 5）的名單就會被正常命中。
