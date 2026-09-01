@@ -1,36 +1,24 @@
-這支 SP NMCHK_GetRCMatchesByKey 是前端介面/查詢報表用來顯示檢核結果的，而從這支 SP 的邏輯可以清楚看出為什麼畫面顯示不出 GROUPID = 5：
-1. 核心原因解析
-在 SP 中，所有黑名單群組描述（GROUPDESCR）的對應規則如下：
-LEFT JOIN dbo.lowrisklistgroups C WITH(NOLOCK) 
-  ON A.sdn_type IN ('SPEC', 'SPEC_CN') AND A.sdn_grp_num = C.GROUPID
+這張截圖非常關鍵，真相已經完全浮現了：
+結果分析
+ * OFAC_SPEC 裡面確實有 72,086 筆 GROUPID = 5 的名單（第三個查詢：資料有正確寫入目標表）。
+ * lowrisklistgroups 也有設定 GROUPID = 5（第一個查詢：設定存在）。
+ * 但是 NMCHK_ResultHistory 查出來是 0 筆（第二個查詢：完全沒有任何歷史案件命中過 sdn_grp_num = 5）。
+這代表：名單同步 SP 沒有問題，問題出在「執行姓名檢核的比對引擎 / 批次 SP」根本沒有將 GROUPID = 5 納入掃描範圍，或者比對來源表沒有更新到！
+請依序執行以下 2 個排查動作：
+動作 1：確認比對引擎所使用的底層黑名單來源表
+通常系統在做比對時，不是直接掃 OFAC_SPEC，而是會先經過一段 ETL 轉入比對用的黑名單總表（例如 OFAC_SDN、NMCHK_BlackList 或 OFAC_ALL）。
+請執行以下查詢，確認是否有資料：
+-- 檢查 OFAC_SDN 或類似的比對母表是否有包含 GROUPID = 5 的資料
+SELECT TOP 10 * 
+FROM BSADBJP..OFAC_SDN 
+WHERE sdn_type = 'SPEC' AND sdn_grp_num = 5;
 
- * 凡是來自 OFAC_SPEC 的自訂名單（包括日本名單 GROUPID = 5），其比對結果的：
-   * sdn_type 必須是 'SPEC' 或 'SPEC_CN'
-   * sdn_grp_num 必須等於 5（即 GROUPID）
- * 回看你上一張 NMCHK_ResultHistory 的查詢結果：
-   * 畫面裡所有的 sdn_grp_num 全都是 0。
-   * sdn_type 全部是 UN、EU、UKHMT、OFAC，完全沒有任何一筆 sdn_type = 'SPEC' 且 sdn_grp_num = 5。
-這代表：在「執行姓名檢核比對」的那支比對 Engine / SP 產出時，壓根就沒有比對到 OFAC_SPEC（GROUPID = 5）這張表。
-2. 逐步檢查排查步驟
-請依序執行以下 3 個步驟來確認是在哪一關斷掉的：
-步驟 1：確認日本名單是否有在 lowrisklistgroups 設定
-SP 串接群組名稱依賴 lowrisklistgroups，先確認是否有設定 GROUPID = 5：
-SELECT * 
-FROM BSADBJP.dbo.lowrisklistgroups 
-WHERE GROUPID = 5;
+(如果找不到 OFAC_SDN，請找找看資料庫裡是否有 OFAC_ALT、NM_BLACKLIST 這類名字的表)
+動作 2：找出「產出 NMCHK_ResultHistory」的那支比對 Stored Procedure
+請搜尋資料庫中寫入 NMCHK_ResultHistory 的 SP 名稱：
+SELECT OBJECT_NAME(id) AS SP_Name
+FROM syscomments
+WHERE text LIKE '%INSERT INTO%NMCHK_ResultHistory%'
+GROUP BY OBJECT_NAME(id);
 
- * 如果查無資料，前端即使有結果也會因為無法解析名稱或型態而有異常。
-步驟 2：直接查歷史表看有沒有任何案件曾經命中過 GROUPID = 5
-SELECT TOP 20 * 
-FROM BSADBJP.dbo.NMCHK_ResultHistory 
-WHERE sdn_type IN ('SPEC', 'SPEC_CN') 
-  AND sdn_grp_num = 5;
-
- * 如果完全為 0 筆：代表你們的「姓名比對批次程式（Name Matching Job/SP）」根本沒有把 OFAC_SPEC WHERE GROUPID = 5 納入掃描來源，或者比對時漏掉了這個群組。
-步驟 3：排查實際執行比對的底層母表（比對來源）
-通常系統在做姓名檢核前，會有一支 SP 將 OFAC_SPEC 轉入比對用的黑名單主表（例如 NMCHK_BlackList 或 OFAC_SDN 等）。請確認該底層表是否有包含 GROUPID = 5 的資料：
--- 範例：確認比對用的黑名單暫存或索引表內是否有日本名單
-SELECT COUNT(*) 
-FROM BSADBJP..OFAC_SPEC 
-WHERE GROUPID = 5 AND DInd = 'N';
-
+把這兩個查詢的結果貼上來，我們就能直接看是哪支 SP 少抓了 GROUPID = 5，或是哪個比對前置作業（ETL）沒跑！
