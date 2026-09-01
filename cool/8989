@@ -1,9 +1,31 @@
-SELECT 
-    A.EntNum, 
-    A.SdnName, 
-    A.NamePropertyBitCode, 
-    B.SanctionListReference
+抓到關鍵了！這張圖非常清楚：
+關鍵原因：名字根本不同，且你找的名字可能是 Alias
+ * EntityId 1780520 在日本名單中的名字是：
+   * 第 18 筆：EntNum = 1780520，它的 SdnName 是 Sai'id, Mahmoud Ibraheem（並不是 Sai'id, Shaykh）。
+ * 為什麼你在找 Sai'id, Shaykh？
+   * Sai'id, Shaykh 很有可能是這個人的 別名 (AKA / Low Quality Alias) 或者是其他 EntityId。
+   * 請在 SSMS 執行以下語句，看看 Sai'id, Shaykh 是不是屬於這個 EntityId 的別名（NamePropertyBitCode 通常不是 1 或 5/7）：
+SELECT EntNum, SdnName, NamePropertyBitCode
+FROM BSADB.dbo.DJ_List_Data_A
+WHERE EntNum = 1780520;
+
+SP 的行為邏輯：
+ * SP 第一段寫入暫存表的邏輯：
+   INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
+SELECT A.EntNum, A.SdnName, MAX(A.UpdatedDate)
 FROM BSADB.dbo.DJ_List_Data_A A
 JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
-WHERE (A.SdnName LIKE '%Sai%id%' OR A.SdnName LIKE '%Shaykh%')
-  AND B.SanctionListReference LIKE '%Japanese Finance%';
+WHERE A.NamePropertyBitCode & 1 > 0
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+GROUP BY A.EntNum, A.SdnName;
+
+   * 因為第 18 筆 Sai'id, Mahmoud Ibraheem 的 NamePropertyBitCode 是 7（7 \ \& \ 1 = 1 > 0），所以這筆其實已經成功進到你的目標表 OFAC_SPEC 了！
+   * 但它進去的名字是 Sai'id, Mahmoud Ibraheem，而不是 Sai'id, Shaykh。
+ * 驗證它是否已經進目標表：
+   SELECT * FROM BSADBJP..OFAC_SPEC 
+WHERE GROUPID = 5 AND remark = '1780520';
+
+   執行這段你會看到這筆資料已經在裡面。
+總結與決策
+ * 系統有正常抓到這個人，只是他在日本制裁名單中的主要姓名登記為 Sai'id, Mahmoud Ibraheem。
+ * 如果你們的業務需求是 「所有的別名 (AKA) 也都要各自獨立新增一筆進 OFAC_SPEC」，那就必須把 A.NamePropertyBitCode & 1 > 0 的過濾條件拿掉或放寬；如果需求是 「只收錄主要名稱 (Primary Name)」，那現在 SP 的運作與資料結果就是完全正確的。
