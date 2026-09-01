@@ -1,24 +1,28 @@
-這張截圖非常關鍵，真相已經完全浮現了：
-結果分析
- * OFAC_SPEC 裡面確實有 72,086 筆 GROUPID = 5 的名單（第三個查詢：資料有正確寫入目標表）。
- * lowrisklistgroups 也有設定 GROUPID = 5（第一個查詢：設定存在）。
- * 但是 NMCHK_ResultHistory 查出來是 0 筆（第二個查詢：完全沒有任何歷史案件命中過 sdn_grp_num = 5）。
-這代表：名單同步 SP 沒有問題，問題出在「執行姓名檢核的比對引擎 / 批次 SP」根本沒有將 GROUPID = 5 納入掃描範圍，或者比對來源表沒有更新到！
-請依序執行以下 2 個排查動作：
-動作 1：確認比對引擎所使用的底層黑名單來源表
-通常系統在做比對時，不是直接掃 OFAC_SPEC，而是會先經過一段 ETL 轉入比對用的黑名單總表（例如 OFAC_SDN、NMCHK_BlackList 或 OFAC_ALL）。
-請執行以下查詢，確認是否有資料：
--- 檢查 OFAC_SDN 或類似的比對母表是否有包含 GROUPID = 5 的資料
-SELECT TOP 10 * 
-FROM BSADBJP..OFAC_SDN 
-WHERE sdn_type = 'SPEC' AND sdn_grp_num = 5;
-
-(如果找不到 OFAC_SDN，請找找看資料庫裡是否有 OFAC_ALT、NM_BLACKLIST 這類名字的表)
-動作 2：找出「產出 NMCHK_ResultHistory」的那支比對 Stored Procedure
-請搜尋資料庫中寫入 NMCHK_ResultHistory 的 SP 名稱：
+從這張截圖可以確認比對失敗的根因：
+OFAC_SDN 裡面完全沒有 sdn_type = 'SPEC' 的資料（結果為 0 筆）。
+原因解析
+ * 比對架構運作方式：
+   * 系統的姓名檢核引擎（Matching Engine）實際掃描的底層黑名單來源是 OFAC_SDN（以及相關的 OFAC_ALT 等比對母表）。
+   * 你前面調整的 SP 雖然已經將資料成功寫入了 OFAC_SPEC（有 72,086 筆），但是 OFAC_SPEC 的資料還沒有被同步/轉入 OFAC_SDN。
+   * 比對母表內沒有這些資料，檢核引擎自然永遠比對不到 GROUPID = 5。
+解決與排查步驟
+步驟 1：找出將 OFAC_SPEC 轉入 OFAC_SDN 的同步 SP
+通常系統會有一支 SP 或 Batch Job 負責把各群組的 SPEC 資料彙整進 OFAC_SDN。請執行以下語句找出這支 SP：
 SELECT OBJECT_NAME(id) AS SP_Name
 FROM syscomments
-WHERE text LIKE '%INSERT INTO%NMCHK_ResultHistory%'
+WHERE text LIKE '%OFAC_SPEC%'
+  AND text LIKE '%INSERT INTO%OFAC_SDN%'
 GROUP BY OBJECT_NAME(id);
 
-把這兩個查詢的結果貼上來，我們就能直接看是哪支 SP 少抓了 GROUPID = 5，或是哪個比對前置作業（ETL）沒跑！
+如果查無結果，可以擴大搜尋：
+SELECT OBJECT_NAME(id) AS SP_Name
+FROM syscomments
+WHERE text LIKE '%OFAC_SPEC%'
+  AND text LIKE '%OFAC_SDN%'
+GROUP BY OBJECT_NAME(id);
+
+步驟 2：確認日常批次排程（Control-M / SQL Job）
+確認在每日名單更新流程中：
+ * 跑完寫入 OFAC_SPEC 的 SP 之後。
+ * 是否有漏跑「重新載入/建置 OFAC_SDN 黑名單母表」的批次作業。
+只要執行該段彙整同步程式，讓 OFAC_SPEC（GROUPID = 5）的 72,086 筆資料轉入 OFAC_SDN 後，再次執行姓名檢核比對，日本名單就會正常命中。
