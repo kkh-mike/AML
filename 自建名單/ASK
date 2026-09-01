@@ -1,48 +1,31 @@
-WITH PrimaryList AS
-(
-    SELECT A.EntNum
-    FROM BSADB.dbo.DJ_List_Data_A A
-    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
-    WHERE A.NamePropertyBitCode & 1 > 0
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-    GROUP BY A.EntNum
-),
--- 2. 篩選預計會透過死亡名單寫入的資料
-ExpectedDeceasedList AS
-(
-    SELECT 
-        A.EntityId, 
-        A.FullName AS SdnName, 
-        MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS ExpectedUpdatedDate
-    FROM BSADB.dbo.DJ_Entity A
-    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-    WHERE A.Deceased = 1
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-      AND NOT EXISTS (SELECT 1 FROM PrimaryList P WHERE P.EntNum = A.EntityId)
-    GROUP BY A.EntityId, A.FullName
-)
--- 3. 比對目標表現況，預覽即將發生的行為
+這段 CTE 卡住的主因是 NOT EXISTS 與 GROUP BY 導致大量關聯表進行全表掃描。
+改用最精簡的直接查詢，只抓 死亡名單（Deceased = 1） 且屬於 Japanese Finance 的資料：
 SELECT 
-    D.EntityId,
-    D.SdnName,
-    D.ExpectedUpdatedDate,
-    T.ent_num AS Current_ent_num,
-    T.updated_date AS Current_updated_date,
-    T.DInd AS Current_DInd,
-    CASE 
-        WHEN T.ent_num IS NULL THEN '即將 INSERT (全新名單)'
-        WHEN T.DInd = 'Y' THEN '即將 UPDATE (由刪除狀態恢復為有效 N)'
-        WHEN T.updated_date <> D.ExpectedUpdatedDate THEN '即將 UPDATE (更新日期或明細)'
-        ELSE '資料一致 (不需異動)'
-    END AS ExpectedAction
-FROM ExpectedDeceasedList D
-LEFT JOIN BSADBJP..OFAC_SPEC T 
-    ON T.GROUPID = 5 
-   AND T.spec_name = D.SdnName 
-   AND T.remark = CAST(D.EntityId AS VARCHAR(100));
+    A.EntityId,
+    A.FullName AS SdnName,
+    CONVERT(VARCHAR, A.UpdatedDate_UTC, 112) AS UpdatedDate
+FROM BSADB.dbo.DJ_Entity A WITH (NOLOCK)
+JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) 
+    ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%';
 
+同步後確認是否寫入
+執行完同步後，直接用 IN 比對目標表，秒查寫入狀態：
+SELECT 
+    ent_num,
+    spec_name,
+    remark AS EntityId,
+    updated_date,
+    DInd
+FROM BSADBJP..OFAC_SPEC WITH (NOLOCK)
+WHERE GROUPID = 5
+  AND remark IN (
+      SELECT CAST(A.EntityId AS VARCHAR(100))
+      FROM BSADB.dbo.DJ_Entity A WITH (NOLOCK)
+      JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) 
+          ON A.EntityId = B.EntityId
+      WHERE A.Deceased = 1
+        AND B.SanctionListReference LIKE '%Japanese Finance%'
+  );
 
-
-我這個就轉好久
-
-可以不要寫這ˇ麼複雜的?
