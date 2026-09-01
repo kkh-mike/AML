@@ -1,42 +1,31 @@
-lowrisklistgroups 的 NamePropertyBitCode 改成 1 之後，接下來需要依序完成以下 3 個動作，才能讓前端頁面與歷史表正常中獎：
-步驟 1：重新同步/重跑 Japan 名單 SP
-你一開始修改的 SP 會將名單寫入 OFAC_SPEC。請確認 OFAC_SPEC 裡面該筆資料或相關欄位已經是最新狀態。
-步驟 2：重新執行該筆客戶的「姓名檢核比對作業」
-修改參數只會影響「之後新跑的比對」。舊的 NMCHK_ResultHistory 裡面的 NamePropertyBitCode 還是舊值（0 或未命中），因此必須將該筆客戶重新送檢（或手動觸發比對 Batch/SP）。
-如果只是要快速驗證該筆歷史案件在畫面上的顯示效果，可以直接手動更新歷史紀錄測試：
-UPDATE BSADBJP.dbo.NMCHK_ResultHistory
-SET NamePropertyBitCode = 1
-WHERE uid = '202698'; -- 換成你的測試 UID
+執行 NMCHK_GetResultFilter 查不出任何資料（結果為空），代表案件被這支 SP 內的權限、Queue 或案件狀態條件擋下來了。
+請在 SSMS 執行以下語句，直接拆解是哪一個條件在卡：
+DECLARE @UserID NVARCHAR(60) = '1061592';
+DECLARE @Role INT = 3;
 
-步驟 3：驗證查詢結果
-1. 驗證歷史比對表是否判定為黑名單：
-SELECT 
-    uid, 
-    sdn_name, 
-    sdn_type, 
-    sdn_grp_num, 
-    NamePropertyBitCode,
-    CASE WHEN NamePropertyBitCode & 1 = 1 THEN 'Y (黑名單成立)' ELSE 'N' END AS Blacklist_Check
-FROM BSADBJP.dbo.NMCHK_ResultHistory
-WHERE uid = '202698';
+-- 1. 查看系統中最新的前 5 筆案件狀態與所屬 Queue
+SELECT TOP 5 
+    A.UID, 
+    A.Name_Key, 
+    A.STATUS, 
+    A.Role AS Case_Role, 
+    A.HandledBy, 
+    A.QUEUEID, 
+    A.Created_Date
+FROM BSADBJP.dbo.NMCHK_Review_Main A WITH (NOLOCK)
+ORDER BY A.Created_Date DESC;
 
-2. 模擬前端 SP 查詢，確認 BLACKLIST 欄位是否變成 'Y'：
-EXEC BSADBJP.dbo.NMCHK_GetResultFilter 
-    @GRIDTYPE = 'A', 
-    @ROLE = 3, 
-    @HANDLEDBY = '', 
-    @HANDLEDBYROLE = 0, 
-    @STATUS = '', 
-    @TRAN_DATEFR = NULL, 
-    @TRAN_DATETO = NULL, 
-    @REFNO = '', 
-    @Name_key = '', 
-    @USERID = '1061592', 
-    @QUEUEID = 0, 
-    @ACTION = 0, 
-    @Channel = '', 
-    @CustName = '', 
-    @QueueName = '', 
-    @CultureName = 'zh-TW';
+-- 2. 檢查此登入帳號（1061592）到底被分配在哪些 Queue 和 Role
+SELECT * 
+FROM BSADBJP.dbo.WORKFLOW_MGMT_USERS WITH (NOLOCK)
+WHERE USERID = @UserID;
 
-執行後查看回傳結果集，該筆案件的 BLACKLIST 欄位就會正確顯示為 Y，畫面上也能正常被黑名單條件過濾出來。
+最常導致「空結果」的 3 個卡點對照：
+ * Queue 權限對不上（最常見）：
+   * 案件上的 A.QUEUEID 必須存在於 WORKFLOW_MGMT_USERS 且該 User 有綁定對應的 ROLE。
+   * 如果第 1 個查詢的 QUEUEID 沒有出現在第 2 個查詢的清單裡，SP 就會直接全部濾除。
+ * 案件已經被指派經辦人（HandledBy 不為空）：
+   * @GRIDTYPE = 'A' 是待分派清單（Main Queue），條件要求 HandledBy 必須是空的。如果案件已經被指派（例如已有特定經辦人），它只會出現在 @GRIDTYPE = 'B'（Personal Queue）。
+ * 案件狀態已經結案（STATUS = '3'）：
+   * SP 明確排除了結案狀態（WHERE A.STATUS <> '3'）。
+把上面這兩段查詢的結果貼出來，就能直接抓出是卡在 Queue 指派還是案件狀態。
