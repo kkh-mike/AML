@@ -1,39 +1,21 @@
-Kisoni, Kambale 檢核沒有中，表示這筆死亡名單在比對時被以下 3 道關卡 中的某一道擋下了。
-請依序在 SSMS 執行以下查詢來精確定位卡在哪一關：
-第一關：確認這筆資料是否有成功進到目標表 OFAC_SPEC
-先確認你的資料同步 SP 到底有沒有把 Kisoni, Kambale 寫進日本黑名單表：
-SELECT ent_num, spec_name, remark, GROUPID, DInd, updated_date
-FROM BSADBJP..OFAC_SPEC
-WHERE GROUPID = 5 
-  AND (spec_name LIKE '%Kisoni%' OR spec_name LIKE '%Kambale%');
+這張截圖非常關鍵：
+ * OFAC_SPEC 裡面確實有這筆資料（ent_num = 696816, spec_name = Kisoni, Kambale, remark = 880575, GROUPID = 5, DInd = 'N'）。
+ * 但是送檢 Kisoni, Kambale 時，比對引擎卻完全沒有命中。
+這代表資料已經正確同步進 OFAC_SPEC，但「比對引擎（Detection Process）」在掃描黑名單時漏掉了 OFAC_SPEC 的自訂名單。
+請執行以下 2 個排查動作來找出比對引擎的卡點：
+步驟 1：查看比對引擎核心 SP DBCHK_ProcessDetectionResults
+在 SSMS 執行以下指令查看比對邏輯：
+sp_helptext 'DBCHK_ProcessDetectionResults';
 
- * 如果查無資料：代表你的資料同步 SP 沒抓到他（可能是因為他是用 FullName 寫入，或者是 SanctionListReference 沒有對到）。
- * 如果 DInd = 'Y'：代表他曾被寫入，但被後續邏輯標記為已刪除。
-第二關：確認在原始實體表 DJ_Entity 與 DJ_List_Data_A 中的名稱格式
-檢查他在 Dow Jones 資料庫中的實際名字格式：
--- 查實體全名與死亡狀態
-SELECT EntityId, FullName, Deceased, UpdatedDate_UTC
-FROM BSADB.dbo.DJ_Entity
-WHERE FullName LIKE '%Kisoni%' OR FullName LIKE '%Kambale%';
+重點搜尋以下關鍵字：
+ * 搜尋 OFAC_SPEC：看它有沒有被 UNION 或 JOIN 到比對暫存表。
+ * 搜尋 lowrisklistgroups：看它比對時是否有限制 SpecType、LowRiskListGroup 或 NamePropertyBitCode。
+ * 搜尋 GROUPID：看是否有寫死特定 GROUPID（例如只比對 1, 2，漏掉了 5）。
+步驟 2：確認自訂名單總表 / View 是否有納入 OFAC_SPEC
+請確認資料庫中是否有比對母表（例如 OFAC_SPEC_ALL、OFAC_ALL、GL_SPEC 或 Blacklist_SPEC）：
+SELECT type_desc, name 
+FROM sys.objects 
+WHERE name LIKE '%SPEC%' OR name LIKE '%BLACKLIST%';
 
--- 查黑名單名稱拆解表
-SELECT EntNum, SdnName, NamePropertyBitCode
-FROM BSADB.dbo.DJ_List_Data_A
-WHERE SdnName LIKE '%Kisoni%' OR SdnName LIKE '%Kambale%';
-
- * 重點排查：
-   * 如果 DJ_Entity.FullName 存的是 Kambale Kisoni（名字在前、姓氏在後），而你用 Kisoni, Kambale（逗點格式）送檢，比對演算法的相似度分數（relative_correlation）可能會低於門檻值而直接不記錄。
-第三關：查這次檢核到底有沒有產生任何紀錄（不限群組）
-看看你剛才送檢的這筆案件（取得最新的 uid），它實際上比對到了什麼、分數是多少：
--- 查看最新送檢案件的 UID
-SELECT TOP 5 uid, new_acct_key, new_acct_name, last_updated_date
-FROM BSADBJP.dbo.NMCHK_CustInfo
-ORDER BY last_updated_date DESC;
-
--- 用該 UID 查出所有命中紀錄（不限 sdn_grp_num）
-SELECT uid, sdn_name, sdn_type, sdn_grp_num, relative_correlation, NamePropertyBitCode
-FROM BSADBJP.dbo.NMCHK_ResultHistory
-WHERE uid = (SELECT TOP 1 uid FROM BSADBJP.dbo.NMCHK_CustInfo ORDER BY last_updated_date DESC);
-
- * 如果該 UID 完全沒有任何紀錄：代表比對分數未達門檻（例如門檻為 85 分，而比對算出來低於 85），系統判定無風險而不寫入歷史表。
-請先執行第一關與第二關的 SQL，確認 OFAC_SPEC 裡面這筆資料的實際名稱格式。
+ * 如果有類似 OFAC_SPEC_ALL 或 V_OFAC_SPEC 的 View，請用 sp_helptext 'View名稱' 確認是否有包含 GROUPID = 5。
+把 DBCHK_ProcessDetectionResults 中關於 SPEC 或 OFAC_SPEC 的那段 SQL 貼出來，就能直接抓出比對引擎少抓 GROUPID = 5 的原因！
