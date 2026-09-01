@@ -1,32 +1,5 @@
-這張截圖把兩個關鍵設定完全攤開了：
-關鍵發現 1：lowrisklistgroups 設定異常（NamePropertyBitCode 設為 0）
-看第二張結果表格中的第 5 筆（GROUPID = 5）：
- * GROUPID = 2 的 NamePropertyBitCode = 1
- * GROUPID = 3 的 NamePropertyBitCode = 1
- * GROUPID = 5 的 NamePropertyBitCode = 0
- * GROUPID = 7 的 NamePropertyBitCode = 1
- * GROUPID = 8 的 NamePropertyBitCode = 1
- * GROUPID = 10 的 NamePropertyBitCode = 1
-問題所在：
-比對引擎在執行名單過濾時，通常會做位元運算檢核（例如 NamePropertyBitCode & 1 > 0 或比對設定檔）。GROUPID = 5 的設定值為 0，代表這個名單群組在參數設定上被關閉或判定為無效屬性，導致比對引擎直接忽略此群組！
-關鍵發現 2：OFAC_SDN 是一張實體表（USER_TABLE）
-第一張結果顯示 OFAC_SDN 是實體表。
-之前查詢 SELECT TOP 10 * FROM OFAC_SDN WHERE sdn_type = 'SPEC' 結果為 0 筆，這代表資料庫內各個自訂名單（SPEC）是獨立存在 OFAC_SPEC，而比對引擎在掃描 SPEC 時是直接讀取 OFAC_SPEC 並參考 lowrisklistgroups 的參數。
-建議處理與驗證步驟
-步驟 1：修正 lowrisklistgroups 中的參數設定
-將 GROUPID = 5 的 NamePropertyBitCode 更新為 1：
-UPDATE BSADBJP.dbo.lowrisklistgroups
-SET NamePropertyBitCode = 1
-WHERE GROUPID = 5;
+SELECT * FROM lowrisklistgroups
 
-步驟 2：確認比對 SP 的過濾邏輯
-查看比對 SP NMCHK_GetDetectionResult，確認它是否有關聯 lowrisklistgroups.NamePropertyBitCode：
-sp_helptext 'NMCHK_GetDetectionResult';
+幫我更新 groupid = 5 的 GROUPDESCR
 
-步驟 3：重新執行姓名檢核批次
-參數更新為 1 後，重新執行該筆客戶的姓名檢核比對作業，再查詢 NMCHK_ResultHistory：
-SELECT * 
-FROM BSADBJP.dbo.NMCHK_ResultHistory 
-WHERE uid = '202694';
-
-此時 GROUPID = 5（sdn_type = 'SPEC', sdn_grp_num = 5）的名單就會被正常命中。
+改成 Japanese Finance
