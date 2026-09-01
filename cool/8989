@@ -1,117 +1,33 @@
-既然這筆 Rahmani, Arsalan 的 ent_num (721314) 是有值的，那就完全排除了主鍵為空的問題。
-在主表有值的情況下，系統依然判定「分數低於預設門檻（RC lower than default RC）」，問題就聚焦在名單狀態標記或比對群組設定。請直接執行以下兩段查詢來鎖定原因：
-1. 檢查這筆資料的狀態欄位（是否被標記刪除或未審核）
-Patriot Officer 比對時會強制過濾特定狀態（例如 DInd = 'N' 代表未刪除、EnterFlag 等）。請在 SSMS 執行：
-SELECT 
-    ent_num,
-    spec_name,
-    GROUPID,
-    SOURCE,
-    DInd,        -- 是否有效/未刪除（正常應為 'N'）
-    EnterFlag,   -- 狀態標記（若是 'D' 可能是草稿或刪除）
-    ApprovedBy,  -- 是否已放行審核
-    DelUserID    -- 刪除人員（若有值代表被軟刪除）
-FROM BSADBJP.dbo.OFAC_SPEC
-WHERE spec_name = 'Rahmani, Arsalan' AND GROUPID = 11;
+從你查詢出來的結果可以清楚看到原因：
+這筆 Entity（1780520）的 SanctionListReference 清單中，包含的是：
+ * Companies House (UK) Disqualified Directors
+ * EC 2024/1517 Syria List
+ * French Economy Ministry...
+ * HM Treasury Consolidated List
+ * OFAC - Specially Designated National List
+ * FCDO (UK) Sanctions List...
+ * CSSF (Luxembourg) Sanctions List
+ * SECO (Switzerland) Syria List
+裡面完全沒有 Japanese Finance 相關的名單。
+原因分析
+ * 制裁名單不符：
+   你的 SP 條件寫死限制只抓日本金融制裁：
+   WHERE B.SanctionListReference LIKE '%Japanese Finance%'
 
- * 判斷標準：若 DInd = 'Y' 或 DelUserID IS NOT NULL，比對引擎會直接忽略這筆名單。
-2. 檢查比對模組是否沒有把 GROUPID = 11 算進去
-如果比對設定只看標準名單（例如 GROUPID 1 或 5），GROUPID 11 的名單在計算 RC 分數時會被賦予 0 權重 或直接跳過。
-請執行查詢目前 Name Check 模組啟用的群組設定：
--- 查詢 NMCK 模組目前啟用的 GROUPID 與門檻設定
-SELECT * 
-FROM BSADB.dbo.NMCK_DETECTION_SETTINGS 
-WHERE MODULE_NAME = 'NMCK';
+   因為該筆資料根本不在日本金融制裁名單內，所以在第一關 INSERT INTO #tempDJBlacklistJP 就被直接過濾掉了。
+ * 如果這筆原本應該進其他名單：
+   * 他有 OFAC（美國財政部）、HM Treasury（英國財政部）、EC/EU（歐盟制裁）等。
+   * 如果這段 SP 專門只處理 日本制裁（GROUPID = 5），那這筆沒中是符合邏輯的正確行為。
+如果你確認日本名單應該要包含他，請檢查：
+ * 查該名稱是否有其他 EntityId（可能有多筆同名但不同 ID）：
+   SELECT EntNum, SdnName, NamePropertyBitCode 
+FROM BSADB.dbo.DJ_List_Data_A 
+WHERE SdnName LIKE '%Sai%id%' OR SdnName LIKE '%Shaykh%';
 
-(若該表在 BSADBJP，請切換至 BSADBJP.dbo.NMCK_DETECTION_SETTINGS 查詢)
- * 判斷標準：查看回傳的清單中是否有包含 GROUPID = 11。若清單內只有 1、5 或其他群組，代表前端點擊 Name Check 時根本沒有比對 GROUPID 11 的資料。
+ * 確認日本名單在資料庫中的確切名稱：
+   SELECT DISTINCT SanctionListReference 
+FROM BSADB.dbo.DJ_SanctionListReference 
+WHERE SanctionListReference LIKE '%Japan%' 
+   OR SanctionListReference LIKE '%MOF%' 
+   OR SanctionListReference LIKE '%METI%';
 
-
-
-
-
-直接在 SSMS 執行以下查詢，確認你目前 BSADBJP.dbo.OFAC_SPEC 中這批名單的 ent_num 是否全部都是 NULL：
-SELECT 
-    COUNT(*) AS Total_Count,
-    COUNT(ent_num) AS Has_Value_Count,
-    COUNT(*) - COUNT(ent_num) AS Null_Count
-FROM BSADBJP.dbo.OFAC_SPEC
-WHERE GROUPID = 11;
-
-如果想看明細資料，可以執行：
-SELECT TOP 20 
-    ent_num, 
-    spec_name, 
-    GROUPID, 
-    SOURCE, 
-    updated_date_UTC
-FROM BSADBJP.dbo.OFAC_SPEC
-WHERE GROUPID = 11
-ORDER BY updated_date_UTC DESC;
-
-判斷方式：
- * 若 Null_Count 等於 Total_Count（或明細中的 ent_num 欄位全部呈現黃底/灰底的 NULL），就證實了這整批資料在寫入時因為取號邏輯失效，導致 ent_num 沒有成功賦予流水號。
-
-
-
-這張查詢結果直接抓出問題了：
- * 有 116,490 筆的 ent_num 全是 NULL
-   * Total_Count 為 489,704 筆，但 Has_Value_Count 只有 373,214 筆，差額剛好就是 116,490 筆 NULL。
- * 你要比對的這筆名單正好就在這 11.6 萬筆 NULL 裡面
-   * 下方明細看到的都是剛好有值（舊資料或更新前留存）的名單。
-   * 你剛才查的 Rahmani, Arsalan 是這次被同步寫入的新增資料，因為當初取號失效，它的 ent_num 是 NULL。
-直接執行這段 SQL，確認 Rahmani, Arsalan 的 ent_num：
-SELECT ent_num, spec_name, GROUPID, SOURCE, updated_date_UTC
-FROM BSADBJP.dbo.OFAC_SPEC
-WHERE spec_name = 'Rahmani, Arsalan' AND GROUPID = 11;
-
-立即修復這 116,490 筆 NULL 資料
-請直接在 SSMS 執行以下修補語法，幫這批 NULL 補上正確的唯一流水號：
-DECLARE @BaseNum INT;
--- 找出目前資料庫中最大的 ent_num
-SELECT @BaseNum = ISNULL(MAX(ent_num), 0) 
-FROM BSADBJP.dbo.OFAC_SPEC;
-
--- 為所有 ent_num 為 NULL 的資料依序編號
-;WITH FixCTE AS (
-    SELECT ent_num, ROW_NUMBER() OVER (ORDER BY (SELECT 1)) AS rn
-    FROM BSADBJP.dbo.OFAC_SPEC
-    WHERE GROUPID = 11 AND ent_num IS NULL
-)
-UPDATE FixCTE
-SET ent_num = @BaseNum + rn;
-
-補完號後，再回前端 Name Check 重新搜尋一次 Rahmani, Arsalan 就能成功命中。
-
-
-
-
-
-
-
-直接在 SSMS 執行以下三段語法，逐一驗證這三點：
-1. 驗證 ent_num 是否全部重複
-SELECT ent_num, COUNT(*) AS cnt, MAX(spec_name) AS sample_name
-FROM BSADBJP.dbo.OFAC_SPEC
-WHERE GROUPID = 11
-GROUP BY ent_num
-HAVING COUNT(*) > 1;
-
- * 判斷標準：若查出任何資料且 cnt > 1，代表 UPDATE 取號語法確實出錯，導致多筆資料共用了同一個 ent_num。
-2. 驗證比對設定是否有啟用 GROUPID = 11
-直接手動呼叫 Profiler 抓到的設定 SP：
-EXEC BSADB.dbo.NMCK_GetDetectionSettings @ModuleName = N'NMCK';
-
-(若不在 BSADB，請切換至 BSADBJP 執行)
- * 判斷標準：查看回傳的 Result Set 中是否有 GROUPID、Source 或名單權重設定，確認名單清單中是否包含 11 或 JP FINANCE。
-3. 驗證底層是否有拆詞/索引表（Token Table）
-搜尋系統內是否存在專門放 Name Token 的資料表或索引預存程序：
--- 查詢是否有名稱拆詞暫存表/索引表
-SELECT name, type_desc 
-FROM BSADBJP.sys.objects 
-WHERE name LIKE '%TOKEN%' 
-   OR name LIKE '%INDEX%' 
-   OR name LIKE '%SOUNDEX%'
-ORDER BY type_desc, name;
-
- * 判斷標準：若存在類似 OFAC_SPEC_TOKENS、NMCK_TOKENS 等資料表，可以直接 SELECT TOP 10 * 該表，確認該表中是否有 Rahmani 的分詞紀錄。若表中沒有，即代表名單雖寫入主表但未建索引。
