@@ -12,3 +12,13 @@
  * Mapping 邏輯：CIF_TYPE.AML_BUZ_SECTOR_CD AS OWNERSHIP_CODE
  * 資料來源：dbo.WBS_CIF_CUST_INFO 的 BUSINESS_SECTOR_CODE 欄位。
  * 邏輯說明：從 WBS 客戶主檔帶出行業別/業務板塊代碼（同時此代碼也用於判斷是否為員工 IsEmployee 及劃分客戶客群 Segment_Code）。
+
+
+
+
+那我要怎麼回復他這個問題
+再問個問題
+海外AML系統的行業別
+是吃WBS還是e-credit的資料啊?
+
+他是法尊
