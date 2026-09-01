@@ -1,5 +1,3 @@
-SELECT * FROM lowrisklistgroups
-
-幫我更新 groupid = 5 的 GROUPDESCR
-
-改成 Japanese Finance
+UPDATE BSADBJP.dbo.lowrisklistgroups
+SET GROUPDESCR = 'Japanese Finance'
+WHERE GROUPID = 5;
