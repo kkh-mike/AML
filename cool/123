@@ -1,65 +1,28 @@
-這支預存程序（Stored Procedure）的主要功能是：依據客戶身分識別碼、帳號識別碼與分行代碼，取得該客戶未刪除的相關上傳附件列表，並動態跨資料庫關聯查詢上傳者的真實姓名。
-1. 帶詳細註解的 SQL 代碼
 USE [BSADBJP]
 GO
-
-/****** Object:  StoredProcedure [dbo].[NMCHK_GetNMCHKAttachment]    Script Date: 2026/9/1 上午 10:40:54 ******/
+/****** Object:  StoredProcedure [dbo].[NMCHK_GetNMCHKRemarkLog]    Script Date: 2026/9/1 上午 10:45:07 ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
-ALTER PROC [dbo].[NMCHK_GetNMCHKAttachment]
-    @UID NVARCHAR(80),       -- 客戶唯一識別碼 (例如: 身分證號/統編/客戶UID)
-    @NAMEKEY NVARCHAR(20),   -- 帳號/戶名識別鍵值 (new_acct_key)
-    @BANKNO VARCHAR(10)      -- 分行/銀行代碼 (用於動態切換使用者授權資料庫)
+ALTER PROC [dbo].[NMCHK_GetNMCHKRemarkLog] 
+@UID NVARCHAR(80),
+@Name_Key NVARCHAR(20),
+@CultureName VARCHAR(5) = NULL
 AS
-DECLARE
-    @LowRiskListGroup BIGINT, -- (未使用的變數，可保留或評估移除)
-    @SOURCE_IND CHAR(1)       -- 來源別指標 (Source Indicator)
 
-    -- 步驟 1: 依據 UID 與 NAMEKEY 查詢客戶資料，取得來源別指標
-    -- 使用 WITH(NOLOCK) 避免造成資料庫讀取鎖定 (Dirty Read)
-    SELECT @SOURCE_IND = Source_IND 
-    FROM dbo.NMCHK_CustInfo WITH(NOLOCK) 
-    WHERE uid = @UID AND new_acct_key = @NAMEKEY
-	
-    -- 步驟 2: 特殊業務規則處理
-    -- 若資料來源為 'W' (Web?)、'O' (Online/Other?) 或 'B' (Branch?) 等特定管道，
-    -- 強制將 @NAMEKEY 重設為預設值 '1' 進行後續附件查詢
-    IF @SOURCE_IND IN ('W','O','B')
-        SELECT @NAMEKEY = '1'
+SELECT A.UID, 
+(SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM WORKFLOW_MGMT_ROLE WHERE A.[ROLE] = ID) ROLE,
+(SELECT CASE WHEN A.Action = 1 THEN dbo.GetResourceString('FalseMatch')
+			WHEN A.Action = 2 THEN dbo.GetResourceString('TrueMatch')
+			ELSE (SELECT CASE WHEN @CultureName = 'zh-TW' THEN ACTION_DESC ELSE ACTION_DESC END FROM dbo.WORKFLOW_MGMT_ACTION WHERE A.[ACTION] = ID) END) [ACTION],
+UPDATEDBY, (SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM UserAccounts WHERE USERID = UPDATEDBY AND Deleted = 0) UpdatedBy_UserName, 
+UPDATED_DATE, REMARK, Id AS RemarkLogId, A.[ACTION] AS ActionId, A.ExtendedReviewDate
+FROM dbo.NMCHK_REMARKLOG A WITH (NOLOCK)
+WHERE A.UID = @UID AND A.Name_Key = 1
+ORDER BY UPDATED_DATE DESC
 
-BEGIN
-    -- 步驟 3: 執行動態 SQL 查詢附件清單
-    -- 欄位說明:
-    --   DESCR: 附件描述
-    --   FILENAME: 原始檔案名稱
-    --   MODIFIED_FILENAME: 系統變更後的檔案儲存名稱
-    --   PATH: 檔案存儲路徑
-    --   UPLOADEDBY: 上傳者員工/使用者帳號 (User ID)
-    --   UPLOADEDBY_UserName: 跨庫子查詢，由 UserLicense[BANKNO] 庫中取得未被刪除的使用者全名
-    --   UPLOADED_DATE: 檔案上傳時間
-    -- 條件限制:
-    --   A.BANKNO = 指定銀行代碼
-    --   FLAG = 'N' (有效/未刪除狀態)
-    --   UID 與 NAME_KEY 需相符
-    -- 排序:
-    --   依照上傳時間由新到舊 (DESC) 排序
-    EXEC(N'SELECT DESCR, FILENAME, MODIFIED_FILENAME, PATH, 
-        UPLOADEDBY, (SELECT ISNULL(FirstName,'''') + '' '' +  ISNULL(LastName,'''') FROM UserLicense' + @BANKNO + '.dbo.UserAccounts WHERE USERID = UPLOADEDBY AND Deleted <> ''1'') UPLOADEDBY_UserName, UPLOADED_DATE
-        FROM dbo.NMCHK_ATTACH A WITH (NOLOCK)
-        WHERE A.BANKNO = ' + '''' + @BANKNO + ''' AND FLAG = ''N''  AND UID = ' + '''' + @UID + ''' AND NAME_KEY = ''' + @NAMEKEY + ''' ORDER BY UPLOADED_DATE DESC')
-END
 
-2. 有使用到的資料表（Tables）
- * dbo.NMCHK_CustInfo（本庫 BSADBJP）：
-   查詢客戶基本資訊與來源指標（Source_IND）。
- * dbo.NMCHK_ATTACH（本庫 BSADBJP）：
-   儲存附件檔案主要屬性（檔名、路徑、描述、上傳時間、有效註記等）。
- * UserLicense[BANKNO].dbo.UserAccounts（動態跨庫）：
-   存放使用者帳號權限資料庫，依傳入的 @BANKNO 動態決定庫名（例如 UserLicense001.dbo.UserAccounts），用來轉換並顯示上傳者的全名（FirstName + LastName）。
-3. 這支 SP 的運作流程與功能總結
- * 檢查來源管道：先從客戶檔 NMCHK_CustInfo 依 @UID 與 @NAMEKEY 查出 Source_IND。
- * 鍵值校正：若來源屬於特定型態（'W'、'O'、'B'），將鍵值統一套用為 '1'。
- * 動態撈取附件與人員全名：透過動態組裝 SQL 字串，從 NMCHK_ATTACH 取出未註銷（FLAG = 'N'）的附件資料，並動態跨庫關聯對應分行庫的使用者全名，最後依最新上傳時間排序輸出。
+幫我註解一下
+然後他有用到什麼table
+然後這支sp 再幹嘛
