@@ -1,149 +1,23 @@
-可以，這份查詢腳本將第二段（日本金融名單）與第三段（Sanctions IDs）的所有篩選條件拆解成獨立的欄位標籤（Flag）。
-執行後可以直接從欄位一眼看出每一筆資料是「符合哪一條條件才被寫入」：
-1. 檢視「日本金融名單（GROUPID = 5）」寫入條件與明細
-DECLARE @OtherIdentMthCode VARCHAR(2);
-SELECT @OtherIdentMthCode = IDENTCODE FROM dbo.IDENTMTHD_DIM WHERE OTHIND = 'Y';
-
-;WITH RawBlacklistJP AS (
-    -- 條件 A：存活本名
-    SELECT 
-        A.EntNum, 
-        A.SdnName, 
-        MAX(A.UpdatedDate) AS UpdatedDate,
-        'Y' AS [Cond_Is_Primary_Name],
-        'N' AS [Cond_Is_Deceased_Scan],
-        '本名符合 (BitCode & 1 > 0)' AS [Trigger_Reason]
-    FROM BSADB.dbo.DJ_List_Data_A A WITH (NOLOCK)
-    JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) ON A.EntNum = B.EntityId
-    WHERE A.NamePropertyBitCode & 1 > 0
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-    GROUP BY A.EntNum, A.SdnName
-
-    UNION ALL
-
-    -- 條件 B：已故掃描（本次新增）
-    SELECT 
-        A.EntityId AS EntNum, 
-        A.FullName AS SdnName, 
-        MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate,
-        'N' AS [Cond_Is_Primary_Name],
-        'Y' AS [Cond_Is_Deceased_Scan],
-        '死亡名單掃描 (Deceased = 1)' AS [Trigger_Reason]
-    FROM BSADB.dbo.DJ_Entity A WITH (NOLOCK)
-    JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) ON A.EntityId = B.EntityId
-    WHERE A.Deceased = 1
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-      AND NOT EXISTS (
-          SELECT 1 
-          FROM BSADB.dbo.DJ_List_Data_A X WITH (NOLOCK)
-          JOIN BSADB.dbo.DJ_SanctionListReference Y WITH (NOLOCK) ON X.EntNum = Y.EntityId
-          WHERE X.EntNum = A.EntityId 
-            AND X.NamePropertyBitCode & 1 > 0
-            AND Y.SanctionListReference LIKE '%Japanese Finance%'
-      )
-    GROUP BY A.EntityId, A.FullName
-)
+報錯原因是你在單獨執行選取的這段 SQL 時，前面宣告建立 #tempDJBlacklistJP 的 CREATE TABLE 還沒被執行過，所以 SQL Server 認不得這個暫存表。
+請直接改用以下 獨立可執行的查詢語句，不需要建暫存表，就能直接查出日本名單中所有符合條件的死亡名單：
 SELECT 
-    CASE 
-        WHEN T.remark IS NULL THEN '預計 INSERT (全新新增)'
-        WHEN T.DInd = 'Y' THEN '預計 UPDATE (重新上架)'
-        WHEN A.UpdatedDate <> T.updated_date THEN '預計 UPDATE (日期更新)'
-        ELSE '資料一致 (不異動)'
-    END AS [Expected_Action],
-    A.[Trigger_Reason]                  AS [觸發寫入原因],
-    A.[Cond_Is_Deceased_Scan]           AS [條件:死亡掃描(Y/N)],
-    A.[Cond_Is_Primary_Name]             AS [條件:存活本名(Y/N)],
-    'Y'                                 AS [條件:含Japanese Finance標籤],
-    A.EntNum                            AS [remark(EntityId)],
-    A.SdnName                           AS [spec_name(姓名)],
-    A.UpdatedDate                       AS [updated_date],
-    T.DInd                              AS [目前Target表DInd],
-    T.ent_num                           AS [既有ent_num]
-FROM RawBlacklistJP A
-LEFT JOIN BSADBJP..OFAC_SPEC T WITH (NOLOCK) 
-       ON T.GROUPID = 5 
-      AND T.spec_name = A.SdnName 
-      AND T.remark = CAST(A.EntNum AS VARCHAR(100))
-ORDER BY A.[Cond_Is_Deceased_Scan] DESC, [Expected_Action] DESC, A.EntNum;
-
-2. 檢視「Sanctions IDs（GROUPID = 10）」寫入條件與明細
-SELECT 
-    CASE 
-        WHEN T.remark IS NULL THEN '預計 INSERT (全新新增)'
-        WHEN T.DInd = 'Y' THEN '預計 UPDATE (重新上架)'
-        WHEN MAX(C.UpdatedDate) <> T.updated_date THEN '預計 UPDATE (日期更新)'
-        ELSE '資料一致 (不異動)'
-    END AS [Expected_Action],
-    
-    -- 寫入條件檢核欄位
-    A.PersonStatus                      AS [條件:人員狀態(Active/Inactive)],
-    CASE 
-        WHEN B.Description2 = 'Sanctions Lists' THEN 'Sanctions Lists (主清單)'
-        ELSE B.Description3 
-    END                                 AS [條件:符合制裁分類],
-    D.IdentificationType                AS [條件:19類證件類型],
-    D.IdentificationNumber              AS [spec_name(證照/通訊碼)],
-    A.EntityId                          AS [remark(EntityId)],
-    MAX(C.UpdatedDate)                  AS [updated_date],
-    
-    -- 預計寫入目標表的組合欄位
-    D.IdentificationType + '; Please go to Dowjones website for more detail' AS [預計寫入ADDRESS欄位],
-    T.DInd                              AS [目前Target表DInd]
-FROM BSADB.dbo.DJ_Entity A WITH (NOLOCK)
-JOIN BSADB.dbo.DJ_ListCategory B WITH (NOLOCK) ON A.EntityId = B.EntityId
-JOIN BSADB.dbo.DJ_List_Data_A C WITH (NOLOCK) ON A.EntityId = C.EntNum
-JOIN BSADB.dbo.DJ_IdentificationTypeInfo D WITH (NOLOCK) ON A.EntityId = D.EntityId
-LEFT JOIN BSADB.dbo.OFAC_GLSpec T WITH (NOLOCK)
-       ON T.GROUPID = 10
-      AND T.spec_name = D.IdentificationNumber
-      AND T.remark = CAST(A.EntityId AS VARCHAR(100))
-      AND REPLACE(T.ADDRESS, '; Please go to Dowjones website for more detail', '') = D.IdentificationType
-WHERE A.PersonStatus <> 'Inactive'
-  AND (
-        B.Description2 = 'Sanctions Lists'
-     OR B.Description3 IN (
-            'OFAC Related - Majority Owned',
-            'OFAC Related - Control',
-            'OFAC - Regional Sanctions Related - Majority Owned',
-            'OFAC - Regional Sanctions Related - Control',
-            'EU Related - Majority Owned',
-            'EU Related - Control',
-            'EU - Regional Sanctions Related - Majority Owned',
-            'EU - Regional Sanctions Related - Control'
-        )
-      )
-  AND B.Deleted = 0
-  AND D.IdentificationType IN (
-        'Aircraft Construction, Line, Fleet or Serial Number',
-        'Aircraft Manufacturer''s Serial Number (MSN)',
-        'Bank Identifier Code (BIC)',
-        'Central Registration Depository (CRD)',
-        'Company Identification No.',
-        'Driving Licence No.',
-        'DUNS Number',
-        'International Maritime Organization (IMO) Ship No.',
-        'International Securities Identification Number (ISIN)',
-        'Legal Entity Identifier (LEI)',
-        'National ID',
-        'National Provider Identifier (NPI)',
-        'National Tax No.',
-        'Others',
-        'Passport No.',
-        'Social Security No.',
-        'Email',
-        'Fax',
-        'Phone'
-      )
-  AND D.Deleted = 0
-GROUP BY 
     A.EntityId, 
-    A.PersonStatus,
-    B.Description2,
-    B.Description3,
-    D.IdentificationType, 
-    D.IdentificationNumber,
-    T.remark,
-    T.DInd,
-    T.updated_date
-ORDER BY [Expected_Action] DESC, A.EntityId;
+    A.FullName, 
+    MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate,
+    B.SanctionListReference
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+GROUP BY A.EntityId, A.FullName, B.SanctionListReference;
+
+測試驗證步驟
+ * 執行上面的 SQL。
+ * 從結果挑選一個人的 FullName（例如複製整串姓名）。
+ * 拿這個名字去系統送姓名檢核。
+ * 檢核完後，執行以下查詢確認是否命中：
+   SELECT uid, sdn_name, sdn_type, sdn_grp_num, relative_correlation, NamePropertyBitCode
+FROM BSADBJP.dbo.NMCHK_ResultHistory
+WHERE sdn_grp_num = 5
+ORDER BY uid DESC;
 
