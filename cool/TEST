@@ -1,66 +1,65 @@
-腳本語法在 Oracle SQL 中完全合法，但有 1 個潛在風險 與 1 個語意建議 需要注意：
- * 潛在風險（欄位順序與數量）：INSERT INTO ... VALUES (...) 未明確指定欄位名稱（Column List）。若 AML_REPORT_ADD_ROLE 欄位順序有變動，或日後新增了欄位（例如新增建立時間、建立者），未指定欄位的寫法會直接引發 ORA-00947: not enough values 或塞錯欄位。
- * 工單/上版建議寫法：建議明確列出欄位名稱（如 INSERT INTO OAAML.AML_REPORT_ADD_ROLE (REGION, AREA, COL3, COL4, EMPNO) VALUES (...)）。
-Oracle SQL*Plus / SQL Developer 執行 Log 模擬
-SQL> --BEFORE
-SQL> SELECT *
-  2  FROM OAAML.AML_REPORT_ADD_ROLE
-  3  WHERE EMPNO IN (
-  4  '1151695','1090115','942095'
-  5  );
+驗證 View 產出的行業別資料是否與 WBS 來源表一致，可以透過以下幾組 SQL 進行比對與防呆檢查：
+1. 抽樣比對單一客戶的欄位值（最直接）
+找幾筆具代表性的客戶 ID（例如個人戶、法人戶、行業代碼為空補 999999 的資料），直接比對 View 與來源表：
+USE [MYDB];
+GO
 
-no rows selected
+DECLARE @CustID VARCHAR(50) = 'MY2199999'; -- 替換為實際測試的 CustomerID
 
-SQL> 
-SQL> --INSERT
-SQL> -------
-SQL> INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','TAOCHU','','','1151695');
+-- 查詢 View 產出的結果
+SELECT 
+    CustomerID,
+    CustomerType,
+    SIC_Code,
+    OccupationCode,
+    OWNERSHIP_CODE
+FROM dbo.Preload_Customer
+WHERE CustomerID = @CustID;
 
-1 row created.
+-- 比對 WBS 來源表的原始值
+SELECT 
+    CIF.CUSTOMER_ID,
+    CIF.LOCAL_INDUSTRY_CODE   AS [WBS_LOCAL_INDUSTRY_CODE],
+    CIF.BUSINESS_SECTOR_CODE  AS [WBS_BUSINESS_SECTOR_CODE],
+    KYC.OCCUPATION            AS [WBS_KYC_OCCUPATION]
+FROM dbo.WBS_CIF_CUST_INFO CIF
+LEFT JOIN dbo.WBS_CIF_KYC KYC 
+    ON CIF.CIF_KYC_SEQ = KYC.CIF_KYC_SEQ 
+   AND KYC.STATUS = '1'
+WHERE CIF.CUSTOMER_ID = @CustID;
 
-SQL> INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','CHUNGCHANG','','','1151695');
+2. 全量比對不一致筆數（驗證邏輯完整性）
+檢查整張 View 與 WBS 原始表是否存在對應落差（理論上查詢結果應該為 0 筆）：
+USE [MYDB];
+GO
 
-1 row created.
+SELECT 
+    V.CustomerID,
+    V.SIC_Code          AS View_SIC_Code,
+    ISNULL(CIF.LOCAL_INDUSTRY_CODE, '999999') AS Expected_SIC_Code,
+    V.OccupationCode    AS View_OccupationCode,
+    KYC.OCCUPATION      AS Expected_OccupationCode,
+    V.OWNERSHIP_CODE    AS View_OWNERSHIP_CODE,
+    CIF.BUSINESS_SECTOR_CODE AS Expected_OWNERSHIP_CODE
+FROM dbo.Preload_Customer V
+JOIN dbo.WBS_CIF_CUST_INFO CIF 
+    ON V.CustomerID = CIF.CUSTOMER_ID
+LEFT JOIN dbo.WBS_CIF_KYC KYC 
+    ON CIF.CIF_KYC_SEQ = KYC.CIF_KYC_SEQ 
+   AND KYC.STATUS = '1'
+WHERE 
+    V.SIC_Code <> ISNULL(CIF.LOCAL_INDUSTRY_CODE, '999999')
+    OR ISNULL(V.OccupationCode, '') <> ISNULL(KYC.OCCUPATION, '')
+    OR ISNULL(V.OWNERSHIP_CODE, '') <> ISNULL(CIF.BUSINESS_SECTOR_CODE, '');
 
-SQL> 
-SQL> INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','TAOCHU','','','1090115');
+3. 檢查常見邊界異常情境
+ * 預設補值 999999 筆數：
+   SELECT COUNT(*) AS Default_SIC_Count 
+FROM dbo.Preload_Customer 
+WHERE SIC_Code = '999999';
 
-1 row created.
-
-SQL> INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','CHUNGCHANG','','','1090115');
-
-1 row created.
-
-SQL> 
-SQL> INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','TAOCHU','','','942095');
-
-1 row created.
-
-SQL> INSERT INTO OAAML.AML_REPORT_ADD_ROLE VALUES ('TW','CHUNGCHANG','','','942095');
-
-1 row created.
-
-SQL> 
-SQL> COMMIT;
-
-Commit complete.
-
-SQL> 
-SQL> --AFTER
-SQL> SELECT *
-  2  FROM OAAML.AML_REPORT_ADD_ROLE
-  3  WHERE EMPNO IN (
-  4  '1151695','1090115','942095'
-  5  );
-
-COL1  COL2        COL3  COL4  EMPNO
-----  ----------  ----  ----  -------
-TW    TAOCHU                  1151695
-TW    CHUNGCHANG              1151695
-TW    TAOCHU                  1090115
-TW    CHUNGCHANG              1090115
-TW    TAOCHU                  942095
-TW    CHUNGCHANG              942095
-
-6 rows selected.
+ * 法人戶（N）是否帶有個人職業代碼（OccupationCode）（確認業務邏輯是否合理）：
+   SELECT CustomerID, CustomerType, OccupationCode 
+FROM dbo.Preload_Customer 
+WHERE CustomerType = 'N' AND OccupationCode IS NOT NULL;
 
