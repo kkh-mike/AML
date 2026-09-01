@@ -1,22 +1,40 @@
-War Room] Hong Kong Tasks Update & Testing Request⁠
+D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\EXE\TriggerDataLoad.exe TW 5 
+DataLoad process has been started.
+Executing Preload Data.
+Executing Data Load.
+Sending statistic.
+DataLoad process has been completed
+2026/8/31 下午 09:43:36 : UpdateAllChangedAddresses
+執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。
+
+未處理的例外狀況: System.Data.SqlClient.SqlException: 執行逾時到期。在作業完成之前超過逾時等待的時間\
+，或是伺服器未回應。 ---> System.ComponentModel.Win32Exception: 等候操作已逾時。
+   --- 內部例外狀況堆疊追蹤的結尾 ---
+   於 System.Data.SqlClient.SqlConnection.OnError(SqlException exception, Boolean breakConnection, Action`1 wrapCloseInAction)
+   於 System.Data.SqlClient.TdsParser.ThrowExceptionAndWarning(TdsParserStateObject stateObj, Boolean callerHasConnectionLock, Boo\
+lean asyncClose)
+   於 System.Data.SqlClient.TdsParser.TryRun(RunBehavior runBehavior, SqlCommand cmdHandler, SqlDataReader dataStream, BulkCopySim\
+pleResultSet bulkCopyHandler, TdsParserStateObject stateObj, Boolean& dataReady)
+   於 System.Data.SqlClient.SqlDataReader.TryConsumeMetaData()
+   於 System.Data.SqlClient.SqlDataReader.get_MetaData()
+   於 System.Data.SqlClient.SqlCommand.FinishExecuteReader(SqlDataReader ds, RunBehavior runBehavior, String resetOptionsString, B\
+oolean isInternal, Boolean forDescribeParameterEncryption, Boolean shouldCacheForAlwaysEncrypted)
+   於 System.Data.SqlClient.SqlCommand.RunExecuteReaderTds(CommandBehavior cmdBehavior, RunBehavior runBehavior, Boolean returnStr\
+eam, Boolean async, Int32 timeout, Task& task, Boolean asyncWrite, Boolean inRetry, SqlDataReader ds, Boolean describeParameterEncr\
+yptionRequest)
+   於 System.Data.SqlClient.SqlCommand.RunExecuteReader(CommandBehavior cmdBehavior, RunBehavior runBehavior, Boolean returnStream\
+, String method, TaskCompletionSource`1 completion, Int32 timeout, Task& task, Boolean& usedCache, Boolean asyncWrite, Boolean inRe\
+try)
+   於 System.Data.SqlClient.SqlCommand.RunExecuteReader(CommandBehavior cmdBehavior, RunBehavior runBehavior, Boolean returnStream\
+, String method)
+   於 System.Data.SqlClient.SqlCommand.ExecuteReader(CommandBehavior behavior, String method)
+   於 System.Data.SqlClient.SqlCommand.ExecuteReader()
+   於 TriggerDataLoad.AddressGrouping.UpdateAllChangedAddresses()
+   於 TriggerDataLoad.AddressGrouping.ProcessAddress()
+   於 TriggerDataLoad.Program.Main(String[] Param)
+
+     Job Object statistics
 
 
 
-這段工作信件建議依照商務情境將「戰情室」翻譯為 War Room（專案常用）或 Dashboard（若指系統儀表板），以下提供幾種不同語氣的寫法：
-選項一：自然得體、最推薦（商務日常）
-> Dear Ling,
-> Regarding the Hong Kong section in the War Room, you can fill in the start date and completion date directly. When you have time, could you please test updating the War Room? Thank you!
-> 
-選項二：簡潔明瞭（偏內部快速溝通）
-> Dear Ling,
-> There are two items for Hong Kong in the War Room. You can enter the start and completion dates directly. Please help test updating the War Room when you're free. Thanks!
-> 
-選項三：正式客氣（對跨部門或資深同仁）
-> Dear Ling,
-> For the Hong Kong items in the War Room, you may enter the start date and completion time directly. Could you please help test and update the War Room when time permits? Thank you for your assistance.
-> 
-常用字彙替換參考：
- * 戰情室：War Room（專案戰情室） / Dashboard（數據或任務儀表板/看板）
- * 填寫：fill in / enter / input
- * 開始日期與完成時間：start date and completion time / start and end dates
- * 有時間幫我...：When you have time, could you please... / Please help ... when you're free
+可能什麼問題
