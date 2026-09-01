@@ -1,124 +1,36 @@
-USE [BSADBJP]
-GO
-/****** Object:  StoredProcedure [dbo].[NMCHK_GetRCMatchesByKey]    Script Date: 2026/9/1 下午 05:17:40 ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROCEDURE [dbo].[NMCHK_GetRCMatchesByKey]
-@RANDNUM NVARCHAR(80),
-@KEY	 NVARCHAR(20),
-@Type	 NVARCHAR(5) = NULL --= 'Q'
-AS
-DECLARE @BankNo VARCHAR(10), @Culture CHAR(5)
-SELECT @BankNo = REPLACE(DB_NAME(), 'BSADB', '')
-SELECT @Culture = ISNULL((SELECT CULTURE FROM GCMAINDB..BankDBProfile WITH (NOLOCK) WHERE BNK_NBR = @BankNo), '')		
-		
-	IF EXISTS(SELECT 1 FROM dbo.NMCHK_ResultHistory WITH(NOLOCK) WHERE UID = @RANDNUM AND new_acct_key = @KEY)
-	BEGIN
-		SELECT A.uid,userid,rel_corr_chosen,A.new_acct_key,relationship,address,city,country,new_acct_name,
-		relative_correlation,alt_num,ent_num, sdn_type, 
-		sdn_name,OFACMatch,OFACNotMatch,Reason,user_brnch_nbr,TAXID,IDENT,IDENTO,ISSBY,
-		IDNUM,REMARK,SECTION,DOB,ISNULL(Reduction_IND,'') 'Reduction_IND',ISNULL(Ori_RC,'') 'Ori_RC',B.last_updated_date, B.DETECTED, A.sdn_grp_num, ISNULL(A.NamePropertyBitCode, 0) 'NamePropertyBitCode', 
-		(CASE WHEN ISNULL(OFACNotMatch,'') = 'Y' THEN dbo.GetResourceString('Matched') 
-			  WHEN ISNULL(OFACMatch,'') = 'Y' THEN dbo.GetResourceString('NotMatched') ELSE '-' END) AS IsMatchWithBlacklist, 
-		CASE WHEN EXISTS (SELECT 1 FROM UN_SANCTIONS_LIST C WITH (NOLOCK) JOIN UN_Program_DIM D ON D.ProgramCode = C.UN_LIST_TYPE
-							WHERE A.sdn_type IN ('UN', 'UN ALT') AND A.ent_num = C.ENT_NUM AND D.IsTerroristFinancing = 1  AND C.DEL_IND = 'N')
-				OR EXISTS(SELECT 1 FROM dbo.UN_Vessel_List C WITH(NOLOCK) JOIN dbo.UN_Program_DIM D ON D.ProgramCode = C.UN_List_Type
-							WHERE A.sdn_type IN ('UN', 'UN ALT') AND A.ent_num = C.EntNum AND D.IsTerroristFinancing = 1 AND C.IsDeleted = 0)
-				OR EXISTS (SELECT 1 FROM OFAC_SPEC E WITH (NOLOCK)
-							JOIN lowrisklistgroups F WITH (NOLOCK) ON E.GROUPID = F.GROUPID
-							JOIN dbo.OFAC_SpecType_Dim G WITH (NOLOCK) ON F.SpecType = G.ID
-							WHERE A.sdn_type = 'SPEC'
-							AND A.ent_num = E.ent_num
-							AND A.sdn_grp_num = E.GROUPID
-							AND E.DInd = 'N'
-							AND G.SpecType = 'TW Sanctions List'
-						   ) 
-		THEN 
-			CASE WHEN @Culture = 'zh-TW' 
-			THEN 
-				CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'
-					WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'
-				ELSE '' END + N' (資恐)' 
-			ELSE 
-				CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'
-					WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'
-				ELSE '' END + N' (Terrorist Financing List)' 
-			END 
-		ELSE 
-			CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'
-				WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'
-			END 
-		END AS GROUPDESCR 
-		FROM dbo.NMCHK_ResultHistory A WITH(NOLOCK) 
-		JOIN dbo.NMCHK_CustInfo B WITH(NOLOCK) ON A.UID = B.UID AND A.new_acct_key = B.new_acct_key
-		LEFT JOIN dbo.lowrisklistgroups C WITH(NOLOCK) ON A.sdn_type IN('SPEC', 'SPEC_CN') AND A.sdn_grp_num = C.GROUPID
-		LEFT JOIN BSADB.dbo.lowrisklistgroups D WITH(NOLOCK) ON A.sdn_type IN('GLSPEC', 'GLSPEC_CN') AND A.sdn_grp_num = D.GROUPID
-		LEFT JOIN BlackList_PriorityList_dim E WITH (NOLOCK) ON A.sdn_type = E.List
-		WHERE A.UID = @RANDNUM 
-		AND A.NEW_ACCT_KEY = @KEY
-		ORDER BY A.RELATIVE_CORRELATION DESC, E.Priority, A.sdn_name
-	END
-	ELSE
-	BEGIN
-		;WITH CTE_FILTER_RC AS (
-			SELECT A.uid,userid,rel_corr_chosen,A.new_acct_key,relationship,address,city,country,new_acct_name,
-			relative_correlation,alt_num,ent_num, sdn_type, 
-			sdn_name,OFACMatch,OFACNotMatch,Reason,user_brnch_nbr,TAXID,IDENT,IDENTO,ISSBY,
-			IDNUM,REMARK,SECTION,DOB,ISNULL(Reduction_IND,'') 'Reduction_IND',ISNULL(Ori_RC,'') 'Ori_RC',B.last_updated_date, B.DETECTED, A.sdn_grp_num, ISNULL(A.NamePropertyBitCode, 0) 'NamePropertyBitCode', 
-			(CASE WHEN ISNULL(OFACNotMatch,'') = 'Y' THEN 'Yes' 
-			  WHEN ISNULL(OFACMatch,'') = 'Y' THEN 'No' ELSE '-' END) AS IsMatchWithBlacklist, 
-			CASE WHEN EXISTS (SELECT 1 FROM UN_SANCTIONS_LIST C WITH (NOLOCK) 
-								JOIN UN_Program_DIM D ON D.ProgramCode = C.UN_LIST_TYPE
-								WHERE A.sdn_type IN ('UN', 'UN ALT')
-								AND A.ent_num = C.ENT_NUM
-								AND D.IsTerroristFinancing = 1 
-								AND C.DEL_IND = 'N')
-					OR EXISTS(SELECT 1 FROM dbo.UN_Vessel_List C WITH(NOLOCK) JOIN dbo.UN_Program_DIM D ON D.ProgramCode = C.UN_List_Type
-							WHERE A.sdn_type IN ('UN', 'UN ALT') AND A.ent_num = C.EntNum AND D.IsTerroristFinancing = 1 AND C.IsDeleted = 0)
-					OR EXISTS (SELECT 1 FROM OFAC_SPEC E WITH (NOLOCK)
-								JOIN lowrisklistgroups F WITH (NOLOCK) ON E.GROUPID = F.GROUPID
-								JOIN dbo.OFAC_SpecType_Dim G WITH (NOLOCK) ON F.SpecType = G.ID
-								WHERE A.sdn_type = 'SPEC'
-								AND A.ent_num = E.ent_num
-								AND A.sdn_grp_num = E.GROUPID
-								AND E.DInd = 'N'
-								AND G.SpecType = 'TW Sanctions List'
-							   ) 
-			THEN 
-				CASE WHEN @Culture = 'zh-TW' 
-				THEN 
-					CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'
-						WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'
-					ELSE '' END + N' (資恐)' 
-				ELSE 
-					CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'
-						WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'
-					ELSE '' END + N' (Terrorist Financing List)' 
-				END 
-			ELSE 
-				CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'
-					WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'
-				END 
-			END AS GROUPDESCR, 
-			DENSE_RANK() OVER(ORDER BY A.relative_correlation DESC) AS RowDense
-			FROM dbo.NMCHK_ResultHistory_FILTER_RC A WITH(NOLOCK)
-			JOIN dbo.NMCHK_CustInfo B WITH(NOLOCK) ON A.UID = B.UID AND A.new_acct_key = B.new_acct_key
-			LEFT JOIN dbo.lowrisklistgroups C WITH(NOLOCK) ON A.sdn_type IN('SPEC', 'SPEC_CN') AND A.sdn_grp_num = C.GROUPID
-			LEFT JOIN BSADB.dbo.lowrisklistgroups D WITH(NOLOCK) ON A.sdn_type IN('GLSPEC', 'GLSPEC_CN') AND A.sdn_grp_num = D.GROUPID
-			WHERE A.UID = @RANDNUM 
-			AND A.NEW_ACCT_KEY = @KEY
-		)
-		SELECT A.* FROM CTE_FILTER_RC A
-		LEFT JOIN BlackList_PriorityList_dim E WITH (NOLOCK) ON A.sdn_type = E.List
-		WHERE A.RowDense = 1
-		ORDER BY E.Priority, A.sdn_name 
-			
-	END
+這支 SP NMCHK_GetRCMatchesByKey 是前端介面/查詢報表用來顯示檢核結果的，而從這支 SP 的邏輯可以清楚看出為什麼畫面顯示不出 GROUPID = 5：
+1. 核心原因解析
+在 SP 中，所有黑名單群組描述（GROUPDESCR）的對應規則如下：
+LEFT JOIN dbo.lowrisklistgroups C WITH(NOLOCK) 
+  ON A.sdn_type IN ('SPEC', 'SPEC_CN') AND A.sdn_grp_num = C.GROUPID
 
+ * 凡是來自 OFAC_SPEC 的自訂名單（包括日本名單 GROUPID = 5），其比對結果的：
+   * sdn_type 必須是 'SPEC' 或 'SPEC_CN'
+   * sdn_grp_num 必須等於 5（即 GROUPID）
+ * 回看你上一張 NMCHK_ResultHistory 的查詢結果：
+   * 畫面裡所有的 sdn_grp_num 全都是 0。
+   * sdn_type 全部是 UN、EU、UKHMT、OFAC，完全沒有任何一筆 sdn_type = 'SPEC' 且 sdn_grp_num = 5。
+這代表：在「執行姓名檢核比對」的那支比對 Engine / SP 產出時，壓根就沒有比對到 OFAC_SPEC（GROUPID = 5）這張表。
+2. 逐步檢查排查步驟
+請依序執行以下 3 個步驟來確認是在哪一關斷掉的：
+步驟 1：確認日本名單是否有在 lowrisklistgroups 設定
+SP 串接群組名稱依賴 lowrisklistgroups，先確認是否有設定 GROUPID = 5：
+SELECT * 
+FROM BSADBJP.dbo.lowrisklistgroups 
+WHERE GROUPID = 5;
 
+ * 如果查無資料，前端即使有結果也會因為無法解析名稱或型態而有異常。
+步驟 2：直接查歷史表看有沒有任何案件曾經命中過 GROUPID = 5
+SELECT TOP 20 * 
+FROM BSADBJP.dbo.NMCHK_ResultHistory 
+WHERE sdn_type IN ('SPEC', 'SPEC_CN') 
+  AND sdn_grp_num = 5;
 
+ * 如果完全為 0 筆：代表你們的「姓名比對批次程式（Name Matching Job/SP）」根本沒有把 OFAC_SPEC WHERE GROUPID = 5 納入掃描來源，或者比對時漏掉了這個群組。
+步驟 3：排查實際執行比對的底層母表（比對來源）
+通常系統在做姓名檢核前，會有一支 SP 將 OFAC_SPEC 轉入比對用的黑名單主表（例如 NMCHK_BlackList 或 OFAC_SDN 等）。請確認該底層表是否有包含 GROUPID = 5 的資料：
+-- 範例：確認比對用的黑名單暫存或索引表內是否有日本名單
+SELECT COUNT(*) 
+FROM BSADBJP..OFAC_SPEC 
+WHERE GROUPID = 5 AND DInd = 'N';
 
-
-我要怎麼檢查 為什麼都沒中
