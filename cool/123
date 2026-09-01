@@ -1,61 +1,201 @@
-Sai'id, Shaykh 沒有被寫入目標表，主要有以下 4 個核心排查方向（由最可能到次可能排序）：
-1. DJ_List_Data_A 篩選條件未命中（Primary Name vs Alias / Deceased）
-程式中抓取名單的條件有兩個入口：
- * 入口一（一般名單）：
-   WHERE A.NamePropertyBitCode & 1 > 0
-  AND B.SanctionListReference LIKE '%Japanese Finance%'
-
-   * NamePropertyBitCode & 1 > 0 通常代表 Primary Name。如果 Sai'id, Shaykh 在 Dow Jones 資料庫中被歸類為 AKA (Also Known As) / Alias / Low Quality Alias，它的 BitCode 可能不是 1（例如可能是 2, 4, 8 等），就會被第一段過濾掉。
- * 入口二（死亡名單）：
-   WHERE A.Deceased = 1
-  AND B.SanctionListReference LIKE '%Japanese Finance%'
-
-   * 只有在 DJ_Entity.Deceased = 1 時才會進入第二段。如果該 Entity 狀態不是死亡（Deceased != 1），且 Primary Name 不符，兩邊都不會進。
-驗證 SQL：
-SELECT A.EntNum, A.SdnName, A.NamePropertyBitCode, B.SanctionListReference, E.Deceased
-FROM BSADB.dbo.DJ_List_Data_A A
-JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
-LEFT JOIN BSADB.dbo.DJ_Entity E ON A.EntNum = E.EntityId
-WHERE A.SdnName LIKE '%Sai''id%' OR A.SdnName LIKE '%Shaykh%';
-
-2. 單引號或格式跳脫字元問題（Sai'id vs Sai’id）
- * 名稱中包含特殊字元 '（ASCII 39）或全形/印刷引號 ’（U+2019）。
- * 如果原始資料庫在寫入 DJ_List_Data_A 或 OFAC_SPEC 時有做過清洗（例如去除單引號或轉換為空白），前後端的字串比對就會失效。
-3. MERGE 比對條件被判定為未變更（被忽略）
-如果該筆資料以前曾經進去過 BSADBJP..OFAC_SPEC：
-MERGE TargetTable AS T
-USING ... AS S
-ON T.spec_name = S.SdnName AND T.remark = CAST(S.EntNum AS VARCHAR(100))
-...
-WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN
-    UPDATE SET ...
-
- * 如果 OFAC_SPEC 裡面已經有這筆資料，且：
-   * DInd = 'N'（未刪除）
-   * S.UpdatedDate = T.updated_date（日期相同）
- * 此時 WHEN MATCHED 不會觸發任何 UPDATE 或 INSERT，且不會寫入 OFAC_SPEC_LOG。
-驗證 SQL：
-SELECT * FROM BSADBJP..OFAC_SPEC 
-WHERE GROUPID = 5 AND spec_name LIKE '%Sai''id%';
-
-4. SanctionListReference 字串未完全比對到
-確認 DJ_SanctionListReference 表內 Japanese Finance 的完整字串是否包含空格、大小寫或變體（例如 Japan - Financial Services Agency 或 Japanese Ministry of Finance）。
-驗證 SQL：
-SELECT DISTINCT SanctionListReference 
-FROM BSADB.dbo.DJ_SanctionListReference 
-WHERE SanctionListReference LIKE '%Japan%';
-
-快速排查建議步驟
- * 執行以下查詢確認原始資料在哪一段被卡住：
--- 1. 查 EntityId 與名單參考
-SELECT * FROM BSADB.dbo.DJ_SanctionListReference 
-WHERE EntityId IN (
-    SELECT EntNum FROM BSADB.dbo.DJ_List_Data_A WHERE SdnName LIKE '%Sai''id%'
-);
-
--- 2. 查暫存表在第一步是否有抓到
-SELECT A.EntNum, A.SdnName, A.NamePropertyBitCode, B.SanctionListReference
-FROM BSADB.dbo.DJ_List_Data_A A
-JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
-WHERE A.SdnName LIKE '%Sai''id%';
-
+CREATE PROC [dbo].[NMCHK_GetResultFilter]  
+@GRIDTYPE CHAR(1),  
+@ROLE INT,   
+@HANDLEDBY NVARCHAR(60),  
+@HANDLEDBYROLE INT,  
+@STATUS CHAR(2),  
+@TRAN_DATEFR DATETIME,  
+@TRAN_DATETO DATETIME,  
+@REFNO NVARCHAR(80),  
+@Name_key NVARCHAR(20),  
+@USERID NVARCHAR(60),  
+@QUEUEID INT,  
+@ACTION INT,  
+@Channel NVARCHAR(20),  
+@CustName NVARCHAR(350),  
+@QueueName NVARCHAR(100),  
+@CultureName VARCHAR(5) = NULL  
+AS  
+  
+SELECT @REFNO = LTRIM(RTRIM(@REFNO))  
+  
+IF ISNULL(@TRAN_DATEFR,'') <> '' AND ISNULL(@TRAN_DATETO,'') <> '' AND  @TRAN_DATETO >= @TRAN_DATEFR  
+ SET @TRAN_DATETO = DATEADD(SECOND,-1,DATEADD(DAY,1,@TRAN_DATETO));  
+  
+IF @GRIDTYPE = 'A' /*Main Queue gridview*/  
+BEGIN  
+ ;WITH CTE_Blacklist AS (  
+  SELECT uid FROM dbo.NMCHK_ResultHistory WITH (NOLOCK) WHERE NamePropertyBitCode & 1 = 1 GROUP BY uid  
+ )  
+ SELECT A.UID, A.Name_Key, D.new_acct_name, D.user_brnch_nbr, Created_Date, Created_UserId,   
+ Last_Upd_UserId, HandledBy, Action, A.Role, G.QUEUENAME, HOLDBY, A.QUEUEID, A.Remark, LstUpdate_Remark, D.Source_IND, D.Channel, D.Ori_REFNO, D.REFNO,   
+ (SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM UserAccounts WHERE USERID = HandledBy AND Deleted = 0) HandledBy_UserName,   
+ CASE WHEN @CultureName = 'zh-TW' THEN F.STATUS_DESC_zh_TW ELSE STATUS_DESC END AS Status,   
+ (SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE A.ROLE = ID) ROLE_DESC,   
+ (SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM dbo.UserAccounts WHERE USERID = LstUpdate_Remark AND Deleted = 0) LstUpdate_Remark_UserName,  
+ (SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE ID = (ISNULL(A.LstUpdate_Role,0))) PREVROLE_DESC,   
+ CASE WHEN @CultureName = 'zh-TW' THEN E.SOURCE_DESC_zh_TW ELSE E.SOURCE_DESC END AS SOURCE_DESC, (CASE WHEN I.uid IS NOT NULL THEN 'Y' ELSE 'N' END) AS 'BLACKLIST',  
+ A.ExtendedReviewDate  
+ FROM dbo.NMCHK_Review_Main A WITH (NOLOCK)   
+ JOIN NMCHK_CustInfo D WITH (NOLOCK) ON A.uid = D.uid AND A.name_key = D.new_acct_key  
+ LEFT JOIN dbo.NMCHK_SOURCE_DIM E WITH (NOLOCK) ON D.Source_IND = E.Source_IND   
+ LEFT JOIN WORKFLOW_MGMT_STATUS F WITH (NOLOCK) ON A.STATUS = F.ID  
+ LEFT JOIN WORKFLOW_MGMT_QUEUE G WITH (NOLOCK) ON A.QueueID = G.QUEUEID AND G.SRC = 'NAME'  
+ LEFT JOIN WORKFLOW_MGMT_USERS H WITH (NOLOCK) ON G.QUEUEID = H.QUEUEID   
+ LEFT JOIN CTE_Blacklist I ON I.uid = A.uid  
+ WHERE A.STATUS <> '3'  
+ AND ((@HANDLEDBY = '' AND ISNULL(A.HandledBy,'') = '')  
+  OR (@HANDLEDBY <> '' AND A.HandledBy = @HANDLEDBY)  
+  )  
+ AND (@HANDLEDBYROLE = 0  
+  OR (@HANDLEDBYROLE <> 0 AND @HANDLEDBYROLE = A.Role)  
+  )  
+ AND ((A.ROLE = @ROLE AND A.ROLE = H.ROLE AND H.USERID = @USERID)   
+  OR (A.ROLE <= @ROLE AND H.ROLE = @ROLE AND H.USERID = @USERID)  
+  )  
+ AND (@STATUS = ''   
+  OR (@STATUS <> '' AND A.Status = @STATUS)  
+  )  
+ AND ((@TRAN_DATEFR = '' AND @TRAN_DATETO = '')   
+  OR (@TRAN_DATEFR <> '' AND @TRAN_DATETO <> '' AND Created_Date BETWEEN @TRAN_DATEFR AND @TRAN_DATETO)  
+  )  
+ AND ((@QUEUEID = 0 AND A.QUEUEID IN (SELECT H.QUEUEID WHERE G.DEL_FLAG = 'N' AND H.USERID = @USERID))  
+  OR (@QUEUEID <> 0 AND A.QUEUEID = @QUEUEID)  
+  )  
+ AND (@ACTION = 0  
+  OR (@ACTION <> 0 AND A.ACTION = @ACTION)  
+  )  
+ AND (@REFNO = ''   
+  OR (@REFNO <> '' AND D.REFNO LIKE '%' + @REFNO + '%')  
+  )  
+ AND (@Channel = ''   
+  OR (@Channel <> '' AND E.Source_IND = @Channel)  
+  )  
+ AND (@CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS = ''   
+  OR (@CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS <> '' AND D.new_acct_name LIKE '%' + @CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS + '%')  
+  )  
+ AND (@QueueName = ''   
+  OR (@QueueName <> '' AND G.QUEUENAME LIKE '%' + @QueueName + '%')  
+  )  
+ ORDER BY ROLE DESC, Created_Date DESC, REFNO option(recompile)  
+END    
+ELSE IF @GRIDTYPE = 'B' /*Personal Queue gridview*/  
+BEGIN  
+ ;WITH CTE_Blacklist AS (  
+  SELECT uid FROM dbo.NMCHK_ResultHistory WITH (NOLOCK) WHERE NamePropertyBitCode & 1 = 1 GROUP BY uid  
+ )  
+ SELECT DISTINCT A.UID, A.Name_Key, D.new_acct_name, D.user_brnch_nbr, Created_Date, Created_UserId,   
+ Last_Upd_UserId, HandledBy, Action, A.Role, G.QUEUENAME, HOLDBY, A.QUEUEID, A.Remark, LstUpdate_Remark, D.Source_IND, D.Channel, D.Ori_REFNO, D.REFNO,   
+ (SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM dbo.UserAccounts WHERE USERID = HandledBy AND Deleted = 0) HandledBy_UserName,   
+ CASE WHEN @CultureName = 'zh-TW' THEN F.STATUS_DESC_zh_TW ELSE STATUS_DESC END AS Status,   
+ (SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE A.ROLE = ID) ROLE_DESC,   
+ (SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM dbo.UserAccounts WHERE USERID = LstUpdate_Remark AND Deleted = 0) LstUpdate_Remark_UserName,  
+ (SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE ID = (ISNULL(A.LstUpdate_Role,0))) PREVROLE_DESC,   
+ CASE WHEN @CultureName = 'zh-TW' THEN E.SOURCE_DESC_zh_TW ELSE E.SOURCE_DESC END AS SOURCE_DESC, (CASE WHEN I.uid IS NOT NULL THEN 'Y' ELSE 'N' END) AS 'BLACKLIST',  
+ A.ExtendedReviewDate  
+ FROM dbo.NMCHK_Review_Main A WITH (NOLOCK)   
+ JOIN NMCHK_CustInfo D WITH (NOLOCK) ON A.uid = D.uid AND A.name_key = D.new_acct_key  
+ LEFT JOIN dbo.NMCHK_SOURCE_DIM E WITH (NOLOCK) ON D.Source_IND = E.Source_IND   
+ LEFT JOIN WORKFLOW_MGMT_STATUS F WITH (NOLOCK) ON A.STATUS = F.ID  
+ LEFT JOIN WORKFLOW_MGMT_QUEUE G WITH (NOLOCK) ON A.QueueID = G.QUEUEID AND G.SRC = 'NAME'  
+ LEFT JOIN WORKFLOW_MGMT_USERS H WITH (NOLOCK) ON G.QUEUEID = H.QUEUEID   
+ LEFT JOIN CTE_Blacklist I ON I.uid = A.uid  
+ WHERE STATUS <> '3'  
+ AND (@HANDLEDBY = ''  
+  OR (@HANDLEDBY <> '' AND A.HandledBy = @HANDLEDBY)  
+  )  
+ AND ((@ROLE = 3 AND A.ROLE = @ROLE AND A.ROLE = H.ROLE AND H.USERID = @USERID)  
+  OR (@ROLE <> 3 AND @ROLE <> 0  
+   AND ((A.ROLE = @ROLE AND A.ROLE = H.ROLE AND H.USERID = @USERID)  
+    OR (A.ROLE = @ROLE - 1 AND H.ROLE = @ROLE AND H.USERID = @USERID)  
+    )  
+   )  
+  )  
+ --AND (@STATUS = ''   
+ -- OR (@STATUS <> '' AND A.Status = @STATUS)  
+ -- )  
+ AND ((@TRAN_DATEFR = '' AND @TRAN_DATETO = '')   
+  OR (@TRAN_DATEFR <> '' AND @TRAN_DATETO <> '' AND Created_Date BETWEEN @TRAN_DATEFR AND @TRAN_DATETO)  
+  )  
+ AND ((@QUEUEID = 0 AND A.QUEUEID IN (SELECT H.QUEUEID WHERE G.DEL_FLAG = 'N' AND H.USERID = @USERID))  
+  OR (@QUEUEID <> 0 AND A.QUEUEID = @QUEUEID)  
+  )  
+ AND (@ACTION = 0  
+  OR (@ACTION <> 0 AND A.ACTION = @ACTION)  
+  )  
+ AND (@REFNO = ''   
+  OR (@REFNO <> '' AND D.REFNO LIKE '%' + @REFNO + '%')  
+  )  
+ AND (@Channel = ''   
+  OR (@Channel <> '' AND E.Source_IND = @Channel)  
+  )  
+ AND (@CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS = ''   
+  OR (@CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS <> '' AND D.new_acct_name LIKE '%' + @CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS + '%')  
+  )  
+ AND (@QueueName = ''   
+  OR (@QueueName <> '' AND G.QUEUENAME LIKE '%' + @QueueName + '%')  
+  )  
+ ORDER BY Created_Date DESC, REFNO option(recompile)  
+END   
+ELSE IF @GRIDTYPE = 'C' /*History Screen gridview*/  
+BEGIN  
+ IF OBJECT_ID('tempdb..#tempQueue') IS NOT NULL  
+  DROP TABLE #tempQueue  
+  
+ CREATE TABLE #tempQueue (QUEUEID INT NOT NULL, DEL_FLAG VARCHAR(1) NULL, QUEUENAME NVARCHAR(120) NULL)  
+  
+ INSERT INTO #tempQueue ( QUEUEID, DEL_FLAG, QUEUENAME )  
+ EXEC dbo.NMCHK_GetQueue @USERID = @USERID, @TYPE = 'C'   
+  
+ ;WITH CTE_Blacklist AS (  
+  SELECT uid FROM dbo.NMCHK_ResultHistory WITH (NOLOCK) WHERE NamePropertyBitCode & 1 = 1 GROUP BY uid  
+ )  
+ SELECT DISTINCT A.UID, A.Name_Key, D.new_acct_name, D.user_brnch_nbr, Created_Date, Created_UserId,   
+ Last_Upd_UserId, HandledBy, Action, A.Role, G.QUEUENAME, HOLDBY, A.QUEUEID, A.Remark, LstUpdate_Remark, D.Source_IND, D.Channel, D.Ori_REFNO, D.REFNO,   
+ (SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM UserAccounts WHERE USERID = HandledBy AND Deleted = 0) HandledBy_UserName,   
+ CASE WHEN @CultureName = 'zh-TW' THEN F.STATUS_DESC_zh_TW ELSE STATUS_DESC END AS Status,   
+ (SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE A.ROLE = ID) ROLE_DESC,   
+ (SELECT ISNULL(FirstName,'') + ' ' +  ISNULL(LastName,'') FROM UserAccounts WHERE USERID = LstUpdate_Remark AND Deleted = 0) LstUpdate_Remark_UserName,  
+ (SELECT CASE WHEN @CultureName = 'zh-TW' THEN ROLE_DESC_zh_TW ELSE ROLE_DESC END FROM dbo.WORKFLOW_MGMT_ROLE WHERE ID = (ISNULL(A.LstUpdate_Role,0))) PREVROLE_DESC,   
+ CASE WHEN @CultureName = 'zh-TW' THEN E.SOURCE_DESC_zh_TW ELSE E.SOURCE_DESC END AS SOURCE_DESC, (CASE WHEN H.uid IS NOT NULL THEN 'Y' ELSE 'N' END) AS 'BLACKLIST',  
+ A.ExtendedReviewDate  
+ FROM dbo.NMCHK_Review_Main A WITH (NOLOCK)   
+ JOIN NMCHK_CustInfo D WITH (NOLOCK) ON A.uid = D.uid AND A.name_key = D.new_acct_key  
+ LEFT JOIN dbo.NMCHK_SOURCE_DIM E WITH (NOLOCK) ON D.Source_IND = E.Source_IND   
+ LEFT JOIN WORKFLOW_MGMT_STATUS F WITH (NOLOCK) ON A.STATUS = F.ID  
+ LEFT JOIN WORKFLOW_MGMT_QUEUE G WITH (NOLOCK) ON A.QueueID = G.QUEUEID AND G.SRC = 'NAME'  
+ LEFT JOIN CTE_Blacklist H ON H.uid = A.uid  
+ WHERE (@HANDLEDBY = ''  
+  OR (@HANDLEDBY <> '' AND EXISTS(SELECT 1 FROM dbo.NMCHK_Review_Diagram X WITH (NOLOCK)  
+         WHERE X.NAME_KEY = A.NAME_KEY AND A.UID = X.UID and X.HandledBy = @HANDLEDBY AND X.ROLE = @ROLE)  
+   )  
+  )  
+ AND (@STATUS = ''   
+  OR (@STATUS <> '' AND A.Status = @STATUS)  
+  )  
+ AND ((@TRAN_DATEFR = '' AND @TRAN_DATETO = '')   
+  OR (@TRAN_DATEFR <> '' AND @TRAN_DATETO <> '' AND Created_Date BETWEEN @TRAN_DATEFR AND @TRAN_DATETO)  
+  )  
+ AND ((@QUEUEID = 0 AND A.QUEUEID IN (SELECT QUEUEID FROM #tempQueue))  
+  OR (@QUEUEID <> 0 AND A.QUEUEID = @QUEUEID)  
+  )  
+ AND (@ACTION = 0  
+  OR (@ACTION <> 0 AND A.ACTION = @ACTION)  
+  )  
+ AND (@REFNO = ''   
+  OR (@REFNO <> '' AND D.REFNO LIKE '%' + @REFNO + '%')  
+  )  
+ AND (@Channel = ''   
+  OR (@Channel <> '' AND E.Source_IND = @Channel)  
+  )  
+ AND (@CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS = ''   
+   OR D.new_acct_name LIKE '%' + @CustName COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS + '%')  
+ AND (@QueueName = ''   
+  OR (@QueueName <> '' AND G.QUEUENAME LIKE '%' + @QueueName + '%')  
+  )  
+ ORDER BY Created_Date DESC, UID DESC, NAME_KEY DESC option(recompile)  
+  
+END  
+  
+  
+  
