@@ -1,33 +1,24 @@
-從你查詢出來的結果可以清楚看到原因：
-這筆 Entity（1780520）的 SanctionListReference 清單中，包含的是：
- * Companies House (UK) Disqualified Directors
- * EC 2024/1517 Syria List
- * French Economy Ministry...
- * HM Treasury Consolidated List
- * OFAC - Specially Designated National List
- * FCDO (UK) Sanctions List...
- * CSSF (Luxembourg) Sanctions List
- * SECO (Switzerland) Syria List
-裡面完全沒有 Japanese Finance 相關的名單。
-原因分析
- * 制裁名單不符：
-   你的 SP 條件寫死限制只抓日本金融制裁：
-   WHERE B.SanctionListReference LIKE '%Japanese Finance%'
-
-   因為該筆資料根本不在日本金融制裁名單內，所以在第一關 INSERT INTO #tempDJBlacklistJP 就被直接過濾掉了。
- * 如果這筆原本應該進其他名單：
-   * 他有 OFAC（美國財政部）、HM Treasury（英國財政部）、EC/EU（歐盟制裁）等。
-   * 如果這段 SP 專門只處理 日本制裁（GROUPID = 5），那這筆沒中是符合邏輯的正確行為。
-如果你確認日本名單應該要包含他，請檢查：
- * 查該名稱是否有其他 EntityId（可能有多筆同名但不同 ID）：
-   SELECT EntNum, SdnName, NamePropertyBitCode 
+先別慌，我們一步一步來縮小範圍。請依序在 SSMS 執行以下 3 段查詢，並把結果截圖或貼給我看：
+步驟 1：確認資料庫內所有叫這個名字的 EntityId
+有些人物在 Dow Jones 裡會有好幾個不同的 EntityId，我們先抓出所有可能的人物編號：
+SELECT EntNum, SdnName, NamePropertyBitCode 
 FROM BSADB.dbo.DJ_List_Data_A 
-WHERE SdnName LIKE '%Sai%id%' OR SdnName LIKE '%Shaykh%';
+WHERE SdnName LIKE '%Sai%id%' 
+   OR SdnName LIKE '%Shaykh%';
 
- * 確認日本名單在資料庫中的確切名稱：
-   SELECT DISTINCT SanctionListReference 
+步驟 2：確認資料庫中「日本制裁名單」的確切名稱
+確認一下日本相關名單在你們資料庫裡到底叫什麼名字（看看有沒有可能不是叫 Japanese Finance）：
+SELECT DISTINCT SanctionListReference 
 FROM BSADB.dbo.DJ_SanctionListReference 
 WHERE SanctionListReference LIKE '%Japan%' 
    OR SanctionListReference LIKE '%MOF%' 
    OR SanctionListReference LIKE '%METI%';
 
+步驟 3：查目標表 OFAC_SPEC 現有名單的來源
+看看目前已經成功寫入 GROUPID = 5 的資料，其 remark（EntityId）對應到的是哪種名單名稱：
+SELECT TOP 10 A.spec_name, A.remark, B.SanctionListReference
+FROM BSADBJP..OFAC_SPEC A
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.remark = CAST(B.EntityId AS VARCHAR(100))
+WHERE A.GROUPID = 5 AND A.DInd = 'N';
+
+你先把這 3 個查詢的結果截圖貼上來，我們就能立刻知道是名字 EntityId 抓錯、還是名單關鍵字（Like 條件）寫錯！
