@@ -1,0 +1,6 @@
+SELECT * FROM UserAccounts
+
+
+ID	UserID	UserType	BranchID	Password	FirstName	LastName	PhoneNo	Email	Occupation	CreatedDate	LastLoginDate	LastModifiedDate	AccountExpiredDate	PasswordExpiredDate	Disabled	PhoneExt	NeedChangePassword	AgreeToLicense	Deleted	LoginFailureCount	LastLoginFailureDate	IsDomainUser	CreatedDate_UTC	LastLoginDate_UTC	LastModifiedDate_UTC	AccountExpiredDate_UTC	PasswordExpiredDate_UTC	LastLoginFailureDate_UTC	BusinessCategory	IsAutomated
+5	1040628             	BankUser	1	NULL	ＸＸ幸	NULL	NULL	1040628@tsbtmail.com                    	NULL	2016-03-15 17:07:06.700	2017-02-23 12:09:27.077	2017-03-24 12:28:42.260	NULL	NULL	0	NULL	0	1	1	0	NULL	0	2016-03-15 08:07:06.700	2017-02-23 03:09:27.077	2017-03-24 03:28:42.260	NULL	NULL	NULL	NULL	1
+
