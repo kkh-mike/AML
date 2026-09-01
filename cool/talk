@@ -22,3 +22,25 @@
 是吃WBS還是e-credit的資料啊?
 
 他是法尊
+
+
+回覆法遵（Compliance）或主管時，建議直接切中結論，並把底層 View 的具體欄位對應與資料來源限制條列清楚，顯得專業且有憑有據。
+可以直接參考以下擬稿回覆：
+回覆範本：
+> 您好，
+> 經檢視目前海外 AML 系統前置資料 View（[dbo].[Preload_Customer]），行業別與職業相關欄位全部都是取自海外核心系統（WBS），並非 e-Credit。
+> 具體欄位來源與對應邏輯如下：
+>  * 行業代碼（SIC_Code）：
+>    * 資料來源：WBS_CIF_CUST_INFO.LOCAL_INDUSTRY_CODE
+>    * 處理邏輯：取 WBS 當地行業代碼，若為空值則預設補 '999999'。
+>  * 職業代碼（OccupationCode）：
+>    * 資料來源：WBS_CIF_KYC.OCCUPATION
+>    * 處理邏輯：取 WBS 有效 KYC 紀錄（STATUS = '1'）中的職業代碼。
+>  * 業務板塊 / 行業分類（OWNERSHIP_CODE）：
+>    * 資料來源：WBS_CIF_CUST_INFO.BUSINESS_SECTOR_CODE
+>    * 處理邏輯：取 WBS 客戶主檔的行業代碼（同時用於判斷員工註記及客群劃分）。
+> 目前底層 SQL 邏輯中並未串接 e-Credit 相關資料表。若法遵評估此處需改採 e-Credit 或以 e-Credit 為優先覆蓋來源，後續可再討論調整 ETL / View 的 Mapping 規則。
+> 
+補充說明（給你的判斷建議）：
+法遵會問這個問題，通常是因為法遵端認為 e-Credit（授信/徵信系統） 上的行業別可能更即時或更精準（尤其是法人戶），而想確認 AML 監控當下抓的是核心帳務（WBS）還是徵信端。最後一段主動提及「若需調整可配合評估」，能展現 IT 在系統架構上的彈性與支援度。
+
