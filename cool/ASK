@@ -1,26 +1,26 @@
-這張截圖證實了問題的根本來源：
-DBCHK_NameDetectionResults 裡面完全是空的（0 筆）。
-這代表：負責算名字相似度分數（Fuzzy Match）的比對引擎程式，在載入黑名單母表時，根本沒有把 OFAC_SPEC（GROUPID = 5）載入進去比對！
-原因解析
-系統的比對流程通常分為兩大步：
- * 第一步（比對演算程式 / 演算法執行）：比對引擎（可能是 C# 服務、獨立的比對執行檔或是特定的準備 SP）從黑名單母表中載入名單，與客戶名單計算相似度（RC），並將結果寫入 DBCHK_NameDetectionResults。
- * 第二步（後處理 SP）：由剛才那支 DBCHK_ProcessDetectionResults 進行 RC 扣分、性別過濾，最後寫入正式結果表。
-現在第一步產出的 DBCHK_NameDetectionResults 裡面連一筆 sdn_grp_num = 5 都沒有，代表比對引擎在讀取黑名單時，漏掉了 OFAC_SPEC 或特定的黑名單 Buffer 表。
-排查與定位步驟
-請依序在 SSMS 執行以下查詢，找出比對引擎到底讀了哪張黑名單快取表：
-步驟 1：檢查黑名單暫存快取表 DBCHK_BlackListData_Buffer
-在剛才的 SP 裡有這行宣告：FROM [dbo].[DBCHK_BlackListData_Buffer]。請檢查這張快取表裡面有沒有日本名單（GROUPID = 5）：
-SELECT TOP 10 * 
-FROM BSADBJP.dbo.DBCHK_BlackListData_Buffer 
-WHERE sdn_grp_num = 5 OR sdn_type = 'SPEC';
-
- * 如果這張表查出來是 0 筆：真相大白！系統比對引擎是去讀取 DBCHK_BlackListData_Buffer，而這張表裡目前只有國際名單，沒有把 OFAC_SPEC (GROUPID = 5) 同步進來。
-步驟 2：找出填寫 DBCHK_BlackListData_Buffer 的前置 SP
-如果步驟 1 查出來是 0 筆，請搜尋是哪支 SP 負責準備這張快取表：
+這張截圖把關鍵問題完全證實了：
+ * DBCHK_BlackListData_Buffer 裡面有自訂名單（sdn_type = 'SPEC'），但目前只有 sdn_grp_num = 8、11 等，完全沒有 sdn_grp_num = 5（日本名單）！
+ * 比對引擎在比對時，是去掃描這張 Buffer 快取表。因為 GROUPID = 5 的 72,086 筆名單根本沒有被寫入 DBCHK_BlackListData_Buffer，所以不管送檢什麼名字（包含死亡名單 Kisoni, Kambale），比對引擎都絕對抓不到。
+解決與定位步驟
+步驟 1：找出維護/刷新 DBCHK_BlackListData_Buffer 的 SP
+在 SSMS 執行以下查詢，找出將名單寫入該 Buffer 表的 SP：
 SELECT OBJECT_NAME(id) AS SP_Name
 FROM syscomments
 WHERE text LIKE '%DBCHK_BlackListData_Buffer%'
-  AND text LIKE '%INSERT INTO%'
+  AND (text LIKE '%INSERT INTO%' OR text LIKE '%MERGE%')
 GROUP BY OBJECT_NAME(id);
 
-只要執行/修改這支前置 SP，把 OFAC_SPEC 的 72,086 筆日本名單寫入 DBCHK_BlackListData_Buffer，比對引擎就能正常掃描到死亡名單與日本名單了！
+步驟 2：檢查該 SP 為什麼漏抓 GROUPID = 5
+找到 SP 名稱後（假設名稱為 DBCHK_PrepareBlackListBuffer 或類似名稱），執行：
+sp_helptext '你的SP名稱';
+
+重點檢查內容：
+ * 裡面是不是有這類條件：WHERE GROUPID IN (1, 2, 8, 11)，漏加了 5？
+ * 或者是串接 lowrisklistgroups 時，因為之前 GROUPID = 5 的設定被設成 NamePropertyBitCode = 0 或其他旗標，導致在寫入 Buffer 時被過濾掉了？
+步驟 3：手動補跑/刷新 Buffer 測試
+一旦確認並修改該前置 SP（或直接重新執行該 SP 刷新 Buffer），再查一次 Buffer 表：
+SELECT COUNT(*) 
+FROM BSADBJP.dbo.DBCHK_BlackListData_Buffer 
+WHERE sdn_grp_num = 5;
+
+只要這裡查出有筆數（約 7 萬多筆），接著再去送檢 Kisoni, Kambale，檢核就會立刻命中並記錄到結果表中。
