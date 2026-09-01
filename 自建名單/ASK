@@ -1,7 +1,3 @@
-為了預先撈出**死亡名單（Deceased = 1）**中會被寫入 GROUPID = 5 的資料，並在同步後驗證寫入狀況，可以依照以下兩段 SQL 腳本執行：
-第一步：同步前（Pre-Check）
-此查詢模擬第二段死亡名單的篩選邏輯（排除已存在於第一段名單中的 EntityId），並列出這些死亡名單目前在目標表 OFAC_SPEC 的現況（是全新資料、已存在且有效、還是需要從刪除狀態恢復）。
--- 1. 取得第一段一般名單的 EntityId
 WITH PrimaryList AS
 (
     SELECT A.EntNum
@@ -45,66 +41,8 @@ LEFT JOIN BSADBJP..OFAC_SPEC T
    AND T.spec_name = D.SdnName 
    AND T.remark = CAST(D.EntityId AS VARCHAR(100));
 
-第二步：同步後（Post-Check）
-執行完同步腳本後，執行此語法驗證目標表 OFAC_SPEC 是否已正確更新為有效狀態（DInd = 'N'），並確認寫入的 LOG 是否正確：
--- 1. 驗證目標表 OFAC_SPEC 是否已正確寫入/更新為有效狀態
-WITH PrimaryList AS
-(
-    SELECT A.EntNum
-    FROM BSADB.dbo.DJ_List_Data_A A
-    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
-    WHERE A.NamePropertyBitCode & 1 > 0
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-    GROUP BY A.EntNum
-),
-DeceasedSource AS
-(
-    SELECT 
-        A.EntityId, 
-        A.FullName AS SdnName, 
-        MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate
-    FROM BSADB.dbo.DJ_Entity A
-    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-    WHERE A.Deceased = 1
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-      AND NOT EXISTS (SELECT 1 FROM PrimaryList P WHERE P.EntNum = A.EntityId)
-    GROUP BY A.EntityId, A.FullName
-)
-SELECT 
-    S.EntityId,
-    S.SdnName,
-    S.UpdatedDate AS Source_UpdatedDate,
-    T.ent_num,
-    T.spec_name,
-    T.updated_date AS Target_UpdatedDate,
-    T.DInd,
-    T.SOURCE,
-    T.DOB,
-    T.ADDRESS,
-    CASE 
-        WHEN T.ent_num IS NULL THEN '❌ 遺漏未寫入'
-        WHEN T.DInd <> 'N' THEN '❌ 狀態異常 (DInd 不是 N)'
-        WHEN T.updated_date <> S.UpdatedDate THEN '⚠️ 日期不一致'
-        ELSE '✅ 寫入成功且狀態正常'
-    END AS VerificationStatus
-FROM DeceasedSource S
-LEFT JOIN BSADBJP..OFAC_SPEC T 
-    ON T.GROUPID = 5 
-   AND T.spec_name = S.SdnName 
-   AND T.remark = CAST(S.EntityId AS VARCHAR(100));
 
-補充：檢查最近寫入的 LOG
-若想進一步確認異動日誌（OFAC_SPEC_LOG），可透過以下語法查看本次執行的動作代碼（ActionCD：01 為新增/復原，02 為修改）：
-SELECT TOP 50 
-    L.ent_num,
-    L.spec_name,
-    L.remark AS EntityId,
-    L.ActionCD,
-    L.DInd,
-    L.ActionDT,
-    L.ActionDT_UTC
-FROM BSADBJP.dbo.OFAC_SPEC_LOG L
-WHERE L.GROUPID = 5
-  AND L.ActionDT_UTC >= DATEADD(MINUTE, -10, GETUTCDATE()) -- 最近 10 分鐘內異動
-ORDER BY L.ActionDT_UTC DESC;
 
+我這個就轉好久
+
+可以不要寫這ˇ麼複雜的?
