@@ -1,31 +1,49 @@
-執行 NMCHK_GetResultFilter 查不出任何資料（結果為空），代表案件被這支 SP 內的權限、Queue 或案件狀態條件擋下來了。
-請在 SSMS 執行以下語句，直接拆解是哪一個條件在卡：
-DECLARE @UserID NVARCHAR(60) = '1061592';
-DECLARE @Role INT = 3;
+要驗證「死亡名單（Deceased = 1）」在姓名檢核中是否會命中，目前整條資料鏈路有 3 個最容易卡住的關鍵點：
+1. 寫入暫存表的邏輯：名字來源與 Deceased 狀態
+回看你第一段 SP 的死亡名單抓取邏輯：
+INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
+SELECT 
+    A.EntityId, 
+    A.FullName, 
+    MAX(CONVERT(VARCHAR,A.UpdatedDate_UTC,112)) AS UpdatedDate
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND NOT EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE X.EntNum = A.EntityId)
+GROUP BY A.EntityId, A.FullName;
 
--- 1. 查看系統中最新的前 5 筆案件狀態與所屬 Queue
-SELECT TOP 5 
-    A.UID, 
-    A.Name_Key, 
-    A.STATUS, 
-    A.Role AS Case_Role, 
-    A.HandledBy, 
-    A.QUEUEID, 
-    A.Created_Date
-FROM BSADBJP.dbo.NMCHK_Review_Main A WITH (NOLOCK)
-ORDER BY A.Created_Date DESC;
+這裡有 2 個潛在問題：
+ * 問題 A：拿的是 A.FullName 而不是拆解後的名稱（SdnName）
+   * DJ_Entity.FullName 通常是 Western 格式或未經處理的全名（例如 First Middle Last），而一般黑名單表 DJ_List_Data_A 裡面的是 Last Name First（例如 Last, First Middle）。如果送檢的名字格式跟 FullName 差異過大，模糊比對的分數（Relative Correlation）會不夠高而掉出門檻。
+ * 問題 B：該死亡人物有沒有掛在 Japanese Finance 名單下
+   * 該人物如果 Deceased = 1，但它在 Dow Jones 裡沒有掛 Japanese Finance 的 Reference，這段就不會進。
+2. 比對母表 / BitCode 設定問題
+ * 前面排查發現，lowrisklistgroups 的 GROUPID = 5 原本 NamePropertyBitCode 是 0。
+ * 死亡名單寫入 OFAC_SPEC 後，系統的比對 Engine 是否把這批資料的 NamePropertyBitCode 正確設為 1？
+ * 如果寫入比對暫存/歷史表時 NamePropertyBitCode = 0，系統就會判定為非命中。
+3. 排查與驗證步驟
+請直接在 SSMS 執行以下 SQL，確認目前資料庫中「有哪些死亡名單已經成功進到 OFAC_SPEC（GROUPID = 5）」，直接挑一個現成的名字去測：
+-- 找出 GROUPID = 5 裡面確定是死人 (Deceased = 1) 的名單
+SELECT TOP 10 
+    O.spec_name, 
+    O.ent_num, 
+    O.remark AS EntityId, 
+    E.FullName AS DJ_FullName,
+    E.Deceased
+FROM BSADBJP..OFAC_SPEC O
+JOIN BSADB.dbo.DJ_Entity E ON O.remark = CAST(E.EntityId AS VARCHAR(100))
+WHERE O.GROUPID = 5 
+  AND O.DInd = 'N'
+  AND E.Deceased = 1;
 
--- 2. 檢查此登入帳號（1061592）到底被分配在哪些 Queue 和 Role
-SELECT * 
-FROM BSADBJP.dbo.WORKFLOW_MGMT_USERS WITH (NOLOCK)
-WHERE USERID = @UserID;
+驗證測試：
+ * 從上面查詢結果中挑選一筆 spec_name（例如複製整串名稱）。
+ * 用這個名稱送姓名檢核。
+ * 執行完成後，查 NMCHK_ResultHistory：
+   SELECT uid, sdn_name, sdn_type, sdn_grp_num, relative_correlation, NamePropertyBitCode
+FROM BSADBJP.dbo.NMCHK_ResultHistory
+WHERE sdn_grp_num = 5
+ORDER BY uid DESC;
 
-最常導致「空結果」的 3 個卡點對照：
- * Queue 權限對不上（最常見）：
-   * 案件上的 A.QUEUEID 必須存在於 WORKFLOW_MGMT_USERS 且該 User 有綁定對應的 ROLE。
-   * 如果第 1 個查詢的 QUEUEID 沒有出現在第 2 個查詢的清單裡，SP 就會直接全部濾除。
- * 案件已經被指派經辦人（HandledBy 不為空）：
-   * @GRIDTYPE = 'A' 是待分派清單（Main Queue），條件要求 HandledBy 必須是空的。如果案件已經被指派（例如已有特定經辦人），它只會出現在 @GRIDTYPE = 'B'（Personal Queue）。
- * 案件狀態已經結案（STATUS = '3'）：
-   * SP 明確排除了結案狀態（WHERE A.STATUS <> '3'）。
-把上面這兩段查詢的結果貼出來，就能直接抓出是卡在 Queue 指派還是案件狀態。
+只要這裡有查出資料且 relative_correlation 超過門檻（通常為 85 或 90 以上），就代表死亡名單的檢核邏輯已經完全通暢。
