@@ -1,21 +1,9 @@
-這筆 確定不是 GROUPID = 5，它是一筆標準的 美國 OFAC 制裁名單。
-直接看這兩個欄位即可判斷：
- * sdn_type = 'OFAC'：表示名單來源為美國財政部 OFAC（若是日本自訂名單，此欄位會是 SPEC 或 SPEC_CN）。
- * sdn_grp_num = 0：國際標準制裁名單（OFAC、UN、EU 等）的群組代碼皆為 0；如果是自訂黑名單群組，此欄位會直接填入其群組編號（例如 5）。
-如何用 SQL 直接關聯驗證
-執行以下查詢，若能串出 GROUPDESCR 且顯示為自訂名單，才代表來自 GROUPID = 5：
-SELECT 
-    A.uid,
-    A.sdn_name,
-    A.sdn_type,
-    A.sdn_grp_num,
-    L.GROUPDESCR,
-    CASE 
-        WHEN A.sdn_type IN ('SPEC', 'SPEC_CN') AND A.sdn_grp_num = 5 THEN '是 (Group 5 日本金融制裁)'
-        ELSE '否 (非 Group 5，目前來源為: ' + A.sdn_type + ')'
-    END AS Is_GroupID_5
-FROM BSADBJP.dbo.NMCHK_ResultHistory A
-LEFT JOIN BSADBJP.dbo.lowrisklistgroups L 
-  ON A.sdn_grp_num = L.GROUPID
-WHERE A.uid = '202698';
-
+SELECT TOP 10 
+    spec_name, 
+    ent_num, 
+    remark AS EntityId, 
+    updated_date
+FROM BSADBJP..OFAC_SPEC
+WHERE GROUPID = 5 
+  AND DInd = 'N'
+  AND spec_name NOT IN (SELECT sdn_name FROM BSADBJP..OFAC_SDN);
