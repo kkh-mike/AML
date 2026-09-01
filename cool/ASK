@@ -1,23 +1,15 @@
-報錯原因是你在單獨執行選取的這段 SQL 時，前面宣告建立 #tempDJBlacklistJP 的 CREATE TABLE 還沒被執行過，所以 SQL Server 認不得這個暫存表。
-請直接改用以下 獨立可執行的查詢語句，不需要建暫存表，就能直接查出日本名單中所有符合條件的死亡名單：
-SELECT 
-    A.EntityId, 
-    A.FullName, 
-    MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate,
-    B.SanctionListReference
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-WHERE A.Deceased = 1
-  AND B.SanctionListReference LIKE '%Japanese Finance%'
-GROUP BY A.EntityId, A.FullName, B.SanctionListReference;
 
-測試驗證步驟
- * 執行上面的 SQL。
- * 從結果挑選一個人的 FullName（例如複製整串姓名）。
- * 拿這個名字去系統送姓名檢核。
- * 檢核完後，執行以下查詢確認是否命中：
+-- Kisoni, Kambale
+
    SELECT uid, sdn_name, sdn_type, sdn_grp_num, relative_correlation, NamePropertyBitCode
 FROM BSADBJP.dbo.NMCHK_ResultHistory
 WHERE sdn_grp_num = 5
 ORDER BY uid DESC;
 
+
+結果
+uid	sdn_name	sdn_type	sdn_grp_num	relative_correlation	NamePropertyBitCode
+201916	ナカノナミ	GLSPEC	5	100	7
+
+
+沒有我查的 Kisoni, Kambale
