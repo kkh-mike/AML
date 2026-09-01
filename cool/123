@@ -5,11 +5,12 @@ GO
 USE [BSADBTW]
 GO
 
-/****** Object:  Table [dbo].[Acct_Migrate_buffer]    Script Date: 2026/8/20 上午 08:49:14 ******/
 SET ANSI_NULLS ON
 GO
-
 SET QUOTED_IDENTIFIER ON
+GO
+
+DROP TABLE IF EXISTS [dbo].[Acct_Migrate_buffer];
 GO
 
 CREATE TABLE [dbo].[Acct_Migrate_buffer](
@@ -102,7 +103,6 @@ CREATE TABLE [dbo].[Acct_Migrate_buffer](
 	[EXPECTED_MTH_TRANAMT_TTL] [decimal](24, 2) NULL,
 	[EXPECTED_MTH_TRANAMT_TTL_OUT] [decimal](24, 2) NULL
 ) ON [PRIMARY]
-
 GO
 
 
@@ -110,11 +110,12 @@ GO
 USE [BSADBTW]
 GO
 
-/****** Object:  Table [dbo].[LoadTrxn_Migrate_buffer]    Script Date: 2026/8/20 上午 08:50:20 ******/
 SET ANSI_NULLS ON
 GO
-
 SET QUOTED_IDENTIFIER ON
+GO
+
+DROP TABLE IF EXISTS [dbo].[LoadTrxn_Migrate_buffer];
 GO
 
 CREATE TABLE [dbo].[LoadTrxn_Migrate_buffer](
@@ -162,20 +163,19 @@ CREATE TABLE [dbo].[LoadTrxn_Migrate_buffer](
 	[reference] [varchar](50) NULL,
 	[TRANDT] [nvarchar](60) NULL
 ) ON [PRIMARY]
-
 GO
-
 
 
 -- 3. Cust_NP_Migrate_buffer
 USE [BSADBTW]
 GO
 
-/****** Object:  Table [dbo].[Cust_NP_Migrate_buffer]    Script Date: 2026/8/20 上午 08:51:16 ******/
 SET ANSI_NULLS ON
 GO
-
 SET QUOTED_IDENTIFIER ON
+GO
+
+DROP TABLE IF EXISTS [dbo].[Cust_NP_Migrate_buffer];
 GO
 
 CREATE TABLE [dbo].[Cust_NP_Migrate_buffer](
@@ -190,20 +190,19 @@ CREATE TABLE [dbo].[Cust_NP_Migrate_buffer](
 	[IsComplexStructure] [bit] NULL,
 	[IsBearerShares] [bit] NULL
 ) ON [PRIMARY]
-
 GO
-
 
 
 -- 4. RP_NP_Migrate_buffer
 USE [BSADBTW]
 GO
 
-/****** Object:  Table [dbo].[RP_NP_Migrate_buffer]    Script Date: 2026/8/20 上午 08:52:23 ******/
 SET ANSI_NULLS ON
 GO
-
 SET QUOTED_IDENTIFIER ON
+GO
+
+DROP TABLE IF EXISTS [dbo].[RP_NP_Migrate_buffer];
 GO
 
 CREATE TABLE [dbo].[RP_NP_Migrate_buffer](
@@ -214,20 +213,19 @@ CREATE TABLE [dbo].[RP_NP_Migrate_buffer](
 	[PEPBitwiseCode] [int] NULL,
 	[isDeleted] [bit] NULL
 ) ON [PRIMARY]
-
 GO
-
 
 
 -- 5. lowrisklistgroups_Migrate_buffer
 USE [BSADBTW]
 GO
 
-/****** Object:  Table [dbo].[lowrisklistgroups_Migrate_buffer]    Script Date: 2026/8/20 上午 08:54:05 ******/
 SET ANSI_NULLS ON
 GO
-
 SET QUOTED_IDENTIFIER ON
+GO
+
+DROP TABLE IF EXISTS [dbo].[lowrisklistgroups_Migrate_buffer];
 GO
 
 CREATE TABLE [dbo].[lowrisklistgroups_Migrate_buffer](
@@ -252,20 +250,19 @@ CREATE TABLE [dbo].[lowrisklistgroups_Migrate_buffer](
 	[ApprovedDelDate] [nvarchar](60) NULL,
 	[ApprovedDelDate_UTC] [nvarchar](60) NULL
 ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
-
 GO
-
 
 
 -- 6. OFAC_SPEC_Migrate_buffer
 USE [BSADBTW]
 GO
 
-/****** Object:  Table [dbo].[OFAC_SPEC_Migrate_buffer]    Script Date: 2026/8/20 上午 08:54:38 ******/
 SET ANSI_NULLS ON
 GO
-
 SET QUOTED_IDENTIFIER ON
+GO
+
+DROP TABLE IF EXISTS [dbo].[OFAC_SPEC_Migrate_buffer];
 GO
 
 CREATE TABLE [dbo].[OFAC_SPEC_Migrate_buffer](
@@ -309,20 +306,19 @@ CREATE TABLE [dbo].[OFAC_SPEC_Migrate_buffer](
 	[ApproveEditDate_UTC] [nvarchar](50) NULL,
 	[Gender] [nvarchar](2) NULL
 ) ON [PRIMARY]
-
 GO
-
 
 
 -- 7. Migrator_LOG
 USE [BSADBTW]
 GO
 
-/****** Object:  Table [dbo].[Migrator_LOG]    Script Date: 2026/8/20 上午 08:55:30 ******/
 SET ANSI_NULLS ON
 GO
-
 SET QUOTED_IDENTIFIER ON
+GO
+
+DROP TABLE IF EXISTS [dbo].[Migrator_LOG];
 GO
 
 CREATE TABLE [dbo].[Migrator_LOG](
@@ -331,7 +327,6 @@ CREATE TABLE [dbo].[Migrator_LOG](
 	[FLAG] [varchar](1) NULL,
 	[LINE] [int] NULL
 ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
-
 GO
 
 
@@ -339,11 +334,12 @@ GO
 USE [BSADBTW]
 GO
 
-/****** Object:  Table [dbo].[XREF]    Script Date: 2026/8/20 上午 08:56:03 ******/
 SET ANSI_NULLS ON
 GO
-
 SET QUOTED_IDENTIFIER ON
+GO
+
+DROP TABLE IF EXISTS [dbo].[XREF];
 GO
 
 CREATE TABLE [dbo].[XREF](
@@ -354,24 +350,18 @@ CREATE TABLE [dbo].[XREF](
 	[STATUS] [varchar](2) NULL,
 	[LST_MTN_DT] [varchar](8) NULL
 ) ON [PRIMARY]
-
 GO
 
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'組織別' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'XREF', @level2type=N'COLUMN',@level2name=N'INST_NO'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'外部參考' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'XREF', @level2type=N'COLUMN',@level2name=N'EXTN_REF_NO'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'內部參考' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'XREF', @level2type=N'COLUMN',@level2name=N'INTN_REF_NO'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'型態' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'XREF', @level2type=N'COLUMN',@level2name=N'TYPE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'狀態' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'XREF', @level2type=N'COLUMN',@level2name=N'STATUS'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'最後異動日' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'XREF', @level2type=N'COLUMN',@level2name=N'LST_MTN_DT'
 GO
 
@@ -380,18 +370,18 @@ GO
 USE [SARCaseWarehouse]
 GO
 
-/****** Object:  Table [dbo].[SK_SAR_SuspiciousActivityCharacteristicsDim_TW]    Script Date: 2026/8/20 上午 08:57:22 ******/
 SET ANSI_NULLS ON
 GO
-
 SET QUOTED_IDENTIFIER ON
+GO
+
+DROP TABLE IF EXISTS [dbo].[SK_SAR_SuspiciousActivityCharacteristicsDim_TW];
 GO
 
 CREATE TABLE [dbo].[SK_SAR_SuspiciousActivityCharacteristicsDim_TW](
 	[QRYREFID] [varchar](100) NULL,
 	[CODE] [varchar](6) NULL
 ) ON [PRIMARY]
-
 GO
 
 
@@ -399,11 +389,12 @@ GO
 USE [BSADBTW]
 GO
 
-/****** Object:  Table [dbo].[CIF_Migrate_Mapping_TEMP]    Script Date: 2026/8/20 上午 08:58:11 ******/
 SET ANSI_NULLS ON
 GO
-
 SET QUOTED_IDENTIFIER ON
+GO
+
+DROP TABLE IF EXISTS [dbo].[CIF_Migrate_Mapping_TEMP];
 GO
 
 CREATE TABLE [dbo].[CIF_Migrate_Mapping_TEMP](
@@ -411,20 +402,19 @@ CREATE TABLE [dbo].[CIF_Migrate_Mapping_TEMP](
 	[SOURCE_CIF_KEY] [nvarchar](100) NOT NULL,
 	[NEW_CIF_KEY] [nvarchar](100) NOT NULL
 ) ON [PRIMARY]
-
 GO
-
 
 
 -- 11. lowrisklistgroups_Migrate_Mapping_TEMP
 USE [BSADBTW]
 GO
 
-/****** Object:  Table [dbo].[lowrisklistgroups_Migrate_Mapping_TEMP]    Script Date: 2026/8/20 上午 08:58:50 ******/
 SET ANSI_NULLS ON
 GO
-
 SET QUOTED_IDENTIFIER ON
+GO
+
+DROP TABLE IF EXISTS [dbo].[lowrisklistgroups_Migrate_Mapping_TEMP];
 GO
 
 CREATE TABLE [dbo].[lowrisklistgroups_Migrate_Mapping_TEMP](
@@ -432,7 +422,6 @@ CREATE TABLE [dbo].[lowrisklistgroups_Migrate_Mapping_TEMP](
 	[NewGroupID] [int] NOT NULL,
 	[specType] [int] NOT NULL
 ) ON [PRIMARY]
-
 GO
 
 
@@ -440,11 +429,12 @@ GO
 USE [BSADBTW]
 GO
 
-/****** Object:  Table [dbo].[Customer_Migrate_Exception_Table]    Script Date: 2026/8/20 上午 08:59:20 ******/
 SET ANSI_NULLS ON
 GO
-
 SET QUOTED_IDENTIFIER ON
+GO
+
+DROP TABLE IF EXISTS [dbo].[Customer_Migrate_Exception_Table];
 GO
 
 CREATE TABLE [dbo].[Customer_Migrate_Exception_Table](
@@ -471,7 +461,6 @@ CREATE TABLE [dbo].[Customer_Migrate_Exception_Table](
 	[CUST_TYPE_CDE] [varchar](2) NULL,
 	[Cust_With_Bearer_Shares] [varchar](2) NULL
 ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
-
 GO
 
 
@@ -479,11 +468,12 @@ GO
 USE [BSADBTW]
 GO
 
-/****** Object:  Table [dbo].[Customer_Migrate_buffer]    Script Date: 2026/8/20 上午 08:59:53 ******/
 SET ANSI_NULLS ON
 GO
-
 SET QUOTED_IDENTIFIER ON
+GO
+
+DROP TABLE IF EXISTS [dbo].[Customer_Migrate_buffer];
 GO
 
 CREATE TABLE [dbo].[Customer_Migrate_buffer](
@@ -507,7 +497,6 @@ CREATE TABLE [dbo].[Customer_Migrate_buffer](
 	[CUST_TYPE_CDE] [varchar](2) NULL,
 	[Cust_With_Bearer_Shares] [varchar](2) NULL
 ) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
-
 GO
 
 
@@ -515,11 +504,12 @@ GO
 USE [BSADBTW]
 GO
 
-/****** Object:  Table [dbo].[BANCS_SK_CUST_INFO]    Script Date: 2026/8/20 上午 09:00:28 ******/
 SET ANSI_NULLS ON
 GO
-
 SET QUOTED_IDENTIFIER ON
+GO
+
+DROP TABLE IF EXISTS [dbo].[BANCS_SK_CUST_INFO];
 GO
 
 CREATE TABLE [dbo].[BANCS_SK_CUST_INFO](
@@ -626,313 +616,209 @@ CREATE TABLE [dbo].[BANCS_SK_CUST_INFO](
 	[SK_SEND_ADD_CY_CODE] [varchar](2) NULL,
 	[SK_ENGL_ADD_CY] [varchar](2) NULL
 ) ON [PRIMARY]
-
 GO
 
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'客戶號碼(台新編CIF_KEY)' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUST_NO'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'新光_轉出客戶ID' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_CUST_ID'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'台新_轉入客戶ID' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'TS_CUST_ID'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'客戶合併重號註記' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUST_RE_NO_FLG'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'ID型態' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUST_ID_TYPE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'國別' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSM_NATIONALITY_CODE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'OBU/DBU註記' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_OD_FLAG'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'生日/營利事業登記日' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVDD_BIRTH_DATE_1'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'姓名/公司戶名(中文欄位注意難字處理)' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVAA_NAME2'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'英文姓名/公司英文戶名' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVAA_NAME1'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'戶籍郵遞區號(法人公司登記地址)' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVAA_POSTCODE_REGISTER'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'通訊1郵遞區號' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVAA_POSTCODE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'通訊2郵遞區號' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_COMM_ZIP_CODE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'戶籍地址(法人公司登記地址)' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVAA_REGISTER_ADD'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'通訊地址 1(中文欄位注意難字處理)' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVAA_ADD1_2'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'通訊地址 2(中文欄位注意難字處理)' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVAA_ADD3_4'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'英文地址' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVA3_ADD'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'新光_其他地址 (中文欄位注意難字處理)' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_OTHER_ADDR'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'新光_公司地址(中文欄位注意難字處理)' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_CPNY_ADDR'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'新光_通訊電話區碼' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_TEL_ZONE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'通訊電話' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVAA_PHONE_NO_RES'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'通訊電話_分機' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVAA_PHONE_RES_EXT'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'新光_戶籍電話區碼' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_HOUSE_TEL_ZONE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'戶籍電話' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVAA_PHONE_NO_REGISTER'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'新光_傳真號碼區碼' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_FAX_ZONE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'傳真號碼' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVAA_FAX_NO'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'新光_公司電話區碼' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_CPNY_TEL_ZONE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'公司電話' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVAA_PHONE_NO_BUS'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'公司電話_分機' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'PHONE_BUS_EXT'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'行動電話' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVAA_TELEX_NO'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'新光_聯絡人1電話區碼' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_NOTICE_TEL_ZONE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'聯絡人1電話' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVDD_CONTACT_PHONE_1'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'聯絡人1電話分機' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVD4_PHONE_EXT_1'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'新光_簡訊電話' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_MSG_TEL'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'新光_其他電話' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_OTHER_TEL'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'性別(F_女性／M_男性)' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVDD_SEX_CODE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'稱謂01:先生、02:小姐，公司空白' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVAA_TITLE_CODE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'客戶型態別01_個人戶、02_公司戶(不可空白)' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSM_CUSTOMER_TYPE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'客戶性質別' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSM_BUS_SECTOR_CODE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'新光_客戶型態' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_CUST_TYPE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'新光_客戶類別' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_CUST_KIND'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'TS 稅率代號' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSM_WTAX_TYPE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'SK 扣稅別' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_TAX_RATE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'行業代號(主計處行業別)' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSM_INDUSTRY_CODE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'新光_央行行業別' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_BINS_CODE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'個資法同意書(Y_是／N_否)' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUMI_PDS_LAW_AGREE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'文件寄送(Y_是／N_否)' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUMI_DMA_ACCT'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'行銷廣告(Y_是／N_否)' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUMI_DMA_ADVERTISE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'扣繳憑單寄發' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUMI_WTC_POST_FLAG'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'客戶狀態' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSM_CUSTOMER_STATUS'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'二代健保扣費註記' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSM_TFN_STATUS'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'警示類型' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSM_LOCKER_HOLDER'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'婚姻狀態' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVDD_MARITAL_STATUS'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'居住型態' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVDD_HOUSE_LIVE_STATUS'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'房屋所有人' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVDD_OCCUPANCY'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'子女數' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVDD_DEPENDENTS'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'公司名稱' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVDD_EMPLOYER_NAME'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'到職日期' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVDD_EMPLOYED_FROM'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'TS 職位代號' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVDD_OCCUP_DESCRIP'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'TS 職業別代號' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVDD_OCCUPATION_CODE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'SK 職稱' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_BUSI_TITLE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'SK 職業別' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_JOB_CODE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'法定代理人1 ID' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVDD_GUARDIAN_ID'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'法定代理人1  ID_TYPE' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVDD_GUARDIAN_TYPE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'法定代理人1  ID_國籍' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_MS_1_CY_CODE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'法定代理人2 ID ' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVDD_GUARDIAN_ID_1'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'法定代理人2  ID_TYPE' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVDD_GUARDIAN_TYPE_1'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'法定代理人2  ID_國籍' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_MS_2_CY_CODE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'聯絡人1姓名' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVDD_CONTACT_1'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'聯絡人1關係' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVDD_CONTACT_RELATION_1'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'負責人ID' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVD4_BOSS_ID_NO'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'負責人ID 型態' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVD4_BOSS_ID_TYPE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'負責人ID 型態_國籍' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_BOSS_CY_CODE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'負責人生日' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVD4_BOSS_BIRTHDAY'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'負責人姓名' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVD4_BOSS_NAME'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'資本額' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVD4_CAPITAL_AMOUNT'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'證券發行狀況' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVD4_STOCK_ISSUE_STATUS'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'總公司統編' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVD4_BUSINESS_NO'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'電子郵件' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUMI_EMAIL_ADD1'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'電子郵件驗證' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUMI_EMAIL_VERIFY'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'教育程度' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUMI_EDUCATION_CODE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'年收入(元)' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSV_D1_INCOME'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'原住民羅馬拼音' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVD3_INDICATE_NAME'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'電子支付警示類型' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVD3_EPAY_LOCK_HOLDER'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'法定代理人1 姓名' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SEAD_GUAR_NAME_1'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'法定代理人2 姓名' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SEAD_GUAR_NAME_2'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'CIF開戶日，非帳戶層的帳戶開戶日' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CREATE_DT'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'CIF分行別' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'HOME_BRANCH_NO'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'最後維護日' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'LST_MTN_DATE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'SWIFT匯款國別' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SEAD_SWIFT_NATN_CODE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'SWIFT匯款城市' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SEAD_SWIFT_CITY'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'SWIFT匯款地址 ' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SEAD_SWIFT_ADDR'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'英文資料確認日期' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSVA3_FAX_NO_1'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'身分別' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUMI_FCY_ID_TYPE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'與大陸往來關係' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUMI_FCY_EXRTCLS'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'授信虛擬編號' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUMI_FCY_VIRTUAL_AC'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'簽帳金融卡對帳單設定_E_mail' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSM_MAIL_IND'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'綜合對帳單訂閱' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUST_MAIL_IND'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'Fled行方不明高風險外籍人士(2:1)' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSV_D3_CHQ_BK_TYPE_2'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'Punish遭查處收容含遣返高風險外籍人士(3:1)' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'CUSV_D3_CHQ_BK_TYPE_3'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'通訊地址國別' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_SEND_ADD_CY_CODE'
 GO
-
 EXEC sys.sp_addextendedproperty @name=N'MS_Description', @value=N'英文聯絡地址國別' , @level0type=N'SCHEMA',@level0name=N'dbo', @level1type=N'TABLE',@level1name=N'BANCS_SK_CUST_INFO', @level2type=N'COLUMN',@level2name=N'SK_ENGL_ADD_CY'
 GO
-
-幫我修改一下 如果已經有table 就先刪除再用我這個創
