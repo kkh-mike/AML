@@ -1,7 +1,59 @@
 
-算出來的分數（Relative Correlation，簡稱 RC）會依據是否達到門檻分流，可從以下兩個位置查詢：
-1. 降噪/未達門檻歷史表（最常出現的位置）
-因為低於門檻（例如 \le 75 分）的紀錄會被分流到此表，用你的檢核批號 @UID 即可查詢原始分數與扣分後分數：
+ --  Stojilkovic, Vlajko
+
+ --  Pitono, Joko
+
+ SELECT * FROM BSADBJP..OFAC_SPEC WHERE GROUPID = '11'
+
+
+ -- 找出死人名單
+SELECT 
+    A.EntityId,
+    A.FullName AS SdnName,
+    CONVERT(VARCHAR, A.UpdatedDate_UTC, 112) AS UpdatedDate
+FROM BSADBJP..OFAC_SPEC f
+JOIN  BSADB.dbo.DJ_Entity A WITH (NOLOCK) on A.FullName = f.spec_name
+JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) 
+    ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1 AND B.SanctionListReference LIKE '%Japanese Finance%' AND f.GROUPID = '11'
+
+
+
+
+
+
+
+
+
+
+  sp_helptext 'NMCHK_GetRCMatchesByKey';
+
+  sp_helptext 'NMCHK_Detection_CombineResults';
+
+
+  exec NMCHK_Detection_CombineResults @uid=N'2026107'
+
+
+
+
+
+
+
+
+  -- 檢核比對結果歷程表（透過 NamePropertyBitCode & 1 = 1 判斷是否命中黑名單）  NamePropertyBitCode
+SELECT a.NamePropertyBitCode,* FROM NMCHK_ResultHistory  a
+JOIN NMCHK_Review_Main b on a.uid  = b.uid
+WHERE b.Created_Date  >'2026-09-02' 
+
+
+SELECT a.NamePropertyBitCode, a.relative_correlation, a.sdn_name, b.*
+FROM dbo.NMCHK_ResultHistory_FILTER_RC a
+JOIN dbo.NMCHK_Review_Main b ON a.uid = b.uid
+WHERE a.uid = '2026107';
+
+
+
+
 SELECT 
     uid,
     new_acct_key,
@@ -13,8 +65,7 @@ SELECT
 FROM dbo.NMCHK_ResultHistory_FILTER_RC WITH (NOLOCK)
 WHERE uid = '2026107';
 
-2. 正式命中歷史表（達到門檻分才會寫入）
-若分數高於門檻（例如 > 75 分），分數則會寫入正式表：
+
 SELECT 
     uid,
     new_acct_key,
@@ -24,37 +75,161 @@ SELECT
     relative_correlation AS [最終分數(含扣分後)],
     Reduction_IND AS [扣分項目旗標]
 FROM dbo.NMCHK_ResultHistory WITH (NOLOCK)
-WHERE uid = '2026107';
+WHERE uid = '2026114';
 
-註：dbo.NMCHK_OtherListDetectionResults_Temp 雖然是在第一時間接收外部引擎傳回的分數，但因為預存程序最後有一行 DELETE FROM dbo.NMCHK_OtherListDetectionResults_Temp WHERE Uid = @uid，跑完會直接被清空，因此日常查驗請直接看上述兩張 ResultHistory 表。
+-- 檢核比對結果歷程表（透過 NamePropertyBitCode & 1 = 1 判斷是否命中黑名單）  NamePropertyBitCode
+SELECT a.NamePropertyBitCode,* FROM NMCHK_ResultHistory  a
+JOIN NMCHK_Review_Main b on a.uid  = b.uid
+WHERE b.Created_Date  >'2026-09-02' AND a.uid = '2026121' AND sdn_grp_num = '11'
+
+SELECT * FROM NMCHK_Review_Main WHERE Created_Date >'2026-09-02'
 
 
 
 
-沒有出現在 NMCHK_ResultHistory 是正常的，因為你的比對分數（58 分）低於系統設定的門檻值，被歸類為低分雜訊，寫入了另一張表 dbo.NMCHK_ResultHistory_FILTER_RC。
-程式碼尾端的關鍵邏輯直接解釋了這個現象：
---insert results with RC <= default RC into NMCHK_ResultHistory_FILTER_RC tables, and insert the rest to NMCHK_ResultHistory table  
-DELETE A   
-OUTPUT ...
-INTO dbo.NMCHK_ResultHistory_FILTER_RC (...)  
-FROM #Temp_New_Acct_Matches_Table A   
-WHERE relative_correlation <= @CHOOSEN_RC  
 
-INSERT INTO dbo.NMCHK_ResultHistory (...)   
-SELECT ...
-FROM #Temp_New_Acct_Matches_Table   
+SELECT 
+    A.EntityId,
+    A.FullName AS SdnName,
+    CONVERT(VARCHAR, A.UpdatedDate_UTC, 112) AS UpdatedDate
+FROM BSADBJP..OFAC_SPEC f
+JOIN  BSADB.dbo.DJ_Entity A WITH (NOLOCK) on A.FullName = f.spec_name
+JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) 
+    ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1 AND B.SanctionListReference LIKE '%Japanese Finance%' AND f.GROUPID = '5'
 
-原因分析
- * 系統閥值設定：程式開頭宣告 @CHOOSEN_RC INT = 75（從 POCTRL 讀取，預設至少 75 分才算真正命中）。
- * 你的測試案例：在稍早的 Profiler 中，外部引擎傳入的分數是 @RelativeCorrelation = 58。
- * 分流處理：
-   * 因為 58 \le 75，DELETE ... OUTPUT INTO 優先執行，把這筆 58 分的紀錄整筆移出並塞進了降噪隔離表 dbo.NMCHK_ResultHistory_FILTER_RC。
-   * 移出後，#Temp_New_Acct_Matches_Table 裡這筆已經不存在，因此後面的 INSERT INTO dbo.NMCHK_ResultHistory 完全塞不到資料。
-驗證方式
-改查降噪篩選表 dbo.NMCHK_ResultHistory_FILTER_RC，你的名字與命中紀錄就會出現：
+
+
+
+
+
+
+  sp_helptext 'NMCHK_GetRCMatchesByKey';
+
+  sp_helptext 'NMCHK_Detection_CombineResults';
+
+
+  exec NMCHK_Detection_CombineResults @uid=N'2026107'
+
+
+
+
+
+
+
+
+  -- 檢核比對結果歷程表（透過 NamePropertyBitCode & 1 = 1 判斷是否命中黑名單）  NamePropertyBitCode
+SELECT a.NamePropertyBitCode,* FROM NMCHK_ResultHistory  a
+JOIN NMCHK_Review_Main b on a.uid  = b.uid
+WHERE b.Created_Date  >'2026-09-02' 
+
+
 SELECT a.NamePropertyBitCode, a.relative_correlation, a.sdn_name, b.*
 FROM dbo.NMCHK_ResultHistory_FILTER_RC a
 JOIN dbo.NMCHK_Review_Main b ON a.uid = b.uid
 WHERE a.uid = '2026107';
 
-這也是為什麼前面提到的查詢預存程序 NMCHK_GetRCMatchesByKey 裡面會有 IF EXISTS (... NMCHK_ResultHistory) 就查正式結果，ELSE 就改從 NMCHK_ResultHistory_FILTER_RC 撈資料的原因。
+
+Pitono, Joko
+
+
+SELECT 
+    uid,
+    new_acct_key,
+    sdn_name,
+    sdn_type,
+    Ori_RC AS [外部引擎原始計算分數],
+    relative_correlation AS [最終分數(含扣分後)],
+    Reduction_IND AS [扣分項目旗標]
+FROM dbo.NMCHK_ResultHistory_FILTER_RC WITH (NOLOCK)
+WHERE uid = '2026107';
+
+
+SELECT 
+    uid,
+    new_acct_key,
+    sdn_name,
+    sdn_type,
+    Ori_RC AS [外部引擎原始計算分數],
+    relative_correlation AS [最終分數(含扣分後)],
+    Reduction_IND AS [扣分項目旗標]
+FROM dbo.NMCHK_ResultHistory WITH (NOLOCK)
+WHERE uid = '2026114';
+.
+
+-- 檢核比對結果歷程表（透過 NamePropertyBitCode & 1 = 1 判斷是否命中黑名單）  NamePropertyBitCode
+SELECT a.NamePropertyBitCode,* FROM NMCHK_ResultHistory  a
+JOIN NMCHK_Review_Main b on a.uid  = b.uid
+WHERE b.Created_Date  >'2026-09-02' AND a.uid = '2026118' AND sdn_grp_num = '4'
+
+SELECT * FROM NMCHK_Review_Main WHERE Created_Date >'2026-09-02'
+
+Created_Date
+2016-10-21 22:00:19.940
+
+
+
+SELECT * 
+FROM BSADBJP..NMCHK_ResultHistory A WITH(NOLOCK)   
+JOIN dbo.NMCHK_CustInfo B WITH(NOLOCK) ON A.UID = B.UID AND A.new_acct_key = B.new_acct_key  
+LEFT JOIN dbo.lowrisklistgroups C WITH(NOLOCK) ON A.sdn_type IN('SPEC', 'SPEC_CN') AND A.sdn_grp_num = C.GROUPID  
+LEFT JOIN BSADB.dbo.lowrisklistgroups D WITH(NOLOCK) ON A.sdn_type IN('GLSPEC', 'GLSPEC_CN') AND A.sdn_grp_num = D.GROUPID  
+LEFT JOIN BlackList_PriorityList_dim E WITH (NOLOCK) ON A.sdn_type = E.List  
+WHERE A.UID = @RANDNUM   
+AND A.NEW_ACCT_KEY = @KEY  
+ORDER BY A.RELATIVE_CORRELATION DESC, E.Priority, A.sdn_name  
+
+
+
+
+SELECT * 
+FROM dbo.NMCHK_ResultHistory WITH (NOLOCK)
+WHERE UID = '' 
+  AND new_acct_key = '';
+
+  exec NMCHK_GetRCMatchesByKey @RANDNUM=N'',@Key=N'',@Type=N''
+
+
+
+
+
+
+-- 群組總數：24 筆 (來源、輸入結果兩者一致)。
+SELECT COUNT(*) FROM BSADBJP..lowrisklistgroups
+SELECT * FROM BSADBJP..lowrisklistgroups
+
+
+
+
+SELECT 
+    A.EntityId,
+    A.FullName AS SdnName,
+    CONVERT(VARCHAR, A.UpdatedDate_UTC, 112) AS UpdatedDate
+FROM BSADBJP..OFAC_SPEC f
+JOIN  BSADB.dbo.DJ_Entity A WITH (NOLOCK) on A.FullName = f.spec_name
+JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) 
+    ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1 AND B.SanctionListReference LIKE '%Japanese Finance%' AND f.GROUPID = '5'
+
+
+
+SELECT 
+f.*
+FROM BSADBJP..OFAC_SPEC f
+JOIN  BSADB.dbo.DJ_Entity A WITH (NOLOCK) on A.FullName = f.spec_name
+JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) 
+    ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1 AND B.SanctionListReference LIKE '%Japanese Finance%' AND f.GROUPID = '5'
+
+
+
+SELECT * FROM BSADBJP..OFAC_SPEC 
+
+
+SELECT * FROM BSADBJP..OFAC_SPEC  WHERE GROUPID = '5'
+4
+4
+
+
+
+幫我把這些東西整理一下跟註解
