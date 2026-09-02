@@ -1,88 +1,117 @@
-CREATE PROC [dbo].[NMCHK_InitiateNewAcctTables]  
-@RANDNUM    NVARCHAR(20),  
-@NAME     NVARCHAR(350),  
-@DOB     NVARCHAR(10) = '',  
-@Nationality   NVARCHAR(50) = '',  
-@RELATIONSHIP   NVARCHAR(50),  
-@TaxID     NVARCHAR(50) = '',   
-@UserID     NVARCHAR(50),  
-@Address  NVARCHAR(160) = '',  
-@City   NVARCHAR(50) = '',  
-@Country  NVARCHAR(50) = '',  
-@CombineKey     INTEGER,  
-@Gender   NVARCHAR(2) = '',  
-@IdentificationNumber NVARCHAR(MAX) = '',  
-@NameCategory INTEGER,   
-@VesselIMONo NVARCHAR(MAX) = ''  
-  
-AS   
-BEGIN  
-  
-DECLARE  
-@OFAC_NEW_ACCT_NAMES_TABLE NVARCHAR(50),  
-@EXTRA_NAME     NVARCHAR(350),  
-@RELATIONSHIP2    NVARCHAR(100),  
-@NSTRSQL NVARCHAR(MAX)  
-  
-  
-SET NOCOUNT ON  
-  
-SELECT @OFAC_NEW_ACCT_NAMES_TABLE = 'OFAC_NEW_ACCT_NAMES_' + @RANDNUM,   
-  @DOB = CASE ISNULL(@DOB,'') WHEN '' THEN NULL ELSE CONVERT(VARCHAR, CONVERT(DATETIME,@DOB),112) END,  
-  @Nationality = ISNULL(@Nationality,''),   
-  @TaxID = ISNULL(@TaxID, '') ,   
-  @IdentificationNumber = ISNULL(LTRIM(RTRIM(@IdentificationNumber)), '')  
-  
-IF OBJECT_ID(@OFAC_NEW_ACCT_NAMES_TABLE, 'U') IS NOT NULL  
- EXEC('DROP TABLE ' + @OFAC_NEW_ACCT_NAMES_TABLE + ' ')  
-  
-EXEC('  
-CREATE TABLE [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(  
- [new_acct_key]  [int] NULL,  
- [new_acct_name] [NVARCHAR] (350) COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS NULL ,   
- [relationship]  [NVARCHAR] (50) NULL ,   
- [NameSource] [NVARCHAR] (20) NULL,   
- [Nationality] NVARCHAR(50),  
- [DOB] NVARCHAR(10),   
- [TAXID] NVARCHAR(50),  
- [Address] NVARCHAR(160),  
- [City] NVARCHAR(50),  
- [Country] NVARCHAR(50),  
- [CombineKey] INTEGER,   
- [Gender] NVARCHAR(2),  
- [IdentificationNumber] NVARCHAR(MAX),   
- [NameCategory] INTEGER,  
- [VesselIMONo] NVARCHAR(MAX))')  
-   
-/*Added Name Source table to determine the source of the name is from English Name Column or Non English Name column*/  
-SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID,   
-                 Address, City, Country, CombineKey,   
-                 Gender, IdentificationNumber, NameCategory, VesselIMONo)  
- VALUES(''1'', @NAME , @RELATIONSHIP, ''EnglishName'', @Nationality, @DOB, @TaxID, @Address, @City, @Country, @CombineKey,   
-   @Gender, @IdentificationNumber, @NameCategory, @VesselIMONo)'  
-  
-EXEC SP_EXECUTESQL @NSTRSQL, N'@NAME NVARCHAR(350), @RELATIONSHIP NVARCHAR(100), @Nationality NVARCHAR(50), @DOB NVARCHAR(16), @TaxID NVARCHAR(50),  
-        @Address NVARCHAR(160), @City NVARCHAR(50), @Country NVARCHAR(50), @CombineKey INTEGER,   
-        @Gender NVARCHAR(2), @IdentificationNumber NVARCHAR(MAX), @NameCategory INTEGER, @VesselIMONo NVARCHAR(MAX)',   
-        @NAME, @RELATIONSHIP, @Nationality, @DOB, @TaxID, @Address, @City, @Country, @CombineKey,   
-        @Gender, @IdentificationNumber, @NameCategory, @VesselIMONo  
-  
-SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID,   
-                 Address, City, Country, CombineKey,   
-                 Gender, IdentificationNumber, NameCategory, VesselIMONo)  
-    SELECT 1 + ROW_NUMBER() OVER(ORDER BY Id), EXTRA_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID,   
-        Address, City, Country, CombineKey, Gender, IdentificationNumber, NameCategory, VesselIMONo  
-    FROM dbo.NMCHK_MultipleList_TMP WITH(NOLOCK)   
-    WHERE USERID = @UserID '  
-EXEC SP_EXECUTESQL @NSTRSQL, N'@UserID NVARCHAR(50)', @UserID   
-  
-END
+exec NMCHK_GetRCMatchesByKey @RANDNUM=N'',@Key=N'',@Type=N''
 
-
-
-
-exec NMCHK_InitiateNewAcctTables @RANDNUM=N'2026107',@NAME=N'Pitono, Joko',@RELATIONSHIP=N'CustomerName',@Nationality=N'',@UserID=N'1141923             ',@DOB=N'',@TaxID=N'',@Address=N'',@City=N'',@Country=N'',@CombineKey=N'',@Gender=N'',@IdentificationNumber=N'',@NameCategory=N'0',@VesselIMONo=N''
-
-
-
-這支在幹嘛
+CREATE PROCEDURE [dbo].[NMCHK_GetRCMatchesByKey]  
+@RANDNUM NVARCHAR(80),  
+@KEY  NVARCHAR(20),  
+@Type  NVARCHAR(5) = NULL --= 'Q'  
+AS  
+DECLARE @BankNo VARCHAR(10), @Culture CHAR(5)  
+SELECT @BankNo = REPLACE(DB_NAME(), 'BSADB', '')  
+SELECT @Culture = ISNULL((SELECT CULTURE FROM GCMAINDB..BankDBProfile WITH (NOLOCK) WHERE BNK_NBR = @BankNo), '')    
+    
+ IF EXISTS(SELECT 1 FROM dbo.NMCHK_ResultHistory WITH(NOLOCK) WHERE UID = @RANDNUM AND new_acct_key = @KEY)  
+ BEGIN  
+  SELECT A.uid,userid,rel_corr_chosen,A.new_acct_key,relationship,address,city,country,new_acct_name,  
+  relative_correlation,alt_num,ent_num, sdn_type,   
+  sdn_name,OFACMatch,OFACNotMatch,Reason,user_brnch_nbr,TAXID,IDENT,IDENTO,ISSBY,  
+  IDNUM,REMARK,SECTION,DOB,ISNULL(Reduction_IND,'') 'Reduction_IND',ISNULL(Ori_RC,'') 'Ori_RC',B.last_updated_date, B.DETECTED, A.sdn_grp_num, ISNULL(A.NamePropertyBitCode, 0) 'NamePropertyBitCode',   
+  (CASE WHEN ISNULL(OFACNotMatch,'') = 'Y' THEN dbo.GetResourceString('Matched')   
+     WHEN ISNULL(OFACMatch,'') = 'Y' THEN dbo.GetResourceString('NotMatched') ELSE '-' END) AS IsMatchWithBlacklist,   
+  CASE WHEN EXISTS (SELECT 1 FROM UN_SANCTIONS_LIST C WITH (NOLOCK) JOIN UN_Program_DIM D ON D.ProgramCode = C.UN_LIST_TYPE  
+       WHERE A.sdn_type IN ('UN', 'UN ALT') AND A.ent_num = C.ENT_NUM AND D.IsTerroristFinancing = 1  AND C.DEL_IND = 'N')  
+    OR EXISTS(SELECT 1 FROM dbo.UN_Vessel_List C WITH(NOLOCK) JOIN dbo.UN_Program_DIM D ON D.ProgramCode = C.UN_List_Type  
+       WHERE A.sdn_type IN ('UN', 'UN ALT') AND A.ent_num = C.EntNum AND D.IsTerroristFinancing = 1 AND C.IsDeleted = 0)  
+    OR EXISTS (SELECT 1 FROM OFAC_SPEC E WITH (NOLOCK)  
+       JOIN lowrisklistgroups F WITH (NOLOCK) ON E.GROUPID = F.GROUPID  
+       JOIN dbo.OFAC_SpecType_Dim G WITH (NOLOCK) ON F.SpecType = G.ID  
+       WHERE A.sdn_type = 'SPEC'  
+       AND A.ent_num = E.ent_num  
+       AND A.sdn_grp_num = E.GROUPID  
+       AND E.DInd = 'N'  
+       AND G.SpecType = 'TW Sanctions List'  
+         )   
+  THEN   
+   CASE WHEN @Culture = 'zh-TW'   
+   THEN   
+    CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'  
+     WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'  
+    ELSE '' END + N' (資恐)'   
+   ELSE   
+    CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'  
+     WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'  
+    ELSE '' END + N' (Terrorist Financing List)'   
+   END   
+  ELSE   
+   CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'  
+    WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'  
+   END   
+  END AS GROUPDESCR   
+  FROM dbo.NMCHK_ResultHistory A WITH(NOLOCK)   
+  JOIN dbo.NMCHK_CustInfo B WITH(NOLOCK) ON A.UID = B.UID AND A.new_acct_key = B.new_acct_key  
+  LEFT JOIN dbo.lowrisklistgroups C WITH(NOLOCK) ON A.sdn_type IN('SPEC', 'SPEC_CN') AND A.sdn_grp_num = C.GROUPID  
+  LEFT JOIN BSADB.dbo.lowrisklistgroups D WITH(NOLOCK) ON A.sdn_type IN('GLSPEC', 'GLSPEC_CN') AND A.sdn_grp_num = D.GROUPID  
+  LEFT JOIN BlackList_PriorityList_dim E WITH (NOLOCK) ON A.sdn_type = E.List  
+  WHERE A.UID = @RANDNUM   
+  AND A.NEW_ACCT_KEY = @KEY  
+  ORDER BY A.RELATIVE_CORRELATION DESC, E.Priority, A.sdn_name  
+ END  
+ ELSE  
+ BEGIN  
+  ;WITH CTE_FILTER_RC AS (  
+   SELECT A.uid,userid,rel_corr_chosen,A.new_acct_key,relationship,address,city,country,new_acct_name,  
+   relative_correlation,alt_num,ent_num, sdn_type,   
+   sdn_name,OFACMatch,OFACNotMatch,Reason,user_brnch_nbr,TAXID,IDENT,IDENTO,ISSBY,  
+   IDNUM,REMARK,SECTION,DOB,ISNULL(Reduction_IND,'') 'Reduction_IND',ISNULL(Ori_RC,'') 'Ori_RC',B.last_updated_date, B.DETECTED, A.sdn_grp_num, ISNULL(A.NamePropertyBitCode, 0) 'NamePropertyBitCode',   
+   (CASE WHEN ISNULL(OFACNotMatch,'') = 'Y' THEN 'Yes'   
+     WHEN ISNULL(OFACMatch,'') = 'Y' THEN 'No' ELSE '-' END) AS IsMatchWithBlacklist,   
+   CASE WHEN EXISTS (SELECT 1 FROM UN_SANCTIONS_LIST C WITH (NOLOCK)   
+        JOIN UN_Program_DIM D ON D.ProgramCode = C.UN_LIST_TYPE  
+        WHERE A.sdn_type IN ('UN', 'UN ALT')  
+        AND A.ent_num = C.ENT_NUM  
+        AND D.IsTerroristFinancing = 1   
+        AND C.DEL_IND = 'N')  
+     OR EXISTS(SELECT 1 FROM dbo.UN_Vessel_List C WITH(NOLOCK) JOIN dbo.UN_Program_DIM D ON D.ProgramCode = C.UN_List_Type  
+       WHERE A.sdn_type IN ('UN', 'UN ALT') AND A.ent_num = C.EntNum AND D.IsTerroristFinancing = 1 AND C.IsDeleted = 0)  
+     OR EXISTS (SELECT 1 FROM OFAC_SPEC E WITH (NOLOCK)  
+        JOIN lowrisklistgroups F WITH (NOLOCK) ON E.GROUPID = F.GROUPID  
+        JOIN dbo.OFAC_SpecType_Dim G WITH (NOLOCK) ON F.SpecType = G.ID  
+        WHERE A.sdn_type = 'SPEC'  
+        AND A.ent_num = E.ent_num  
+        AND A.sdn_grp_num = E.GROUPID  
+        AND E.DInd = 'N'  
+        AND G.SpecType = 'TW Sanctions List'  
+          )   
+   THEN   
+    CASE WHEN @Culture = 'zh-TW'   
+    THEN   
+     CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'  
+      WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'  
+     ELSE '' END + N' (資恐)'   
+    ELSE   
+     CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'  
+      WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'  
+     ELSE '' END + N' (Terrorist Financing List)'   
+    END   
+   ELSE   
+    CASE WHEN A.sdn_type IN('SPEC', 'SPEC_CN') THEN N' (' + C.GROUPDESCR + N')'  
+     WHEN A.sdn_type IN('GLSPEC', 'GLSPEC_CN') THEN N' (' + D.GROUPDESCR + N')'  
+    END   
+   END AS GROUPDESCR,   
+   DENSE_RANK() OVER(ORDER BY A.relative_correlation DESC) AS RowDense  
+   FROM dbo.NMCHK_ResultHistory_FILTER_RC A WITH(NOLOCK)  
+   JOIN dbo.NMCHK_CustInfo B WITH(NOLOCK) ON A.UID = B.UID AND A.new_acct_key = B.new_acct_key  
+   LEFT JOIN dbo.lowrisklistgroups C WITH(NOLOCK) ON A.sdn_type IN('SPEC', 'SPEC_CN') AND A.sdn_grp_num = C.GROUPID  
+   LEFT JOIN BSADB.dbo.lowrisklistgroups D WITH(NOLOCK) ON A.sdn_type IN('GLSPEC', 'GLSPEC_CN') AND A.sdn_grp_num = D.GROUPID  
+   WHERE A.UID = @RANDNUM   
+   AND A.NEW_ACCT_KEY = @KEY  
+  )  
+  SELECT A.* FROM CTE_FILTER_RC A  
+  LEFT JOIN BlackList_PriorityList_dim E WITH (NOLOCK) ON A.sdn_type = E.List  
+  WHERE A.RowDense = 1  
+  ORDER BY E.Priority, A.sdn_name   
+     
+ END  
+  
+  
+  這樣好奇怪 那這隻如果真的是檢核有沒有在黑名單
+那他怎麼知道名字是什麼
