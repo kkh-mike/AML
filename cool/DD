@@ -1,88 +1,199 @@
-可是我這裡還有一個
+Dim SaveName As String
+Dim pathName As String
+Dim Filename As String
 
-USE [BSADBJP]
-GO
-/****** Object:  StoredProcedure [dbo].[NMCHK_InitiateNewAcctTables]    Script Date: 2026/8/31 下午 01:20:21 ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROC [dbo].[NMCHK_InitiateNewAcctTables]
-@RANDNUM				NVARCHAR(20),
-@NAME					NVARCHAR(350),
-@DOB					NVARCHAR(10) = '',
-@Nationality			NVARCHAR(50) = '',
-@RELATIONSHIP			NVARCHAR(50),
-@TaxID					NVARCHAR(50) = '', 
-@UserID					NVARCHAR(50),
-@Address		NVARCHAR(160) = '',
-@City			NVARCHAR(50) = '',
-@Country		NVARCHAR(50) = '',
-@CombineKey     INTEGER,
-@Gender			NVARCHAR(2) = '',
-@IdentificationNumber NVARCHAR(MAX) = '',
-@NameCategory INTEGER, 
-@VesselIMONo NVARCHAR(MAX) = ''
+Sub start()
+    Call ClearTransferredSheet
+    Sheets("Action").Select
+    pathName = Range("D1").Value
+    Filename = Range("D2").Value
+    SaveName = Range("D3").Value
+    TabName = "TEMP"
+    If Dir(pathName & Filename) = "" Then
+        MsgBox "File" & Filename & " doesn 't exist in the path " & pathName & ". Please check it again!!"
+    Else
+        ControlFile = ActiveWorkbook.Name
+        Workbooks.Open Filename:=pathName & Filename
+        ActiveSheet.Name = TabName
+        Sheets(TabName).Copy After:=Workbooks(ControlFile).Sheets(1)
+        Windows(Filename).Activate
+        ActiveWorkbook.Close SaveChanges:=False
+        Windows(ControlFile).Activate
+        splitX = Split(Filename, ".")
+        Filename = splitX(0)
+        Filename = UCase(Filename)
+        Select Case Filename
+            Case "HOUJIN"
+                Call TransferHoujin
+            Case "KOJIN"
+                Call TransferKojin
+            Case "SEIHO"
+                Call TransferSeiho
+            Case "SONGHO"
+                Call TransferSongho
+        End Select
+        
+        Call CSVFile
+    End If
+End Sub
+Sub TransferHoujin()
+    Sheets("TEMP").Select
 
-AS 
-BEGIN
+    finalrow = Cells(Rows.Count, 1).End(xlUp).Row
+    For x = 2 To finalrow
+        Dim Arr(1 To 4) As Variant, R As Range
+        Set R = Range("A" & x & ": L" & x & "")
+        Num = "" 'R.Cells(1, 1)
+        Arr(1) = R.Cells(1, 2)
+        Arr(2) = R.Cells(1, 3)
+        Arr(3) = R.Cells(1, 4)
+        Arr(4) = R.Cells(1, 5)
+        Address = R.Cells(1, 7)
+        Remark = R.Cells(1, 8)
+        Source = R.Cells(1, 9)
+        birth = ""
+        Call RowItem(Num, Source, Address, Remark, birth, Arr)
+        Sheets("TEMP").Select
+    Next x
+End Sub
+Sub TransferKojin()
+    Sheets("TEMP").Select
 
-DECLARE
-@OFAC_NEW_ACCT_NAMES_TABLE	NVARCHAR(50),
-@EXTRA_NAME					NVARCHAR(350),
-@RELATIONSHIP2				NVARCHAR(100),
-@NSTRSQL NVARCHAR(MAX)
+    finalrow = Cells(Rows.Count, 1).End(xlUp).Row
+    For x = 2 To finalrow
+        Dim Arr(1 To 4) As Variant, R As Range
+        Set R = Range("A" & x & ": L" & x & "")
+        Num = ""
+        Arr(1) = R.Cells(1, 2) '漢字氏名
+        Arr(2) = R.Cells(1, 3) '??氏名
+        Arr(3) = R.Cells(1, 4) '通?漢字氏名
+        Arr(4) = R.Cells(1, 5) '通???氏名
+        Address = R.Cells(1, 8) '住所
+        Remark = CStr(R.Cells(1, 6)) + CStr(R.Cells(1, 7)) '生日+年齡
+        birth = SplitString(CStr(R.Cells(1, 6)))
+        Source = R.Cells(1, 10) '
+        Call RowItem(Num, Source, Address, Remark, birth, Arr)
+        Sheets("TEMP").Select
+    Next x
+End Sub
+Sub TransferSeiho()
+    Sheets("TEMP").Select
 
+    finalrow = Cells(Rows.Count, 1).End(xlUp).Row
+    For x = 2 To finalrow
+        Dim Arr(1 To 4) As Variant, R As Range
+        Set R = Range("A" & x & ": L" & x & "")
+        Num = ""
+        Arr(1) = R.Cells(1, 6) '氏名１（漢字）
+        Arr(2) = R.Cells(1, 7) '氏名（??）
+        Arr(3) = R.Cells(1, 8) '氏名２（漢字）
+        Arr(4) = R.Cells(1, 9) '氏名２（??）
+        Address = R.Cells(1, 14) '住所
+        Remark = CStr(R.Cells(1, 11)) + CStr(R.Cells(1, 10)) + CStr(R.Cells(1, 12)) '生日+年齡+性別
+        birth = SplitString(CStr(R.Cells(1, 11)))
+        Source = R.Cells(1, 3) '?載紙
+        Call RowItem(Num, Source, Address, Remark, birth, Arr)
+        Sheets("TEMP").Select
+    Next x
+        
+End Sub
+Sub TransferSongho()
+    Sheets("TEMP").Select
 
-SET NOCOUNT ON
+    finalrow = Cells(Rows.Count, 1).End(xlUp).Row
+    For x = 2 To finalrow
+        Dim Arr(1 To 4) As Variant, R As Range
+        Set R = Range("A" & x & ": L" & x & "")
+        Num = ""
+        Arr(1) = Trim(CStr(R.Cells(1, 4))) + Trim(CStr(R.Cells(1, 5))) '氏名（姓）+ 氏名（名）
+        Arr(2) = Trim(CStr(R.Cells(1, 6))) + Trim(CStr(R.Cells(1, 7))) '????（姓）+ ????（名）
+        Arr(3) = Trim(CStr(R.Cells(1, 9))) + Trim(CStr(R.Cells(10))) + Trim(CStr(R.Cells(11))) '別名（名）+ 別名????（姓）+別名????（名）
+        Address = R.Cells(1, 19) '住所
+        Remark = Trim(CStr(R.Cells(1, 12))) + Trim(CStr(R.Cells(1, 13))) + Trim(CStr(R.Cells(1, 14))) '生日+年齡+性別
+        birth = SplitString(CStr(R.Cells(1, 12)))
+        Source = R.Cells(1, 30) '??他
+        Call RowItem(Num, Source, Address, Remark, birth, Arr)
+        Sheets("TEMP").Select
+    Next x
+End Sub
+Sub RowItem(Num, s, Adr, Remk, birth, Arr() As Variant)
+    Sheets("TransferredFile").Select
+    For x = 1 To UBound(Arr)
+        If Arr(x) <> "" Then
+            nextrow = Cells(Rows.Count, 1).End(xlUp).Row + 1
+            Cells(nextrow, 1).Value = s
+            Cells(nextrow, 2).Value = Arr(x)
+            Cells(nextrow, 3).Value = Arr(x)
+            Cells(nextrow, 4).Value = Num
+            Cells(nextrow, 6).Value = Adr
+            Cells(nextrow, 8).Value = "JP"
+            Cells(nextrow, 11).Value = "JP"
+            Cells(nextrow, 12).Value = Remk
+            Cells(nextrow, 14).Value = birth
+            Cells(nextrow, 15).Value = "NEW"
+        End If
+    Next x
+End Sub
+Function SplitString(s) As String
+'Dim sp() As Variant
+Dim last As String
+If s = "" Then Exit Function
+d = Format(s, "yyyymmdd")
+SplitString = d
+End Function
+Sub CSVFile()
 
-SELECT @OFAC_NEW_ACCT_NAMES_TABLE = 'OFAC_NEW_ACCT_NAMES_' + @RANDNUM, 
-		@DOB = CASE ISNULL(@DOB,'') WHEN '' THEN NULL ELSE CONVERT(VARCHAR, CONVERT(DATETIME,@DOB),112) END,
-		@Nationality = ISNULL(@Nationality,''), 
-		@TaxID = ISNULL(@TaxID, '') , 
-		@IdentificationNumber = ISNULL(LTRIM(RTRIM(@IdentificationNumber)), '')
+Dim SrcRg As Range
+Dim CurrRow As Range
+Dim CurrCell As Range
+Dim CurrTextStr As String
+Dim ListSep As String
+Dim FName As Variant
+Dim fsT As Object
 
-IF OBJECT_ID(@OFAC_NEW_ACCT_NAMES_TABLE, 'U') IS NOT NULL
-	EXEC('DROP TABLE ' + @OFAC_NEW_ACCT_NAMES_TABLE + ' ')
+dYear = Year(Now())
+dMonth = Month(Now())
+dDay = Day(Now())
+Sheets("TransferredFile").Select
 
-EXEC('
-CREATE TABLE [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(
-	[new_acct_key]  [int] NULL,
-	[new_acct_name] [NVARCHAR] (350) COLLATE Chinese_Traditional_Stroke_Order_100_CI_AS NULL , 
-	[relationship]  [NVARCHAR] (50) NULL , 
-	[NameSource] [NVARCHAR] (20) NULL, 
-	[Nationality] NVARCHAR(50),
-	[DOB] NVARCHAR(10), 
-	[TAXID] NVARCHAR(50),
-	[Address] NVARCHAR(160),
-	[City]	NVARCHAR(50),
-	[Country] NVARCHAR(50),
-	[CombineKey] INTEGER, 
-	[Gender] NVARCHAR(2),
-	[IdentificationNumber] NVARCHAR(MAX), 
-	[NameCategory] INTEGER,
-	[VesselIMONo] NVARCHAR(MAX))')
-	
-/*Added Name Source table to determine the source of the name is from English Name Column or Non English Name column*/
-SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
-																	Address, City, Country, CombineKey, 
-																	Gender, IdentificationNumber, NameCategory, VesselIMONo)
-	VALUES(''1'', @NAME , @RELATIONSHIP, ''EnglishName'', @Nationality, @DOB, @TaxID, @Address, @City, @Country, @CombineKey, 
-			@Gender, @IdentificationNumber, @NameCategory, @VesselIMONo)'
+'FName = Application.GetSaveAsFilename("", "CSV File (*.csv), *.csv")
+FName = SaveName + "_" + Filename + "_" & dYear & dMonth & dDay & ".csv"
+Set fsT = CreateObject("ADODB.Stream")
+fsT.Type = 2 'Specify stream type - we want To save text/string data.
+fsT.Charset = "unicode" '"utf-8" 'Specify charset For the source text data.
 
-EXEC SP_EXECUTESQL @NSTRSQL, N'@NAME NVARCHAR(350), @RELATIONSHIP NVARCHAR(100), @Nationality NVARCHAR(50), @DOB NVARCHAR(16), @TaxID NVARCHAR(50),
-								@Address NVARCHAR(160), @City NVARCHAR(50), @Country NVARCHAR(50), @CombineKey INTEGER, 
-								@Gender NVARCHAR(2), @IdentificationNumber NVARCHAR(MAX), @NameCategory INTEGER, @VesselIMONo NVARCHAR(MAX)', 
-								@NAME, @RELATIONSHIP, @Nationality, @DOB, @TaxID, @Address, @City, @Country, @CombineKey, 
-								@Gender, @IdentificationNumber, @NameCategory, @VesselIMONo
+fsT.Open 'Open the stream And write binary data To the object
+ListSep = Application.International(xlListSeparator)
+  If Selection.Cells.Count > 1 Then
+    Set SrcRg = Selection
+  Else
+    Set SrcRg = ActiveSheet.UsedRange
+  End If
+  
+For Each CurrRow In SrcRg.Rows
+    CurrTextStr = ""
+    For Each CurrCell In CurrRow.Cells
+        CurrTextStr = CurrTextStr & """" & Replace(CurrCell.Value, """", """""") & """" & ListSep
+    Next
+    While Right(CurrTextStr, 1) = ListSep
+        CurrTextStr = Left(CurrTextStr, Len(CurrTextStr) - 1)
+    Wend
 
-SET @NSTRSQL = 'INSERT INTO [dbo].' + @OFAC_NEW_ACCT_NAMES_TABLE + '(NEW_ACCT_KEY, NEW_ACCT_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
-																	Address, City, Country, CombineKey, 
-																	Gender, IdentificationNumber, NameCategory, VesselIMONo)
-				SELECT 1 + ROW_NUMBER() OVER(ORDER BY Id), EXTRA_NAME, RELATIONSHIP, NameSource, Nationality, DOB, TAXID, 
-					   Address, City, Country, CombineKey, Gender, IdentificationNumber, NameCategory, VesselIMONo
-				FROM dbo.NMCHK_MultipleList_TMP WITH(NOLOCK) 
-				WHERE USERID = @UserID '
-EXEC SP_EXECUTESQL @NSTRSQL, N'@UserID NVARCHAR(50)', @UserID 
+    fsT.WriteText CurrTextStr, adWriteLine
+    fsT.WriteText vbNewLine, adWriteLine
+Next
+fsT.SaveToFile pathName & FName, 2 'Save binary data To disk
+Sheets("TEMP").Delete
+End Sub
 
-END
+Sub ClearTransferredSheet()
+    Sheets("TransferredFile").Select
+    finalrow = Cells(Rows.Count, 1).End(xlUp).Row
+    For x = 2 To finalrow
+        Range("A" & x & ": O" & x & "").Clear
+    Next x
+End Sub
+
+幫我看一下為什麼資料有 邦丸	賢治
+但轉出來只有 賢治
+應該要 邦丸賢治
