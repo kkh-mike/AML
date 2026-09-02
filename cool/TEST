@@ -1,65 +1,12 @@
-驗證 View 產出的行業別資料是否與 WBS 來源表一致，可以透過以下幾組 SQL 進行比對與防呆檢查：
-1. 抽樣比對單一客戶的欄位值（最直接）
-找幾筆具代表性的客戶 ID（例如個人戶、法人戶、行業代碼為空補 999999 的資料），直接比對 View 與來源表：
-USE [MYDB];
-GO
-
-DECLARE @CustID VARCHAR(50) = 'MY2199999'; -- 替換為實際測試的 CustomerID
-
--- 查詢 View 產出的結果
-SELECT 
-    CustomerID,
-    CustomerType,
-    SIC_Code,
-    OccupationCode,
-    OWNERSHIP_CODE
-FROM dbo.Preload_Customer
-WHERE CustomerID = @CustID;
-
--- 比對 WBS 來源表的原始值
-SELECT 
-    CIF.CUSTOMER_ID,
-    CIF.LOCAL_INDUSTRY_CODE   AS [WBS_LOCAL_INDUSTRY_CODE],
-    CIF.BUSINESS_SECTOR_CODE  AS [WBS_BUSINESS_SECTOR_CODE],
-    KYC.OCCUPATION            AS [WBS_KYC_OCCUPATION]
-FROM dbo.WBS_CIF_CUST_INFO CIF
-LEFT JOIN dbo.WBS_CIF_KYC KYC 
-    ON CIF.CIF_KYC_SEQ = KYC.CIF_KYC_SEQ 
-   AND KYC.STATUS = '1'
-WHERE CIF.CUSTOMER_ID = @CustID;
-
-2. 全量比對不一致筆數（驗證邏輯完整性）
-檢查整張 View 與 WBS 原始表是否存在對應落差（理論上查詢結果應該為 0 筆）：
-USE [MYDB];
-GO
-
-SELECT 
-    V.CustomerID,
-    V.SIC_Code          AS View_SIC_Code,
-    ISNULL(CIF.LOCAL_INDUSTRY_CODE, '999999') AS Expected_SIC_Code,
-    V.OccupationCode    AS View_OccupationCode,
-    KYC.OCCUPATION      AS Expected_OccupationCode,
-    V.OWNERSHIP_CODE    AS View_OWNERSHIP_CODE,
-    CIF.BUSINESS_SECTOR_CODE AS Expected_OWNERSHIP_CODE
-FROM dbo.Preload_Customer V
-JOIN dbo.WBS_CIF_CUST_INFO CIF 
-    ON V.CustomerID = CIF.CUSTOMER_ID
-LEFT JOIN dbo.WBS_CIF_KYC KYC 
-    ON CIF.CIF_KYC_SEQ = KYC.CIF_KYC_SEQ 
-   AND KYC.STATUS = '1'
-WHERE 
-    V.SIC_Code <> ISNULL(CIF.LOCAL_INDUSTRY_CODE, '999999')
-    OR ISNULL(V.OccupationCode, '') <> ISNULL(KYC.OCCUPATION, '')
-    OR ISNULL(V.OWNERSHIP_CODE, '') <> ISNULL(CIF.BUSINESS_SECTOR_CODE, '');
-
-3. 檢查常見邊界異常情境
- * 預設補值 999999 筆數：
-   SELECT COUNT(*) AS Default_SIC_Count 
-FROM dbo.Preload_Customer 
-WHERE SIC_Code = '999999';
-
- * 法人戶（N）是否帶有個人職業代碼（OccupationCode）（確認業務邏輯是否合理）：
-   SELECT CustomerID, CustomerType, OccupationCode 
-FROM dbo.Preload_Customer 
-WHERE CustomerType = 'N' AND OccupationCode IS NOT NULL;
-
+Dear [對方名字],
+您好，
+針對您反映的兩點問題，我檢查了轉檔工具，原因如下：
+1. 為什麼 CSV 檔格式會跑掉？
+ 原因：目前程式有一個設定是「如果畫面上滑鼠有點選或框選到格子，就只轉出框選的那幾格」。所以只要執行時不小心點到了畫面，匯出的檔案就會缺漏。
+ 解法：我會把程式改成「固定轉出整張工作表的所有資料」，以後不管滑鼠點到哪裡都不會再跑掉。
+2. 為什麼別名（邦丸 賢治）只轉出「賢治」？
+ 原因：原始檔案的別名分成兩欄（H 欄是姓、I 欄是名），目前程式抓取的位置往右偏了一格，只抓到「名」，漏掉了前面的「姓」。
+ 解法：我會重新校對對應的欄位，將「本名、假名、別名、別名假名」這 4 組姓與名都完整合併轉出。
+後續處理：
+這兩處的修改方式已經準備好了。如果確認沒問題，我可以直接修改程式並提供新版本給您，您再用新版跑跑看，驗證結果是否符合預期，您看這樣方便嗎？
+謝謝！
