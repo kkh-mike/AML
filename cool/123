@@ -1,49 +1,18 @@
-要驗證「死亡名單（Deceased = 1）」在姓名檢核中是否會命中，目前整條資料鏈路有 3 個最容易卡住的關鍵點：
-1. 寫入暫存表的邏輯：名字來源與 Deceased 狀態
-回看你第一段 SP 的死亡名單抓取邏輯：
-INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
-SELECT 
-    A.EntityId, 
-    A.FullName, 
-    MAX(CONVERT(VARCHAR,A.UpdatedDate_UTC,112)) AS UpdatedDate
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-WHERE A.Deceased = 1
-  AND B.SanctionListReference LIKE '%Japanese Finance%'
-  AND NOT EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE X.EntNum = A.EntityId)
-GROUP BY A.EntityId, A.FullName;
+可以放在 <body> 裡，但不要直接丟在最上方，否則會破壞版面或被後面的頂部藍條蓋住。
+有兩種最推薦的做法：
+做法一：漂浮在畫面最頂層（最穩、最醒目、不改壞原版面）
+直接放在 第 56 行 <body> 正下方，使用 fixed 定位讓它浮在視窗最上方中間：
+<div style="position: fixed; top: 0; left: 50%; transform: translateX(-50%); z-index: 999999; background: #fff0f0; border: 2px solid red; color: red; font-size: 16px; font-weight: bold; padding: 4px 16px; border-radius: 0 0 8px 8px; pointer-events: none;">
+    【此為測試環境，所有資料僅供測試使用】
+</div>
 
-這裡有 2 個潛在問題：
- * 問題 A：拿的是 A.FullName 而不是拆解後的名稱（SdnName）
-   * DJ_Entity.FullName 通常是 Western 格式或未經處理的全名（例如 First Middle Last），而一般黑名單表 DJ_List_Data_A 裡面的是 Last Name First（例如 Last, First Middle）。如果送檢的名字格式跟 FullName 差異過大，模糊比對的分數（Relative Correlation）會不夠高而掉出門檻。
- * 問題 B：該死亡人物有沒有掛在 Japanese Finance 名單下
-   * 該人物如果 Deceased = 1，但它在 Dow Jones 裡沒有掛 Japanese Finance 的 Reference，這段就不會進。
-2. 比對母表 / BitCode 設定問題
- * 前面排查發現，lowrisklistgroups 的 GROUPID = 5 原本 NamePropertyBitCode 是 0。
- * 死亡名單寫入 OFAC_SPEC 後，系統的比對 Engine 是否把這批資料的 NamePropertyBitCode 正確設為 1？
- * 如果寫入比對暫存/歷史表時 NamePropertyBitCode = 0，系統就會判定為非命中。
-3. 排查與驗證步驟
-請直接在 SSMS 執行以下 SQL，確認目前資料庫中「有哪些死亡名單已經成功進到 OFAC_SPEC（GROUPID = 5）」，直接挑一個現成的名字去測：
--- 找出 GROUPID = 5 裡面確定是死人 (Deceased = 1) 的名單
-SELECT TOP 10 
-    O.spec_name, 
-    O.ent_num, 
-    O.remark AS EntityId, 
-    E.FullName AS DJ_FullName,
-    E.Deceased
-FROM BSADBJP..OFAC_SPEC O
-JOIN BSADB.dbo.DJ_Entity E ON O.remark = CAST(E.EntityId AS VARCHAR(100))
-WHERE O.GROUPID = 5 
-  AND O.DInd = 'N'
-  AND E.Deceased = 1;
+ * 優點：不會擠壓到原有的 header 與表格排版，且無論畫面怎麼捲動都能清楚看見。
+做法二：整併進系統頂部藍色導航列
+若希望它像系統原生文字一樣嵌在頂部橫條：
+ * 往下捲動程式碼，找到 <form id="form1" ...> 底下放置頂部藍色 Bar 的區塊（通常是一個 <header>、<table> 或 <div class="header">，裡面會有「PATRIOT OFFICER」或目錄按鈕）。
+ * 在該標題或右上角使用者資訊旁加入：
+   <span style="color: #ff3333; font-weight: bold; font-size: 16px; margin-left: 15px;">
+    (測試環境)
+</span>
 
-驗證測試：
- * 從上面查詢結果中挑選一筆 spec_name（例如複製整串名稱）。
- * 用這個名稱送姓名檢核。
- * 執行完成後，查 NMCHK_ResultHistory：
-   SELECT uid, sdn_name, sdn_type, sdn_grp_num, relative_correlation, NamePropertyBitCode
-FROM BSADBJP.dbo.NMCHK_ResultHistory
-WHERE sdn_grp_num = 5
-ORDER BY uid DESC;
-
-只要這裡有查出資料且 relative_correlation 超過門檻（通常為 85 或 90 以上），就代表死亡名單的檢核邏輯已經完全通暢。
+建議優先用做法一，直接貼在 <body> 下方，存檔後瀏覽器按 Ctrl + F5 即可立即見效。
