@@ -1,11 +1,7 @@
-是的，這張圖就是名單掃描／姓名檢核（Name Checking / Watchlist Screening）的線上查詢與作業畫面。
-對照剛才的 SQL（NMCHK_...），畫面上完全是該預存程序所對應的輸入與產出邏輯：
- * 畫面用途：這是 AML/CFT 系統中的 Online Name Screening（線上姓名檢核） 功能。
-   * Customer Name（必填）：目前輸入為 Pitono, Joko，這就是送進後端掃描引擎與黑名單（OFAC、UN 等）比對的姓名。
-   * 點擊上方紅字的 「1. Pitono, Joko」 標籤，下方就會展開該筆比對結果（即 NMCHK_GetRCMatchesByKey 回傳的明細）。
-   * 勾選了 「Integrate into workflow」：表示檢核結果若有命中疑義，會直接拋轉到案件審查工作流程（Workflow/Alert Review）由經辦或合規人員判定。
- * 欄位與剛剛那隻 SP 的欄位完全對應：
-   * Step 1 基本資料：Customer Name（對應 new_acct_name）、Address、City、Country、Date of Birth（DOB）、Tax ID（TAXID）、Relationship。
-   * Step 2 身分識別：Method of Identification（IDENT）、Ident No（IDNUM）、Issued By（ISSBY）、Remark（REMARK）。
-   * Step 3 關聯人：Multiple Person List（比對更多關係人，即對應 relationship / 關聯命中清單）。
-剛才那隻 SP（NMCHK_GetRCMatchesByKey）正是這類畫面在點擊檢核對象時，負責到後端歷史表撈出命中黑名單項目、相似度（RC）、制裁群組與資恐標籤的查詢程式。
+那我怎麼知道 他在那裡比對我的名字
+
+Pitono, Joko
+
+
+
+要怎麼反向驗證
