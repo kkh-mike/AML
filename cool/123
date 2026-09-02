@@ -1,60 +1,21 @@
-在 AML 系統架構中，這隻 Stored Procedure（NMCHK_GetRCMatchesByKey）本身不負責執行模糊比對演算法，它只負責讀取比對引擎產出後的結果。真正的比對是由背景的 AML 比對引擎（C++/Java 寫的 Matching Engine 或專門做掃描的批次/即時 SP）完成後，將命中紀錄寫入暫存與歷史表。
-要反向驗證 Pitono, Joko 是在哪裡比對、比對到了誰，可以從以下三個層次進行 SQL 驗證與追查：
-1. 直接反查命中結果明細（反查結果表記錄）
-在畫面上送出檢核後，引擎會產生一組批號（UID / @RANDNUM），可以直接用你的輸入名字反查目前儲存的結果：
--- 1. 查看命中明細與比對分數
-SELECT 
-    A.UID,
-    A.new_acct_key,
-    A.new_acct_name,           -- 你輸入的名字 (Pitono, Joko)
-    A.sdn_name,                -- 命中黑名單上的名字
-    A.sdn_type,                -- 名單類型 (OFAC, UN, SPEC 等)
-    A.relative_correlation,    -- 比對相似度分數 (RC Score)
-    A.OFACMatch, 
-    A.OFACNotMatch
-FROM dbo.NMCHK_ResultHistory A WITH (NOLOCK)
-WHERE A.new_acct_name LIKE '%Pitono%'
-ORDER BY A.relative_correlation DESC;
+NMCHK_ResultHistory
+他的欄位
 
--- 2. 若剛按完還沒入正式歷史表，查暫存/過濾表
-SELECT * 
-FROM dbo.NMCHK_ResultHistory_FILTER_RC WITH (NOLOCK)
-WHERE new_acct_name LIKE '%Pitono%';
 
-2. 反查底層「黑名單庫」到底有沒有這個人
-比對引擎本質上是把你的輸入字串跟底層的制裁名單庫做字串比對（包含 Exact Match 與 Fuzzy Match，如 Soundex、Jaro-Winkler 或 Levenshtein 距離）。直接去名單底表撈取最原始的資料：
--- 查常見名單表是否有 Pitono
--- (1) OFAC 名單主表與別名表
-SELECT ent_num, sdn_name, sdn_type, program 
-FROM dbo.SDN WITH (NOLOCK) 
-WHERE sdn_name LIKE '%Pitono%' OR sdn_name LIKE '%Joko%';
-
-SELECT ent_num, alt_name, alt_type 
-FROM dbo.ALT WITH (NOLOCK) 
-WHERE alt_name LIKE '%Pitono%' OR alt_name LIKE '%Joko%';
-
--- (2) 聯合國制裁清單 (UN)
-SELECT ENT_NUM, DATAID, FIRST_NAME, SECOND_NAME, UN_LIST_TYPE 
-FROM dbo.UN_SANCTIONS_LIST WITH (NOLOCK) 
-WHERE FIRST_NAME LIKE '%Pitono%' OR SECOND_NAME LIKE '%Pitono%';
-
--- (3) 銀行自建名單 / 當地制裁名單 (SPEC)
-SELECT ent_num, GROUPID, NAME, IDNO 
-FROM dbo.OFAC_SPEC WITH (NOLOCK) 
-WHERE NAME LIKE '%Pitono%';
-
-3. 反向追查執行「比對」的來源程式
-如果想知道前端按鈕按下去之後，到底是哪隻程式在呼叫比對邏輯，有兩種方法：
- * 方法 A：SQL Profiler / Extended Events 側錄
-   * 在測試環境開啟 SQL Server Profiler 或 Extended Events，篩選你的登入帳號或 Application Name。
-   * 點擊前端畫面上的「查詢 / 比對」按鈕。
-   * 觀察在 NMCHK_GetRCMatchesByKey 被執行之前，系統依序呼叫了哪些預存程序（通常命名會帶有 NMCHK_Search、NMCHK_Match、NMCHK_Scan 或 AML_Engine_...）。
- * 方法 B：搜尋寫入 NMCHK_ResultHistory 的預存程序
-   * 找出所有會對結果表做 INSERT 的程式碼：
-   SELECT OBJECT_NAME(id) AS ProcedureName
-FROM syscomments
-WHERE text LIKE '%INSERT%NMCHK_ResultHistory%'
-   OR text LIKE '%INTO%NMCHK_ResultHistory_FILTER_RC%'
-GROUP BY OBJECT_NAME(id);
-
-   清單中通常會有一隻負責呼叫比對核心（或接收比對引擎 DLL 回傳結果）的寫入程序。
+uid
+new_acct_key
+relative_correlation
+alt_num
+ent_num
+sdn_type
+sdn_grp_num
+sdn_name
+OFACMatch
+OFACNotMatch
+Reason
+updated_date
+SECTION
+Reduction_IND
+Ori_RC
+NamePropertyBitCode
+SourceColumn
