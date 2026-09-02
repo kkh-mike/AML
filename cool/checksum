@@ -1,59 +1,28 @@
 USE [USERLICENSEJP]
 GO
 
-/****** Object:  Table [dbo].[UserAccounts]    Script Date: 2026/9/2 上午 09:34:47 ******/
-SET ANSI_NULLS ON
+INSERT INTO [dbo].[UserAccounts] (
+    [UserID],
+    [UserType],
+    [FirstName],
+    [CreatedDate],
+    [CreatedDate_UTC],
+    [Disabled],
+    [NeedChangePassword],
+    [AgreeToLicense],
+    [Deleted],
+    [IsDomainUser]
+)
+VALUES (
+    N'1141923',      -- 員工編號 (UserID)
+    N'Employee',     -- 使用者類型 (請依系統定義調整，例如 Admin/User/Staff)
+    N'1141923',      -- FirstName 為 NOT NULL，若無姓名暫以員工編號代入
+    GETDATE(),       -- 本地建立時間
+    GETUTCDATE(),    -- UTC 建立時間
+    0,               -- Disabled: 0 (未停用)
+    0,               -- NeedChangePassword: 0
+    1,               -- AgreeToLicense: 1
+    0,               -- Deleted: 0 (未刪除)
+    0                -- IsDomainUser: 0
+);
 GO
-
-SET QUOTED_IDENTIFIER ON
-GO
-
-CREATE TABLE [dbo].[UserAccounts](
-	[ID] [bigint] IDENTITY(1,1) NOT NULL,
-	[UserID] [nvarchar](40) NOT NULL,
-	[UserType] [nvarchar](20) NOT NULL,
-	[BranchID] [bigint] NULL,
-	[Password] [nvarchar](max) NULL,
-	[FirstName] [nvarchar](50) NOT NULL,
-	[LastName] [nvarchar](50) NULL,
-	[PhoneNo] [varchar](30) NULL,
-	[Email] [varchar](50) NULL,
-	[Occupation] [nvarchar](30) NULL,
-	[CreatedDate] [datetime] NOT NULL,
-	[LastLoginDate] [datetime] NULL,
-	[LastModifiedDate] [datetime] NULL,
-	[AccountExpiredDate] [datetime] NULL,
-	[PasswordExpiredDate] [datetime] NULL,
-	[Disabled] [bit] NOT NULL,
-	[PhoneExt] [varchar](30) NULL,
-	[NeedChangePassword] [bit] NOT NULL,
-	[AgreeToLicense] [bit] NOT NULL,
-	[Deleted] [bit] NOT NULL,
-	[LoginFailureCount] [int] NULL,
-	[LastLoginFailureDate] [datetime] NULL,
-	[IsDomainUser] [bit] NOT NULL,
-	[CreatedDate_UTC] [datetime] NULL,
-	[LastLoginDate_UTC] [datetime] NULL,
-	[LastModifiedDate_UTC] [datetime] NULL,
-	[AccountExpiredDate_UTC] [datetime] NULL,
-	[PasswordExpiredDate_UTC] [datetime] NULL,
-	[LastLoginFailureDate_UTC] [datetime] NULL,
-	[BusinessCategory] [nvarchar](128) NULL,
-	[IsAutomated] [bit] NULL,
- CONSTRAINT [pk_accounts_ID] PRIMARY KEY CLUSTERED 
-(
-	[ID] ASC,
-	[UserID] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
-) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
-
-GO
-
-ALTER TABLE [dbo].[UserAccounts] ADD  CONSTRAINT [df_UserAccounts_IsDomainUser]  DEFAULT ((0)) FOR [IsDomainUser]
-GO
-
-
-
-
-
-我想要insert 我的員工編號進去這個table
