@@ -21,3 +21,16 @@ WHERE USERID = '1141923'
   AND Deleted = 0 
   AND Disabled = 0;
 
+
+
+
+-- 1. 先復原帳號
+UPDATE UserAccounts 
+SET Deleted = 0 
+WHERE USERID = '1141923';
+
+-- 2. 再加入群組 (ID 為 10085)
+INSERT INTO AccountUserGroups (UserID, GroupID)
+VALUES (10085, '1');
+
+
