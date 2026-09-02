@@ -1,384 +1,59 @@
-# ============================================
-# 1. 路徑與基本設定
-# ============================================
-
-$folderPath   = "D:\UATR3\AMLDataMigrator"
-$baselineFile = Join-Path $folderPath "AML_CHECK_SUM_1.csv"
-$logFolder    = Join-Path $folderPath "Log"
-
-# 確保 Log 目錄存在
-if (!(Test-Path $logFolder)) {
-    New-Item -ItemType Directory -Path $logFolder -Force | Out-Null
-}
-
-# 帶有時間戳記的 Log 檔案
-$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$logFile   = Join-Path $logFolder "SKcheck_CHECK_SUM_CIF_$timestamp.log"
-
-$hasError = $false
-
-
-# ============================================
-# 2. Log 輸出函式
-# 同時記錄到 Control-M Console 與實體 Log
-# ============================================
-
-function Write-Log {
-    param(
-        [string]$msg,
-        [string]$level = "INFO"
-    )
-
-    $time    = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logLine = "[$time] [$level] $msg"
-
-    # 輸出到 Control-M Console
-    Write-Output $logLine
-
-    # 寫入實體 Log
-    Add-Content -Path $logFile -Value $logLine -Encoding UTF8
-}
-
-
-# ============================================
-# 3. 高效能雙計數函式 (取代原本低效的雙重讀取)
-# 
-# 特點：
-# 1. 單次遍歷 (Single Pass) 同時計算 Physical Lines 與 CSV Records
-# 2. 採用底層 StreamReader (64KB Buffer)，記憶體佔用極低
-# 3. 支援雙引號內含換行之 CSV 格式
-# ============================================
-
-function Get-CsvCountsOptimized {
-    param(
-        [string]$filePath
-    )
-
-    $physicalLines = 0
-    $csvRecords    = 0
-    $inQuotes      = $false
-    $hasContent    = $false
-    $prevChar      = [char]0
-
-    $bufferSize = 65536
-    $reader = New-Object System.IO.StreamReader($filePath, [System.Text.Encoding]::UTF8, $true, $bufferSize)
-
-    try {
-        while (($charInt = $reader.Read()) -ne -1) {
-            $char = [char]$charInt
-            $hasContent = $true
-
-            if ($char -eq '"') {
-                $inQuotes = -not $inQuotes
-            }
-            elseif ($char -eq "`n") {
-                $physicalLines++
-                if (-not $inQuotes) {
-                    $csvRecords++
-                }
-            }
-
-            $prevChar = $char
-        }
-
-        # 處理檔案結尾沒有換行符號的情況
-        if ($hasContent -and $prevChar -ne "`n" -and $prevChar -ne "`r") {
-            $physicalLines++
-            if (-not $inQuotes) {
-                $csvRecords++
-            }
-        }
-    }
-    finally {
-        $reader.Close()
-        $reader.Dispose()
-    }
-
-    return [PSCustomObject]@{
-        PhysicalLines = $physicalLines
-        CsvRecords    = $csvRecords
-    }
-}
-
-
-# ============================================
-# 4. 作業開始
-# ============================================
-
-Write-Log "============================================"
-Write-Log "JOB START: Checksum & CSV Record Count Verification"
-Write-Log "Input Path   : $folderPath"
-Write-Log "Baseline File: $baselineFile"
-Write-Log "Log File     : $logFile"
-Write-Log "============================================"
-
-
-# ============================================
-# 5. 檢查 Input Folder
-# ============================================
-
-if (!(Test-Path $folderPath)) {
-    Write-Log `
-        "ERROR TYPE : INPUT FOLDER NOT FOUND (Path: $folderPath)" `
-        "ERROR"
-
-    $hasError = $true
-}
-
-
-# ============================================
-# 6. 檢查 Baseline File
-# ============================================
-
-if (!$hasError -and !(Test-Path $baselineFile)) {
-    Write-Log `
-        "ERROR TYPE : BASELINE FILE NOT FOUND (File: $baselineFile)" `
-        "ERROR"
-
-    $hasError = $true
-}
-
-
-# ============================================
-# 7. 基本環境檢核失敗
-# ============================================
-
-if ($hasError) {
-    Write-Log "============================================"
-    Write-Log "JOB STATUS : FAILED (Exit Code: 1)" "ERROR"
-    Write-Log "============================================"
-
-    exit 1
-}
-
-
-# ============================================
-# 8. 讀取與解析 AML_CHECK_SUM_1.csv
-#
-# 格式：
-# AML_SPEC_OFAC_SPEC.csv;1933;MD5
-# ============================================
-
-$baseline = @{}
-
-try {
-    $lines = Get-Content `
-        -Path $baselineFile `
-        -Encoding UTF8
-
-    foreach ($line in $lines) {
-        # 忽略空白行
-        if ([string]::IsNullOrWhiteSpace($line)) {
-            continue
-        }
-
-        $parts = $line.Split(";")
-
-        # 至少需要：FileName ; Count ; MD5
-        if ($parts.Count -lt 3) {
-            Write-Log `
-                "ERROR TYPE : BASELINE FORMAT ERROR -> Line: $line" `
-                "ERROR"
-
-            $hasError = $true
-            continue
-        }
-
-        $fileName  = $parts[0].Trim()
-        $countText = $parts[1].Trim()
-        $md5       = $parts[2].Trim().ToLowerInvariant()
-
-        # 檢查 File Name
-        if ([string]::IsNullOrWhiteSpace($fileName)) {
-            Write-Log `
-                "ERROR TYPE : EMPTY FILE NAME -> Line: $line" `
-                "ERROR"
-
-            $hasError = $true
-            continue
-        }
-
-        # 檢查 Count
-        $expectedCount = 0
-        if (-not [int64]::TryParse($countText, [ref]$expectedCount)) {
-            Write-Log `
-                "ERROR TYPE : INVALID COUNT -> File: $fileName, Count: $countText" `
-                "ERROR"
-
-            $hasError = $true
-            continue
-        }
-
-        # 檢查 MD5 Format
-        if ($md5 -notmatch '^[0-9a-f]{32}$') {
-            Write-Log `
-                "ERROR TYPE : INVALID MD5 FORMAT -> File: $fileName, MD5: $md5" `
-                "ERROR"
-
-            $hasError = $true
-            continue
-        }
-
-        # 儲存 Baseline
-        $key = $fileName.ToLowerInvariant()
-        $baseline[$key] = @{
-            FileName = $fileName
-            Count    = $expectedCount
-            MD5      = $md5
-        }
-    }
-}
-catch {
-    Write-Log `
-        "ERROR TYPE : BASELINE READ ERROR -> $($_.Exception.Message)" `
-        "ERROR"
-
-    $hasError = $true
-}
-
-
-# ============================================
-# 9. Baseline 解析失敗
-# ============================================
-
-if ($hasError) {
-    Write-Log "============================================"
-    Write-Log "JOB STATUS : FAILED (Exit Code: 1)" "ERROR"
-    Write-Log "============================================"
-
-    exit 1
-}
-
-
-# ============================================
-# 10. 逐檔比對
-#
-# 比對：
-# 1. CSV Record Count
-# 2. MD5
-#
-# 同時記錄：
-# Physical Line Count
-# ============================================
-
-foreach ($key in $baseline.Keys) {
-
-    $expectedFileName = $baseline[$key].FileName
-    $expectedCount    = $baseline[$key].Count
-    $expectedMD5      = $baseline[$key].MD5
-
-    $targetFile = $null
-    $matchedLeaf = $null
-
-    # 10-1. 直接比對檔名
-    $directPath = Join-Path $folderPath $expectedFileName
-
-    if (Test-Path $directPath) {
-        $targetFile = $directPath
-        $matchedLeaf = Split-Path $targetFile -Leaf
-    }
-    else {
-        # 10-2. 自動嘗試副檔名變體
-        $baseStem = $expectedFileName -replace '(\.Table)?\.(sql|csv)$', ''
-
-        $candidateFiles = @(
-            (Join-Path $folderPath "$baseStem.sql"),
-            (Join-Path $folderPath "$baseStem.Table.sql"),
-            (Join-Path $folderPath "$baseStem.csv")
-        )
-
-        foreach ($candidate in $candidateFiles) {
-            if (Test-Path $candidate) {
-                $targetFile = $candidate
-                $matchedLeaf = Split-Path $targetFile -Leaf
-
-                Write-Log "Matched '$expectedFileName' -> local file '$matchedLeaf'"
-                break
-            }
-        }
-    }
-
-    # 10-3. 檢查檔案是否存在
-    if ($null -eq $targetFile) {
-        Write-Log `
-            "ERROR TYPE : FILE NOT FOUND -> Expected: $expectedFileName" `
-            "ERROR"
-
-        $hasError = $true
-        continue
-    }
-
-    # 10-4. 計算 Count 與 MD5
-    try {
-        Write-Log "Checking File: $expectedFileName"
-
-        # 單次讀取完成 Physical Line Count 與 CSV Record Count
-        $counts = Get-CsvCountsOptimized -filePath $targetFile
-        $physicalLineCount = $counts.PhysicalLines
-        $actualCount       = $counts.CsvRecords
-
-        # MD5 計算
-        $actualMD5 = (Get-FileHash -Path $targetFile -Algorithm MD5).Hash.ToLowerInvariant()
-
-        # 10-5. Log Count Information
-        Write-Log "CSV RECORD COUNT -> File: $expectedFileName (Expected: $expectedCount, Actual: $actualCount)"
-        Write-Log "PHYSICAL LINE COUNT -> File: $expectedFileName (Actual: $physicalLineCount)"
-
-        # 10-6. 檢驗 CSV Record Count
-        if ($actualCount -ne $expectedCount) {
-            Write-Log `
-                "COUNT MISMATCH -> File: $expectedFileName (Expected: $expectedCount, Actual: $actualCount)" `
-                "ERROR"
-
-            $hasError = $true
-        }
-
-        # 10-7. 檢驗 MD5
-        if ($actualMD5 -ne $expectedMD5) {
-            Write-Log `
-                "MD5 MISMATCH -> File: $expectedFileName (Expected: $expectedMD5, Actual: $actualMD5)" `
-                "ERROR"
-
-            $hasError = $true
-        }
-
-        # 10-8. Count + MD5 都正確
-        if ($actualCount -eq $expectedCount -and $actualMD5 -eq $expectedMD5) {
-            Write-Log `
-                "PASSED -> File: $expectedFileName (CSV Records: $actualCount, Physical Lines: $physicalLineCount, MD5: OK)"
-        }
-
-    }
-    catch {
-        Write-Log `
-            "ERROR TYPE : FILE PROCESS ERROR -> File: $expectedFileName, Message: $($_.Exception.Message)" `
-            "ERROR"
-
-        $hasError = $true
-    }
-}
-
-
-# ============================================
-# 11. 最終結果與 Exit Code
-# ============================================
-
-Write-Log "============================================"
-
-if ($hasError) {
-    Write-Log `
-        "JOB STATUS : FAILED (Exit Code: 1)" `
-        "ERROR"
-
-    Write-Log "============================================"
-    exit 1
-}
-else {
-    Write-Log `
-        "JOB STATUS : SUCCESS (Exit Code: 0)" `
-        "INFO"
-
-    Write-Log "============================================"
-    exit 0
-}
-
+USE [USERLICENSEJP]
+GO
+
+/****** Object:  Table [dbo].[UserAccounts]    Script Date: 2026/9/2 上午 09:34:47 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[UserAccounts](
+	[ID] [bigint] IDENTITY(1,1) NOT NULL,
+	[UserID] [nvarchar](40) NOT NULL,
+	[UserType] [nvarchar](20) NOT NULL,
+	[BranchID] [bigint] NULL,
+	[Password] [nvarchar](max) NULL,
+	[FirstName] [nvarchar](50) NOT NULL,
+	[LastName] [nvarchar](50) NULL,
+	[PhoneNo] [varchar](30) NULL,
+	[Email] [varchar](50) NULL,
+	[Occupation] [nvarchar](30) NULL,
+	[CreatedDate] [datetime] NOT NULL,
+	[LastLoginDate] [datetime] NULL,
+	[LastModifiedDate] [datetime] NULL,
+	[AccountExpiredDate] [datetime] NULL,
+	[PasswordExpiredDate] [datetime] NULL,
+	[Disabled] [bit] NOT NULL,
+	[PhoneExt] [varchar](30) NULL,
+	[NeedChangePassword] [bit] NOT NULL,
+	[AgreeToLicense] [bit] NOT NULL,
+	[Deleted] [bit] NOT NULL,
+	[LoginFailureCount] [int] NULL,
+	[LastLoginFailureDate] [datetime] NULL,
+	[IsDomainUser] [bit] NOT NULL,
+	[CreatedDate_UTC] [datetime] NULL,
+	[LastLoginDate_UTC] [datetime] NULL,
+	[LastModifiedDate_UTC] [datetime] NULL,
+	[AccountExpiredDate_UTC] [datetime] NULL,
+	[PasswordExpiredDate_UTC] [datetime] NULL,
+	[LastLoginFailureDate_UTC] [datetime] NULL,
+	[BusinessCategory] [nvarchar](128) NULL,
+	[IsAutomated] [bit] NULL,
+ CONSTRAINT [pk_accounts_ID] PRIMARY KEY CLUSTERED 
+(
+	[ID] ASC,
+	[UserID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+
+GO
+
+ALTER TABLE [dbo].[UserAccounts] ADD  CONSTRAINT [df_UserAccounts_IsDomainUser]  DEFAULT ((0)) FOR [IsDomainUser]
+GO
+
+
+
+
+
+我想要insert 我的員工編號進去這個table
