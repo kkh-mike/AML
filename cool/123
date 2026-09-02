@@ -1,3 +1,36 @@
+
+算出來的分數（Relative Correlation，簡稱 RC）會依據是否達到門檻分流，可從以下兩個位置查詢：
+1. 降噪/未達門檻歷史表（最常出現的位置）
+因為低於門檻（例如 \le 75 分）的紀錄會被分流到此表，用你的檢核批號 @UID 即可查詢原始分數與扣分後分數：
+SELECT 
+    uid,
+    new_acct_key,
+    sdn_name,
+    sdn_type,
+    Ori_RC AS [外部引擎原始計算分數],
+    relative_correlation AS [最終分數(含扣分後)],
+    Reduction_IND AS [扣分項目旗標]
+FROM dbo.NMCHK_ResultHistory_FILTER_RC WITH (NOLOCK)
+WHERE uid = '2026107';
+
+2. 正式命中歷史表（達到門檻分才會寫入）
+若分數高於門檻（例如 > 75 分），分數則會寫入正式表：
+SELECT 
+    uid,
+    new_acct_key,
+    sdn_name,
+    sdn_type,
+    Ori_RC AS [外部引擎原始計算分數],
+    relative_correlation AS [最終分數(含扣分後)],
+    Reduction_IND AS [扣分項目旗標]
+FROM dbo.NMCHK_ResultHistory WITH (NOLOCK)
+WHERE uid = '2026107';
+
+註：dbo.NMCHK_OtherListDetectionResults_Temp 雖然是在第一時間接收外部引擎傳回的分數，但因為預存程序最後有一行 DELETE FROM dbo.NMCHK_OtherListDetectionResults_Temp WHERE Uid = @uid，跑完會直接被清空，因此日常查驗請直接看上述兩張 ResultHistory 表。
+
+
+
+
 沒有出現在 NMCHK_ResultHistory 是正常的，因為你的比對分數（58 分）低於系統設定的門檻值，被歸類為低分雜訊，寫入了另一張表 dbo.NMCHK_ResultHistory_FILTER_RC。
 程式碼尾端的關鍵邏輯直接解釋了這個現象：
 --insert results with RC <= default RC into NMCHK_ResultHistory_FILTER_RC tables, and insert the rest to NMCHK_ResultHistory table  
