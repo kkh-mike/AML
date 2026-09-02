@@ -1,13 +1,63 @@
-這個改動是為了防止使用者在畫面上不小心點到或反白框選儲存格，導致匯出的 CSV 檔案缺漏或格式壞掉。
-原本程式碼中的邏輯是：
-If Selection.Cells.Count > 1 Then
+對方提出了 兩個核心需求，重點如下：
+1. 修正別名與別名假名遺漏的問題（第 2 點需求）
+ * 需求現況：全銀協的 songho 原始檔中，每個人最多會有 4 組姓名（各組都是姓、名分成兩欄）：
+   * 氏名（姓 / 名）
+   * フリガナ（姓 / 名）
+   * 別名（姓 / 名）
+   * 別名フリガナ（姓 / 名）
+ * 問題點：目前程式轉別名時只抓到名（賢治），漏了姓（邦丸）。
+ * 期望目標：希望這 4 組只要有資料，每一組的「姓+名」都要能完整合併，並轉出對應的列（放在 Name 與 Chinese Name 欄位）。也就是一個人最多可能會產出 4 筆姓名紀錄。
+2. 排查 CSV 產出格式不正確的問題（第 1 點需求）
+ * 問題點：使用者在 Excel 工作表（TransferredFile）看到的資料是正確的，但最後匯出產生的 CSV 檔（InternalList_SONGHO_...csv）格式跑掉。
+ * 原因分析：看你的 CSVFile 程式碼：
+   If Selection.Cells.Count > 1 Then
     Set SrcRg = Selection
 Else
     Set SrcRg = ActiveSheet.UsedRange
 End If
 
- * 發生什麼事：
-   如果使用者在執行巨集前，滑鼠在畫面上不小心拉了一個框、按到 Shift 多選了幾個格子，或者上次編輯殘留了選取狀態，Selection.Cells.Count > 1 就會成立。
- * 導致的後果：
-   程式會以為「你只想匯出被反白選取的那幾格」，於是只抓那幾格寫進 CSV，原本幾百列幾千列的資料通通沒被匯出，造成使用者信中抱怨的：「工作表二（TransferredFile）明明資料是對的，但匯出來的 CSV 格式卻完全不對或缺東缺西。」
-拿掉這個判斷、直接寫死 Set SrcRg = Sheets("TransferredFile").UsedRange，就是強迫程式不管畫面上游標停在哪、框選了什麼，一律完整匯出整張工作表的全部資料。
+   如果使用者在執行前，游標不小心在畫面上框選了多個儲存格（Selection > 1），程式就不會抓整張工作表（UsedRange），而是只抓被框到的那些格子去寫入 CSV，導致產出的 CSV 格式完全破碎。
+ * 期望目標：修復巨集，確保產出的 CSV 檔與工作表內容一致。
+具體程式碼修法建議
+針對需求 1：修正 TransferSongho 的 4 組姓名拆分
+目前陣列只有 4 個位置，但原始有 4 組姓名：
+ * Arr(1)：本名（姓 D 欄 + 名 E 欄）
+ * Arr(2)：本名拼音（姓 F 欄 + 名 G 欄）
+ * Arr(3)：別名（姓 H 欄 + 名 I 欄）
+ * Arr(4)：別名拼音（姓 J 欄 + 名 K 欄）
+請將 TransferSongho 改為：
+Sub TransferSongho()
+    Sheets("TEMP").Select
+
+    finalrow = Cells(Rows.Count, 1).End(xlUp).Row
+    For x = 2 To finalrow
+        Dim Arr(1 To 4) As Variant, R As Range
+        Set R = Range("A" & x & ":AD" & x) ' 範圍涵蓋到後面的欄位
+        Num = ""
+        Arr(1) = Trim(CStr(R.Cells(1, 4))) & Trim(CStr(R.Cells(1, 5)))   ' 氏名（姓）+ 氏名（名）
+        Arr(2) = Trim(CStr(R.Cells(1, 6))) & Trim(CStr(R.Cells(1, 7)))   ' フリガナ（姓）+ フリガナ（名）
+        Arr(3) = Trim(CStr(R.Cells(1, 8))) & Trim(CStr(R.Cells(1, 9)))   ' 別名（姓）+ 別名（名）
+        Arr(4) = Trim(CStr(R.Cells(1, 10))) & Trim(CStr(R.Cells(1, 11))) ' 別名フリガナ（姓）+ 別名フリガナ（名）
+        
+        Address = R.Cells(1, 19) ' 住所
+        Remark = Trim(CStr(R.Cells(1, 12))) + Trim(CStr(R.Cells(1, 13))) + Trim(CStr(R.Cells(1, 14))) ' 生日+年齡+性別
+        birth = SplitString(CStr(R.Cells(1, 12)))
+        Source = R.Cells(1, 30)
+        
+        Call RowItem(Num, Source, Address, Remark, birth, Arr)
+        Sheets("TEMP").Select
+    Next x
+End Sub
+
+針對需求 2：修正 CSVFile 避免抓取到局部選取範圍
+把 CSVFile 中的 Selection 判斷拿掉，固定抓取完整範圍：
+' 把這段：
+' If Selection.Cells.Count > 1 Then
+'   Set SrcRg = Selection
+' Else
+'   Set SrcRg = ActiveSheet.UsedRange
+' End If
+
+' 直接改成：
+Set SrcRg = Sheets("TransferredFile").UsedRange
+
