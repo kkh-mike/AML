@@ -1,36 +1,19 @@
-這個錯誤是因為 @U1 沒有查到對應的 ID，導致寫入了預設值 0，而資料表內已經存在 (0, 1) 這筆複合主鍵資料。
-具體原因與檢查步驟如下：
-核心原因分析
- * 錯誤訊息顯示重複索引鍵值是 (0, 1)，代表 INSERT INTO AccountUserGroups 時傳進去的第一個欄位值變成了 0。
- * DECLARE @U1 VARCHAR(10) = '' 宣告了字串，如果 SELECT @U1 = ID FROM UserAccounts WHERE USERID = '1141923' AND Deleted = 0 AND Disabled = 0 完全沒有查到任何資料，@U1 就會維持原值（空字串 ''）。
- * 當寫入數值型別欄位時，SQL Server 會自動把空字串轉型為數值 0，而 AccountUserGroups 裡面早已有一筆 UserID = 0, GroupID = 1 的紀錄，因此觸發 pk_AccountUserGroups 主鍵衝突。
-排查與驗證
-先單獨執行這段查詢，確認是否有資料被撈出：
-SELECT ID, USERID, Deleted, Disabled 
-FROM UserAccounts 
-WHERE USERID = '1141923';
 
- * 若查無資料：確認 USERID 前後是否有空白、大小寫問題，或該帳號根本不存在。
- * 若有資料但 Deleted 或 Disabled 不為 0：代表該帳號已被刪除或停用，所以第二句赋值沒有命中。
-安全寫法建議
-避免查不到資料時直接拿預設值盲塞，建議改為直接使用 INSERT ... SELECT，查不到時就不會執行寫入：
-INSERT INTO AccountUserGroups (UserID, GroupID) -- 依你實際欄位名稱
-SELECT ID, '1'
-FROM UserAccounts
-WHERE USERID = '1141923' 
-  AND Deleted = 0 
-  AND Disabled = 0;
+想請教一下
+
+因為我們合併案會分三階段
+1. 把新光主機整個搬回來
+2. 慢慢移植DB資料
+3. 關掉新光主機 正式用台新的
+
+第一階段會先把新光整個主機系統搬過來
+然後會先讓台新的法尊相關人員連進去使用
+但那個主機跟aml系統都是新光的
+
+有個問題
+因為新光是AD 權限驗證 ，台新人員如果要進去新光的aml系統使用，流程要怎樣做
+除了幫台新人員新增AD權限以外，還有什麼工作群組之類的要先幫他們弄好?
 
 
-
-
--- 1. 先復原帳號
-UPDATE UserAccounts 
-SET Deleted = 0 
-WHERE USERID = '1141923';
-
--- 2. 再加入群組 (ID 為 10085)
-INSERT INTO AccountUserGroups (UserID, GroupID)
-VALUES (10085, '1');
-
-
+幫我整理邏輯清楚，我要line 給廠商問他
+ 
