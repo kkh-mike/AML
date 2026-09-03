@@ -1,48 +1,11 @@
-如果你的意思是：
 
-刪除 BlackListData 裡面有，但 OFAC_SPEC 沒有對應資料的資料
+Dear伯龍,
 
-那你要用 NOT EXISTS，而不是 JOIN：
+經辦於8/17維護3戶法人戶FATCA簽署日期(畫面一)其中兩戶(客戶ID: MY2100005及MY2200013)，放行後customer related party頁簽資訊正常有資料(畫面二)但今日查詢Customer related party頁簽資訊卻不見了(畫面三)
+請協助調查異常原因
 
-DELETE A
-FROM BSADBJP..BlackListData A
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM OFAC_SPEC B
-    WHERE B.spec_name = A.sdn_name
-);
+另，業務單位表示今日AML的CDC檢核(畫面2-1)，有戶個人戶(客戶ID:MY1200008) 的資訊串連了客戶MY2100005的資料，再麻煩一並調查原因
+謝謝
 
-🔍 建議先確認會刪哪些資料
 
-正式 DELETE 前先跑：
-
-SELECT A.*
-FROM BSADBJP..BlackListData A
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM OFAC_SPEC B
-    WHERE B.spec_name = A.sdn_name
-);
-
-確認結果沒問題，再執行 DELETE。
-
-⸻
-
-但如果你真正想要的是：
-
-BlackListData 有，而且 OFAC_SPEC 也有對應資料的那些，從 BlackListData 刪掉
-
-那就是你原本 JOIN 的條件：
-
-DELETE A
-FROM BSADBJP..BlackListData A
-JOIN OFAC_SPEC B
-    ON B.spec_name = A.sdn_name;
-
-也就是：
-
-目的	SQL
-BlackListData 有，但 OFAC_SPEC 沒有	NOT EXISTS
-BlackListData 有，而且 OFAC_SPEC 也有	JOIN
-
-你說的「BlackListData 有，但 OFAC_SPEC 的資料刪掉」如果是指「只保留兩邊都有的，刪掉 BlackListData 多出來的資料」，就是第一個 NOT EXISTS。
+他什麼問題
