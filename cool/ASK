@@ -1,20 +1,15 @@
-
-C-04：Deceased 旗標不符（非死亡名單不應入選）
- * 測試目的：驗證非死亡人口不會誤入第二批同步。
- * 前置資料準備：
-   * DJ_Entity：EntityId = 90003, Deceased = 0（或 NULL），且有 Japanese Finance 標籤。
-   * DJ_List_Data_A：無此資料。
- * 執行動作：執行 SP。
- * 預期結果：
-   * BSADBJP..OFAC_SPEC 不應 新增 remark = '90003' 的資料。
-
-
-
-SELECT   A.EntityId , A.FullName , F.spec_name  FROM BSADB..DJ_Entity  A
-JOIN BSADB..DJ_SanctionListReference B ON A.EntityId = B.EntityId
-LEFT JOIN BSADB..DJ_List_Data_A C ON  A.EntityId = C.EntNum
-LEFT JOIN BSADBJP..OFAC_SPEC F  ON A.FullName = F.spec_name
- WHERE B.SanctionListReference  LIKE '%Japanese Finance%' AND A.Deceased = 0 AND F.spec_name is null  AND C.EntNum is null
-
-
-我這樣寫有對?
+SELECT
+    A.EntityId,
+    A.FullName,
+    F.spec_name
+FROM BSADB..DJ_Entity A
+JOIN BSADB..DJ_SanctionListReference B
+    ON A.EntityId = B.EntityId
+LEFT JOIN BSADB..DJ_List_Data_A C
+    ON A.EntityId = C.EntNum
+LEFT JOIN BSADBJP..OFAC_SPEC F
+    ON A.FullName = F.spec_name
+WHERE B.SanctionListReference LIKE '%Japanese Finance%'
+  AND A.Deceased = 0
+  AND F.spec_name IS NULL
+  AND C.EntNum IS NULL;
