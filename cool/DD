@@ -1,13 +1,75 @@
-TC-03：死亡名單重複時以 DJ_List_Data_A 為主（NOT EXISTS 驗證）
- * 測試目的：驗證同一 EntityId 同時符合兩邊條件時，不會產生主鍵衝突或重覆寫入。
- * 前置資料準備：
-   * DJ_List_Data_A：EntNum = 90002, SdnName = 'NAME FROM LIST_A', BitCode & 1 > 0。
-   * DJ_Entity：EntityId = 90002, FullName = 'NAME FROM ENTITY', Deceased = 1。
-   * 兩者皆關聯至 Japanese Finance。
- * 執行動作：執行 SP。
- * 預期結果：
-   * #tempDJBlacklistJP 只有 1 筆 EntNum = 90002。
-   * spec_name 為 'NAME FROM LIST_A'（確保第一段優先，第二段被 NOT EXISTS 濾除）。
+對，如果你是要先從現有資料庫撈出符合 TC-03 條件的測試案例，就不要寫死 EntNum = 90002。
 
+你要找的是：
 
-那這樣怎麼驗?
+同一個 EntityId 同時符合「第一段」和「第二段」條件的資料。
+
+可以直接這樣撈：
+
+SELECT 
+    A.EntNum,
+    A.SdnName,
+    A.NamePropertyBitCode,
+    E.FullName,
+    E.Deceased,
+    B.SanctionListReference
+FROM BSADB.dbo.DJ_List_Data_A A WITH (NOLOCK)
+JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK)
+    ON A.EntNum = B.EntityId
+JOIN BSADB.dbo.DJ_Entity E WITH (NOLOCK)
+    ON A.EntNum = E.EntityId
+WHERE A.NamePropertyBitCode & 1 > 0
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND E.Deceased = 1
+ORDER BY A.EntNum;
+
+這個就是在找：
+
+DJ_List_Data_A
+    ↓
+NamePropertyBitCode & 1 > 0
+    ↓
+Japanese Finance
+    ↓
+同一個 Entity
+    ↓
+DJ_Entity.Deceased = 1
+
+所以撈出來的每一筆，理論上都同時符合你第一段和第二段 INSERT 的條件。
+
+⸻
+
+如果你要直接找「可能重複的 Entity」
+
+我更推薦這個版本：
+
+SELECT 
+    A.EntNum,
+    COUNT(*) AS Cnt,
+    MAX(A.SdnName) AS SdnName,
+    MAX(E.FullName) AS FullName,
+    MAX(E.Deceased) AS Deceased
+FROM BSADB.dbo.DJ_List_Data_A A WITH (NOLOCK)
+JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK)
+    ON A.EntNum = B.EntityId
+JOIN BSADB.dbo.DJ_Entity E WITH (NOLOCK)
+    ON A.EntNum = E.EntityId
+WHERE A.NamePropertyBitCode & 1 > 0
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND E.Deceased = 1
+GROUP BY A.EntNum
+ORDER BY A.EntNum;
+
+你要拿哪一筆當 TC-03？
+
+就從結果挑一個：
+
+EntNum = XXXX
+SdnName = NAME FROM LIST_A
+FullName = NAME FROM ENTITY
+Deceased = 1
+Japanese Finance
+
+然後把那個 XXXX 填進你的測試資料。
+
+這樣才是正確的「先從正式資料找測試案例」方式。
