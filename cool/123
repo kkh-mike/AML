@@ -1,1 +1,12 @@
-我要把 BSADBJP..OFAC_SPEC 拿掉
+SELECT 
+    A.EntityId,
+    A.FullName AS SdnName,
+    CONVERT(VARCHAR, A.UpdatedDate_UTC, 112) AS UpdatedDate
+FROM BSADB.dbo.DJ_Entity A WITH (NOLOCK)
+JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) 
+    ON A.EntityId = B.EntityId
+LEFT JOIN BSADBJP..BlackListData H 
+    ON A.FullName = H.sdn_name
+WHERE A.Deceased = 1 
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND H.sdn_name IS NULL;
