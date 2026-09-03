@@ -1,36 +1,20 @@
-這張截圖把關鍵設定表帶出來了：
-程式在比對黑名單版本與開關時，串接了一張關鍵的設定快取表：
-[dbo].[DBCHK_BlackList_Setting_Buffer]
-在截圖中的條件：
-JOIN [dbo].[DBCHK_BlackList_Setting_Buffer] B 
-  ON A.[list] = B.[LIST] 
- AND ISNULL(NULLIF(B.LIST_ID, ''), 0) = ISNULL(NULLIF(A.[sdn_grp_num], ''), 0)
-WHERE B.[FLAG] = 'Y'
 
-關鍵卡點分析
- * 系統掃描黑名單時，只會載入在 DBCHK_BlackList_Setting_Buffer 裡面 FLAG = 'Y' 的名單。
- * 如果你的 LIST_ID = '5'（或對應 Group 5）在這張表裡的 FLAG 是 'N' 或是根本沒有這筆設定，系統在準備階段就會直接略過 Group 5！
-排查與修正步驟
-步驟 1：查詢 DBCHK_BlackList_Setting_Buffer 的設定值
-在 SSMS 執行以下查詢：
-SELECT * 
-FROM BSADBJP.dbo.DBCHK_BlackList_Setting_Buffer
-WHERE LIST = 'SPEC' OR LIST_ID = '5' OR LIST_ID LIKE '%5%';
+C-04：Deceased 旗標不符（非死亡名單不應入選）
+ * 測試目的：驗證非死亡人口不會誤入第二批同步。
+ * 前置資料準備：
+   * DJ_Entity：EntityId = 90003, Deceased = 0（或 NULL），且有 Japanese Finance 標籤。
+   * DJ_List_Data_A：無此資料。
+ * 執行動作：執行 SP。
+ * 預期結果：
+   * BSADBJP..OFAC_SPEC 不應 新增 remark = '90003' 的資料。
 
- * 如果查出來 FLAG = 'N'：代表開關被關閉了，請執行步驟 2 將它更新為 'Y'。
- * 如果完全查無資料：代表缺少 Group 5 的設定資料，需手動補進去。
-步驟 2：開啟 Group 5 的黑名單開關
--- 若存在但 FLAG = 'N'，將其開啟
-UPDATE BSADBJP.dbo.DBCHK_BlackList_Setting_Buffer
-SET FLAG = 'Y'
-WHERE LIST = 'SPEC' AND LIST_ID = '5';
 
--- 若原本沒有這筆設定，補插入
-IF NOT EXISTS (SELECT 1 FROM BSADBJP.dbo.DBCHK_BlackList_Setting_Buffer WHERE LIST = 'SPEC' AND LIST_ID = '5')
-BEGIN
-    INSERT INTO BSADBJP.dbo.DBCHK_BlackList_Setting_Buffer (LIST, LIST_ID, FLAG)
-    VALUES ('SPEC', '5', 'Y');
-END
 
-步驟 3：往上捲動查看寫入 DBCHK_BlackListData_Buffer 的語法
-在目前開啟的這支 SP（檔案中的 1~100 行區間），往上找 INSERT INTO [dbo].[DBCHK_BlackListData_Buffer] 的語法，確認它從 OFAC_SPEC 寫入 Buffer 時的篩選條件。
+SELECT   A.EntityId , A.FullName , F.spec_name  FROM BSADB..DJ_Entity  A
+JOIN BSADB..DJ_SanctionListReference B ON A.EntityId = B.EntityId
+LEFT JOIN BSADB..DJ_List_Data_A C ON  A.EntityId = C.EntNum
+LEFT JOIN BSADBJP..OFAC_SPEC F  ON A.FullName = F.spec_name
+ WHERE B.SanctionListReference  LIKE '%Japanese Finance%' AND A.Deceased = 0 AND F.spec_name is null  AND C.EntNum is null
+
+
+我這樣寫有對?
