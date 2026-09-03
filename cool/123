@@ -1,26 +1,9 @@
-  
-CREATE PROCEDURE [dbo].[NMCHK_InsertResultsIntoTempTable]  
-@Uid VARCHAR(40),  
-@NameKey INT,  
-@EntNum INT,  
-@AltNum BIGINT,  
-@RelativeCorrelation INT,  
-@SdnName NVARCHAR(350),  
-@SdnType VARCHAR(50),  
-@sdn_grp_num INT,  
-@NameCategory INT,  
-@UpdatedDate_UTC DATETIME,  
-@NamePropertyBitCode INT  
-AS  
-BEGIN   
- SET NOCOUNT ON;  
-   
- IF NOT EXISTS(SELECT 1 FROM dbo.NMCHK_OtherListDetectionResults_Temp WHERE [Uid] = @Uid AND NameKey = @NameKey AND sdn_type = @SdnType AND ent_num = @EntNum AND alt_num = @AltNum)  
- BEGIN   
-  INSERT INTO dbo.NMCHK_OtherListDetectionResults_Temp ( Uid, NameKey, ent_num, alt_num, RelativeCorrelation, sdn_name, sdn_type, sdn_grp_num, name_cat, UpdatedDate_UTC, NamePropertyBitCode )  
-  VALUES(@Uid, @NameKey, @EntNum, @AltNum, @RelativeCorrelation, @SdnName, @SdnType, @sdn_grp_num, @NameCategory, @UpdatedDate_UTC, @NamePropertyBitCode)   
- END   
-  
-END   
-  
-  
+SELECT 
+    name AS table_or_view_name, 
+    type_desc, 
+    modify_date
+FROM sys.objects
+WHERE name LIKE '%OFAC%SPEC%' 
+   OR name LIKE '%NMCHK%SPEC%'
+   OR name LIKE '%Blacklist%SPEC%'
+ORDER BY modify_date DESC;
