@@ -1,28 +1,7 @@
-破案了！OFAC_SPEC_PARSED 裡面沒東西，就是 Stojilkovic 永遠審不過的根本原因。
-請看 OFACTDB_ProcessSPECList 裡最關鍵的一句 SQL：
-EXEC(N'INSERT INTO dbo.OFAC_SPEC_PARSED(ent_num, spec_name, GROUPID)  
-SELECT ent_num, spec_name, GROUPID  
-FROM dbo.[OFAC_SPEC] WITH (NOLOCK) WHERE BATCHID = ''' + @BATCHID + '''')
+可是
+   SELECT * FROM OFAC_SPEC_PARSED
 
-系統在比對時，只會去查 OFAC_SPEC_PARSED。而只有在名單透過批次匯入（Batch Import）並由這支 SP 跑完時，資料才會被 INSERT 進 OFAC_SPEC_PARSED。
-如果當初「Stojilkovic, Vlajko」是手動在資料庫直接 INSERT 到 OFAC_SPEC，或者當初匯入時批次拋轉失敗，OFAC_SPEC_PARSED 就會是空的，比對引擎自然視若無睹。
-解決方案：手動將資料補進 OFAC_SPEC_PARSED
-請直接針對這筆資料執行補入語法：
--- 補入 Stojilkovic 的解析資料
-INSERT INTO dbo.OFAC_SPEC_PARSED (ent_num, spec_name, GROUPID)
-SELECT ent_num, spec_name, GROUPID
-FROM dbo.OFAC_SPEC WITH (NOLOCK)
-WHERE spec_name = 'Stojilkovic, Vlajko'
-  AND NOT EXISTS (
-      SELECT 1 FROM dbo.OFAC_SPEC_PARSED P 
-      WHERE P.ent_num = OFAC_SPEC.ent_num 
-        AND P.GROUPID = OFAC_SPEC.GROUPID
-  );
 
-執行完成後確認：
-SELECT * FROM dbo.OFAC_SPEC_PARSED WHERE spec_name LIKE '%Stojilkovic%';
+他裡面完全是沒東西的耶
 
-同步確認
-補進去之後，再重新執行一次審核，並確認：
- * NMCHK_Setting_Log 中該次 UID 的 SPEC LIST_ID = 5 必須是 Y（先前截圖第 45 行已是 Y）。
- * OFAC_SPEC 中該筆資料的 COUNTRY 有補上與客戶相符的國籍（避免後續被 NMCHK_Detection_CombineResults 扣分剔除）。
+insert 進去對?
