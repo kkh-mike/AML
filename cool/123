@@ -1,16 +1,16 @@
- -- 找出死人名單
 SELECT 
-	 H.sdn_grp_num,
+    NULL AS sdn_grp_num, -- 或移除此欄位，因不在 BlackListData 內該值為 NULL
     A.EntityId,
     A.FullName AS SdnName,
-	F.IDENT,
+    F.IDENT,
     CONVERT(VARCHAR, A.UpdatedDate_UTC, 112) AS UpdatedDate
-FROM BSADBJP..OFAC_SPEC f
-JOIN  BSADB.dbo.DJ_Entity A WITH (NOLOCK) on A.FullName = f.spec_name
+FROM BSADBJP..OFAC_SPEC F
+JOIN BSADB.dbo.DJ_Entity A WITH (NOLOCK) 
+    ON A.FullName = F.spec_name
 JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) 
     ON A.EntityId = B.EntityId
-JOIN BSADBJP..BlackListData H ON f.spec_name = H.sdn_name
-WHERE A.Deceased = 1 AND B.SanctionListReference LIKE '%Japanese Finance%' 
-
-
-我想要改成找出 不再BSADBJP..BlackListData  裡面的資料
+LEFT JOIN BSADBJP..BlackListData H 
+    ON F.spec_name = H.sdn_name
+WHERE A.Deceased = 1 
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND H.sdn_name IS NULL; -- 過濾掉存在於黑名單的資料
