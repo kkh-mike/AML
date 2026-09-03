@@ -1,29 +1,377 @@
-這張清單直接抓到關鍵架構了！
-注意清單中的這兩張表：
- * OFAC_SPEC_PARSED（還有 ofac_spec_parsed_temp）
- * OFAC_SPEC_FORMAT
-為什麼手動改 OFAC_SPEC 沒有用？
-在該系統架構中，比對引擎（後端服務或 CLR）在比對 SPEC 名單時，讀取的根本不是原始的 OFAC_SPEC，而是經過解析、清洗、分詞後的 OFAC_SPEC_PARSED！
-當在前端介面新增名單或上傳名單時，系統會呼叫類似 OFACTDB_ProcessSPECList 或 OFACTDB_SaveSpecialList，將原始資料清洗後寫入 OFAC_SPEC_PARSED。
-如果直接在 OFAC_SPEC 改資料或補國籍，OFAC_SPEC_PARSED 根本不會自動同步，所以比對引擎在讀字典時依然讀不到或讀到舊資料。
-第一步：立即驗證 OFAC_SPEC_PARSED
-請直接下這段 SQL，看 Stojilkovic 在解析表裡長什麼樣、甚至到底在不在：
+
 SELECT * 
 FROM OFAC_SPEC_PARSED 
 WHERE spec_name LIKE '%Stojilkovic%' 
    OR spec_name LIKE '%Vlajko%';
 
- * 如果查無資料：
-   代表這筆資料根本沒有完成解析或同步到比對庫！「阪下透」有在裡面，但「Stojilkovic」不在，後端引擎當然永遠抓不到它。
- * 如果有資料：
-   看它的欄位內容（例如 spec_name 被清洗成了什麼格式、是否有拆成 First/Last Name、國籍欄位是否仍然是舊的或 NULL）。
-第二步：如果是缺少解析資料，如何讓它生效？
-查看清單中的預存程序：
- * OFACTDB_ProcessSPECList
- * OFACTDB_UpdateSpecBatch
- * OFACTDB_ApproveSpecialList
-若是在後台手動新增但尚未經過主管「審核通過（Approve）」，資料只會停留在 Buffer / 原始表，不會進到 PARSED 比對表。
-請檢查該筆名單的審核狀態，或查看 OFACTDB_ProcessSPECList 的內容：
-EXEC sp_helptext 'OFACTDB_ProcessSPECList';
 
-看它是如何把 OFAC_SPEC 轉進 OFAC_SPEC_PARSED 的，只要重新執行一次對應的處理程序（或從管理介面上點擊重新產生/審核通過），比對引擎就能載入這筆英文名單。
+沒東西
+   EXEC sp_helptext 'OFACTDB_ProcessSPECList';
+
+CREATE PROC [dbo].[OFACTDB_ProcessSPECList]   
+@USERID NVARCHAR(60),  
+@GROUPID INT,  
+@BANK_NO VARCHAR(10),  
+@CultureName varchar(5) = NULL,   
+@BATCHID nvarchar(100),  
+@p_RETVAL NVARCHAR(MAX) OUTPUT,  
+@ERRORFLAG CHAR(1) OUTPUT  
+AS  
+DECLARE   
+@str_command nvarchar(MAX),    
+@retval nvarchar(1000),    
+@retval2 nvarchar(1000),   
+@StartValue BIGINT,  
+@data_date_101  char(10),  
+@APPROVEDDATE NVARCHAR(100),  
+@Col NVARCHAR(50),  
+@LOCAL_TIME NVARCHAR(100),  
+@UTC_TIME NVARCHAR(100)  
+BEGIN  
+ SELECT @ERRORFLAG = 'N'  
+ SELECT @StartValue = MAX(ent_num) FROM dbo.OFAC_SPEC WITH (NOLOCK)  
+ SET @data_date_101 = CONVERT(varchar(10), (dbo.ConvertToBankLocalTime(getutcdate())), 101)    
+ SELECT @APPROVEDDATE = CONVERT(VARCHAR,(dbo.ConvertToBankLocalTime(getutcdate())))  
+ SELECT @LOCAL_TIME = dbo.ConvertToBankLocalTime(getutcdate()), @UTC_TIME  = GETUTCDATE()  
+ IF @StartValue IS NULL  
+  BEGIN  
+   SET @StartValue = '0'  
+  END  
+   
+ /*VALIDATION*/  
+ SELECT @str_command = N'IF EXISTS (SELECT 1 FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+ WHERE LEN(NAME) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''Name''))) SET @result = ''1'' ELSE SET @result = ''0'' '    
+ EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+ IF @retval = '1'    
+  BEGIN  
+   SELECT @str_command = N'SELECT TOP 1 @result = ROW FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+   WHERE LEN(NAME) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''Name'')) ORDER BY ROW '    
+   EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+   EXEC(N'UPDATE dbo.OFAC_SPEC_DownloadedFiles SET CurrentStatus = ''F'' WHERE ID = CONVERT(VARCHAR(100),' + '''' + @BATCHID + ''')')  
+   SELECT @ERRORFLAG = 'Y'  
+   SELECT @p_RETVAL = 'Line ' + @retval  
+   RETURN  
+  END   
+    
+ SELECT @str_command = N'IF EXISTS (SELECT 1 FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+ WHERE ISNULL(NAME,'''') = '''') SET @result = ''1'' ELSE SET @result = ''0'' '    
+ EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+ IF @retval = '1'    
+  BEGIN  
+   SELECT @str_command = N'SELECT TOP 1 @result = ROW FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+   WHERE ISNULL(NAME,'''') = '''' ORDER BY ROW '    
+   EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+   
+   EXEC(N'UPDATE dbo.OFAC_SPEC_DownloadedFiles SET CurrentStatus = ''F'' WHERE ID = CONVERT(VARCHAR(100),' + '''' + @BATCHID + ''')')  
+   SELECT @ERRORFLAG = 'Y'  
+   SELECT @p_RETVAL = 'Line ' + @retval + ': Name cannot be empty.'  
+   RETURN  
+  END   
+    
+ SELECT @str_command = N'IF EXISTS (SELECT 1 FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] A WITH (NOLOCK)   
+ WHERE EXISTS(SELECT 1 FROM dbo.OFAC_SPEC WITH (NOLOCK) WHERE NAME = A.NAME AND GROUPID = ''' + CONVERT(VARCHAR,@GROUPID) + ''')) SET @result = ''1'' ELSE SET @result = ''0'' '    
+ EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+ IF @retval = '1'    
+  BEGIN  
+   SELECT @str_command = N'SELECT TOP 1 @result = ROW FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] A WITH (NOLOCK)   
+   WHERE EXISTS(SELECT 1 FROM dbo.OFAC_SPEC WITH (NOLOCK) WHERE NAME = A.NAME AND GROUPID = ''' + CONVERT(VARCHAR,@GROUPID) + ''') ORDER BY ROW '    
+   EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+   EXEC(N'UPDATE dbo.OFAC_SPEC_DownloadedFiles SET CurrentStatus = ''F'' WHERE ID = CONVERT(VARCHAR(100),' + '''' + @BATCHID + ''')')  
+   SELECT @ERRORFLAG = 'Y'  
+   SELECT @p_RETVAL = 'Line ' + @retval + ': Name already existed in the system.'  
+   RETURN  
+  END    
+    
+ SELECT @str_command = N'IF EXISTS (SELECT 1 FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+ WHERE LEN(TAXIDCD) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''TAX CODE''))) SET @result = ''1'' ELSE SET @result = ''0'' '    
+ EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+ IF @retval = '1'    
+  BEGIN  
+   SELECT @str_command = N'SELECT TOP 1 @result = ROW FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+   WHERE LEN(TAXIDCD) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''TAX CODE'')) ORDER BY ROW '    
+   EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+   EXEC(N'UPDATE dbo.OFAC_SPEC_DownloadedFiles SET CurrentStatus = ''F'' WHERE ID = CONVERT(VARCHAR(100),' + '''' + @BATCHID + ''')')  
+   SELECT @ERRORFLAG = 'Y'  
+   SELECT @p_RETVAL = 'Line ' + @retval  
+   RETURN  
+  END   
+    
+ SELECT @str_command = N'IF EXISTS (SELECT 1 FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+ WHERE LEN(TAXID) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''TAX ID''))) SET @result = ''1'' ELSE SET @result = ''0'' '    
+ EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+ IF @retval = '1'    
+  BEGIN  
+   SELECT @str_command = N'SELECT TOP 1 @result = ROW FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+   WHERE LEN(TAXID) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''TAX ID'')) ORDER BY ROW '    
+   EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+   EXEC(N'UPDATE dbo.OFAC_SPEC_DownloadedFiles SET CurrentStatus = ''F'' WHERE ID = CONVERT(VARCHAR(100),' + '''' + @BATCHID + ''')')  
+   SELECT @ERRORFLAG = 'Y'  
+   SELECT @p_RETVAL = 'Line ' + @retval  
+   RETURN  
+  END    
+    
+ SELECT @str_command = N'IF EXISTS (SELECT 1 FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+ WHERE LEN(ADDRESS) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''ADDRESS''))) SET @result = ''1'' ELSE SET @result = ''0'' '    
+ EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+ IF @retval = '1'    
+  BEGIN  
+   SELECT @str_command = N'SELECT TOP 1 @result = ROW FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+   WHERE LEN(ADDRESS) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''ADDRESS'')) ORDER BY ROW '    
+   EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+   EXEC(N'UPDATE dbo.OFAC_SPEC_DownloadedFiles SET CurrentStatus = ''F'' WHERE ID = CONVERT(VARCHAR(100),' + '''' + @BATCHID + ''')')  
+   SELECT @ERRORFLAG = 'Y'  
+   SELECT @p_RETVAL = 'Line ' + @retval  
+   RETURN  
+  END    
+   
+ SELECT @str_command = N'IF EXISTS (SELECT 1 FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+ WHERE LEN(STATE) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''STATE''))) SET @result = ''1'' ELSE SET @result = ''0'' '    
+ EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+ IF @retval = '1'    
+  BEGIN  
+   SELECT @str_command = N'SELECT TOP 1 @result = ROW FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+   WHERE LEN(STATE) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''STATE'')) ORDER BY ROW '    
+   EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+   EXEC(N'UPDATE dbo.OFAC_SPEC_DownloadedFiles SET CurrentStatus = ''F'' WHERE ID = CONVERT(VARCHAR(100),' + '''' + @BATCHID + ''')')  
+   SELECT @ERRORFLAG = 'Y'  
+   SELECT @p_RETVAL = 'Line ' + @retval  
+   RETURN  
+  END    
+   
+ SELECT @str_command = N'IF EXISTS (SELECT 1 FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+ WHERE LEN(COUNTRY) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''COUNTRY''))) SET @result = ''1'' ELSE SET @result = ''0'' '    
+ EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+ IF @retval = '1'    
+  BEGIN  
+   SELECT @str_command = N'SELECT TOP 1 @result = ROW FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+   WHERE LEN(COUNTRY) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''COUNTRY'')) ORDER BY ROW '    
+   EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+   EXEC(N'UPDATE dbo.OFAC_SPEC_DownloadedFiles SET CurrentStatus = ''F'' WHERE ID = CONVERT(VARCHAR(100),' + '''' + @BATCHID + ''')')  
+   SELECT @ERRORFLAG = 'Y'  
+   SELECT @p_RETVAL = 'Line ' + @retval  
+   RETURN  
+  END    
+   
+ SELECT @str_command = N'IF EXISTS (SELECT 1 FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+ WHERE LEN(IDENT) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''IDENT''))) SET @result = ''1'' ELSE SET @result = ''0'' '    
+ EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+ IF @retval = '1'    
+  BEGIN  
+   SELECT @str_command = N'SELECT TOP 1 @result = ROW FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+   WHERE LEN(IDENT) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''IDENT'')) ORDER BY ROW '    
+   EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+   EXEC(N'UPDATE dbo.OFAC_SPEC_DownloadedFiles SET CurrentStatus = ''F'' WHERE ID = CONVERT(VARCHAR(100),' + '''' + @BATCHID + ''')')  
+   SELECT @ERRORFLAG = 'Y'  
+   SELECT @p_RETVAL = 'Line ' + @retval  
+   RETURN  
+  END    
+   
+ SELECT @str_command = N'IF EXISTS (SELECT 1 FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+ WHERE LEN(IDENTO) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''IDENTO''))) SET @result = ''1'' ELSE SET @result = ''0'' '    
+ EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+ IF @retval = '1'    
+  BEGIN  
+   SELECT @str_command = N'SELECT TOP 1 @result = ROW FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+   WHERE LEN(IDENTO) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''IDENTO'')) ORDER BY ROW '    
+   EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+   EXEC(N'UPDATE dbo.OFAC_SPEC_DownloadedFiles SET CurrentStatus = ''F'' WHERE ID = CONVERT(VARCHAR(100),' + '''' + @BATCHID + ''')')  
+   SELECT @ERRORFLAG = 'Y'  
+   SELECT @p_RETVAL = 'Line ' + @retval  
+   RETURN  
+  END    
+    
+ SELECT @str_command = N'IF EXISTS (SELECT 1 FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+ WHERE LEN(ISSBY) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''ISSBY''))) SET @result = ''1'' ELSE SET @result = ''0'' '    
+ EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+ IF @retval = '1'    
+  BEGIN  
+   SELECT @str_command = N'SELECT TOP 1 @result = ROW FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+   WHERE LEN(ISSBY) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''ISSBY'')) ORDER BY ROW '    
+   EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+   EXEC(N'UPDATE dbo.OFAC_SPEC_DownloadedFiles SET CurrentStatus = ''F'' WHERE ID = CONVERT(VARCHAR(100),' + '''' + @BATCHID + ''')')  
+   SELECT @ERRORFLAG = 'Y'  
+   SELECT @p_RETVAL = 'Line ' + @retval  
+   RETURN  
+  END    
+    
+ SELECT @str_command = N'IF EXISTS (SELECT 1 FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+ WHERE LEN(REMARK) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''REMARK''))) SET @result = ''1'' ELSE SET @result = ''0'' '    
+ EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+ IF @retval = '1'    
+  BEGIN  
+   SELECT @str_command = N'SELECT TOP 1 @result = ROW FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+   WHERE LEN(REMARK) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''REMARK'')) ORDER BY ROW '    
+   EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+   EXEC(N'UPDATE dbo.OFAC_SPEC_DownloadedFiles SET CurrentStatus = ''F'' WHERE ID = CONVERT(VARCHAR(100),' + '''' + @BATCHID + ''')')  
+   SELECT @ERRORFLAG = 'Y'  
+   SELECT @p_RETVAL = 'Line ' + @retval  
+   RETURN  
+  END    
+   
+ SELECT @str_command = N'IF EXISTS (SELECT 1 FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+ WHERE LEN(IDNUM) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''IDNUM''))) SET @result = ''1'' ELSE SET @result = ''0'' '    
+ EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+ IF @retval = '1'    
+  BEGIN  
+   SELECT @str_command = N'SELECT TOP 1 @result = ROW FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)   
+   WHERE LEN(IDNUM) > CONVERT(INT,(SELECT LENGTH FROM dbo.OFAC_SPEC_FORMAT WITH (NOLOCK) WHERE FIELD_NAME = ''IDNUM'')) ORDER BY ROW '    
+   EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+     
+   EXEC(N'UPDATE dbo.OFAC_SPEC_DownloadedFiles SET CurrentStatus = ''F'' WHERE ID = CONVERT(VARCHAR(100),' + '''' + @BATCHID + ''')')  
+   SELECT @ERRORFLAG = 'Y'  
+   SELECT @p_RETVAL = 'Line ' + @retval  
+   RETURN  
+  END   
+       
+ --EXEC(N'INSERT INTO dbo.OFAC_SPEC(ent_num, spec_name, updated_date, remark, TaxID, IDENT, IDENTO,  
+ --TaxIDCD, IDNUM, IssBy, DInd, creUserID, [STATE], [ADDRESS], COUNTRY, GROUPID,  
+ --[SOURCE], EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID,  
+ --ApproveDelDate, creDate, updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC,  
+ --creDate_UTC, BatchID)  
+ --   SELECT ' + @StartValue + ' + ROW_NUMBER() over (order by (select 1)) as IncrementNumber, NAME,' + '''' +   
+ --   @data_date_101 + ''', REMARK, TaxID, IDENT, IDENTO,  
+ --TaxIDCD, IDNUM, IssBy, ''N'', ' + 'N''' + @USERID + ''', [STATE], [ADDRESS], COUNTRY, ' + '''' + @GROUPID + ''',  
+ --[SOURCE], ''U'', ''System Admin'', ' + '''' + @APPROVEDDATE + ''', '''', NULL, '''',  
+ --NULL, ' + '''' + @LOCAL_TIME + ''', ''' + @LOCAL_TIME + ''', ''' + @LOCAL_TIME + ''', NULL, NULL,  
+ --'  + '''' + @LOCAL_TIME + ''',''' + @BATCHID + '''' + '  
+ --   FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)')  
+   
+ EXEC(N'INSERT INTO dbo.OFAC_SPEC(spec_name, updated_date, remark, TaxID, IDENT, IDENTO,  
+ TaxIDCD, IDNUM, IssBy, DInd, creUserID, [STATE], [ADDRESS], COUNTRY, GROUPID,  
+ [SOURCE], EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID,  
+ ApproveDelDate, creDate, updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC,  
+ creDate_UTC, BatchID)  
+    SELECT NAME,' + '''' +   
+    @data_date_101 + ''', REMARK, TaxID, IDENT, IDENTO,  
+ TaxIDCD, IDNUM, IssBy, ''N'', ' + 'N''' + @USERID + ''', [STATE], [ADDRESS], COUNTRY, ' + '''' + @GROUPID + ''',  
+ [SOURCE], ''U'', ''System Admin'', ' + '''' + @APPROVEDDATE + ''', '''', NULL, '''',  
+ NULL, ' + '''' + @LOCAL_TIME + ''', ''' + @LOCAL_TIME + ''', ''' + @LOCAL_TIME + ''', NULL, NULL,  
+ '  + '''' + @LOCAL_TIME + ''',''' + @BATCHID + '''' + '  
+    FROM dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '] WITH (NOLOCK)')  
+             
+    EXEC(N'INSERT INTO dbo.OFAC_SPEC_PARSED(ent_num, spec_name, GROUPID)  
+    SELECT ent_num, spec_name, GROUPID  
+ FROM dbo.[OFAC_SPEC] WITH (NOLOCK) WHERE BATCHID = ''' + @BATCHID + '''')   
+   
+ /*SELECT @str_command = N'IF EXISTS (SELECT 1 FROM dbo.[OFAC_SPEC] WITH (NOLOCK)   
+ WHERE BATCHID = ' + '''' + @BATCHID + ''' AND CAST(spec_name AS VARCHAR(MAX)) <> spec_name) SET @result = ''1'' ELSE SET @result = ''0'' '    
+ EXEC sp_executesql @str_command, N'@result varchar(1000) output', @retval OUTPUT  
+   
+ IF @retval = '1'    
+  BEGIN  
+   /*DO SOME HANDLING FOR CHINESE WORD*/  
+   DECLARE @CharList TABLE (  
+    RowID BIGINT IDENTITY(1, 1),  
+    ent_num NVARCHAR(1000),  
+    spec_name NVARCHAR(1000),  
+    GROUPID NVARCHAR(1000)  
+   )  
+     
+   DECLARE @CharList_EN TABLE (  
+    UnicodeChar NVARCHAR(1)  
+   )  
+  
+   DECLARE @CharList_CN TABLE (  
+    UnicodeChar NVARCHAR(1)  
+   )  
+  
+   DECLARE @position int,  
+    @Names NVARCHAR(1000),  
+    @entnum_CN NVARCHAR(1000),  
+    @groupid_CN NVARCHAR(1000),  
+    @Names_CN NVARCHAR(1000),  
+    @Names_EN NVARCHAR(1000),   
+    @NumberRecords BIGINT,   
+    @RowCount BIGINT  
+   SET @position = 1  
+   SET @RowCount = 1  
+     
+   INSERT INTO @CharList  
+   SELECT ent_num, spec_name, GROUPID FROM dbo.OFAC_SPEC WITH (NOLOCK)  
+   WHERE BATCHID = @BATCHID AND CAST(spec_name AS VARCHAR(MAX)) <> spec_name  
+   SELECT @NumberRecords = COUNT(1) FROM @CharList  
+  
+      WHILE @RowCount <= @NumberRecords  
+    BEGIN  
+     SELECT @Names = spec_name, @entnum_CN = ent_num  FROM @CharList WHERE RowID = @RowCount  
+     WHILE @position <= LEN(@Names)  
+      BEGIN  
+       INSERT @CharList_EN  
+       SELECT CONVERT(nchar(1), SUBSTRING(@Names, @position, 1)) as UnicodeChar  
+       WHERE UNICODE(SUBSTRING(@Names, @position, 1)) <= 128  
+  
+       INSERT @CharList_CN  
+       SELECT CONVERT(nchar(1), SUBSTRING(@Names, @position, 1)) as UnicodeChar  
+       WHERE UNICODE(SUBSTRING(@Names, @position, 1)) > 128  
+       SET @position = @position + 1  
+      END  
+        
+      SELECT @Names_EN = COALESCE(@Names_EN + ' ', '') + UnicodeChar FROM @CharList_EN  
+        
+      SELECT @Names_CN = COALESCE(@Names_CN + ' ', '') + UnicodeChar FROM @CharList_CN  
+              
+      EXEC(N'INSERT INTO dbo.OFAC_SPEC_PARSED(ent_num, spec_name, GROUPID)  
+       SELECT ent_num, ' + 'N''' + @Names_EN + '''' + ', GROUPID  
+       FROM dbo.[OFAC_SPEC] WITH (NOLOCK) WHERE BATCHID = ''' + @BATCHID + ''' AND ent_num = ''' + @entnum_CN + '''')   
+         
+      EXEC(N'INSERT INTO dbo.OFAC_SPEC_CN_PARSED(ent_num, spec_name, GROUPID)  
+       SELECT ent_num, ' + 'N''' + @Names_CN + '''' + ', GROUPID  
+       FROM dbo.[OFAC_SPEC] WITH (NOLOCK) WHERE BATCHID = ''' + @BATCHID + ''' AND ent_num = ''' + @entnum_CN + '''')   
+   
+      SET @Names_EN = ''  
+      SET @Names_CN = ''  
+      SET @RowCount = @RowCount + 1  
+    END  
+  END  
+    */  
+      
+    SELECT @str_command = N'IF OBJECT_ID (N''OFAC_SPEC_UPLOAD_' +  @USERID + ''', ''U'') IS NOT NULL SET @result = ''1'' ELSE SET @result = ''0'' '    
+ EXEC sp_executesql @str_command, N'@result varchar(1) output', @retval OUTPUT    
+      
+ /*IF @retval = '1'    
+  BEGIN  
+   EXEC(N'DROP TABLE dbo.[OFAC_SPEC_UPLOAD_' + @USERID + ']')  
+  END  
+ */  
+     
+ SELECT @str_command = N'IF OBJECT_ID (N''OFAC_SPEC_UPLOAD_' +  @USERID + '_TEMP'', ''U'') IS NOT NULL SET @result = ''1'' ELSE SET @result = ''0'' '    
+ EXEC sp_executesql @str_command, N'@result varchar(1) output', @retval OUTPUT    
+       
+ /*IF @retval = '1'    
+  BEGIN  
+   EXEC(N'DROP TABLE dbo.[OFAC_SPEC_UPLOAD_' + @USERID + '_TEMP]')  
+  END  
+ */  
+ SELECT @p_RETVAL = COUNT(1) FROM dbo.OFAC_SPEC WITH (NOLOCK) WHERE BATCHID = CONVERT(VARCHAR(100), @BATCHID)  
+   
+ UPDATE dbo.OFAC_SPEC_DownloadedFiles  
+ SET RECORDCOUNT = @p_RETVAL WHERE ID = CONVERT(VARCHAR(100), @BATCHID)  
+    
+ EXEC(N'UPDATE dbo.OFAC_SPEC_DownloadedFiles SET CurrentStatus = ''Y'' WHERE ID = CONVERT(VARCHAR(100),' + '''' + @BATCHID + ''')')  
+     
+END  
+  
