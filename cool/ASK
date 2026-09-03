@@ -1,15 +1,13 @@
-SELECT
-    A.EntityId,
-    A.FullName,
-    F.spec_name
-FROM BSADB..DJ_Entity A
-JOIN BSADB..DJ_SanctionListReference B
-    ON A.EntityId = B.EntityId
-LEFT JOIN BSADB..DJ_List_Data_A C
-    ON A.EntityId = C.EntNum
-LEFT JOIN BSADBJP..OFAC_SPEC F
-    ON A.FullName = F.spec_name
-WHERE B.SanctionListReference LIKE '%Japanese Finance%'
-  AND A.Deceased = 0
-  AND F.spec_name IS NULL
-  AND C.EntNum IS NULL;
+TC-03：死亡名單重複時以 DJ_List_Data_A 為主（NOT EXISTS 驗證）
+ * 測試目的：驗證同一 EntityId 同時符合兩邊條件時，不會產生主鍵衝突或重覆寫入。
+ * 前置資料準備：
+   * DJ_List_Data_A：EntNum = 90002, SdnName = 'NAME FROM LIST_A', BitCode & 1 > 0。
+   * DJ_Entity：EntityId = 90002, FullName = 'NAME FROM ENTITY', Deceased = 1。
+   * 兩者皆關聯至 Japanese Finance。
+ * 執行動作：執行 SP。
+ * 預期結果：
+   * #tempDJBlacklistJP 只有 1 筆 EntNum = 90002。
+   * spec_name 為 'NAME FROM LIST_A'（確保第一段優先，第二段被 NOT EXISTS 濾除）。
+
+
+那這要怎麼寫
