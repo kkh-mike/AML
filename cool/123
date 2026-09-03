@@ -1,235 +1,35 @@
+FTP_AML_DTLBK
+>> 建立SSIS 搬檔案
+Command
+D:\TaiShinIntra\BatchPC2016x64\DIBSAP2016.exe -j FTP_AML_DTLBK
 
- --  Stojilkovic, Vlajko
+CHECKSUM.AML.DTLBK
+>> 上版程式: AML_DTLBK_CHECK_SUM.ps1
+powershell.exe -ExecutionPolicy Bypass -File "D:\UATR3\AMLDataMigrator\DTLBK\AML_DTLBK_CHECK_SUM.ps1"
 
- --  Pitono, Joko
+SPLIT.AML.DTLBK
+>> 上版程式: DETAIL_SPLIT.ps1
+Command
+powershell.exe -ExecutionPolicy Bypass -File "D:\UATR3\AMLDataMigrator\DTLBK\DETAIL_SPLIT.ps1"
 
- SELECT * FROM BSADBJP..OFAC_SPEC WHERE GROUPID = '11'
 
+INSERT.AML.DTLBK
+>> 上版程式: DTLBK_RUN_SQL.ps1
+Command
+powershell.exe -ExecutionPolicy Bypass -File "D:\UATR3\AMLDataMigrator\DTLBK\DTLBK_RUN_SQL.ps1"
 
- -- 找出死人名單
-SELECT 
-    A.EntityId,
-    A.FullName AS SdnName,
-    CONVERT(VARCHAR, A.UpdatedDate_UTC, 112) AS UpdatedDate
-FROM BSADBJP..OFAC_SPEC f
-JOIN  BSADB.dbo.DJ_Entity A WITH (NOLOCK) on A.FullName = f.spec_name
-JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) 
-    ON A.EntityId = B.EntityId
-WHERE A.Deceased = 1 AND B.SanctionListReference LIKE '%Japanese Finance%' AND f.GROUPID = '11'
 
+INSERT.SPLIT.AML.DTLBK
+>> 上版程式: DTLBK_RUN_SPLT.ps1
+Command
+powershell.exe -ExecutionPolicy Bypass -File "D:\UATR3\AMLDataMigrator\DTLBK\DTLBK_RUN_SPLT.ps1"
 
+UPDATE.BATCH.AML.DTLBK
+>> 上版程式: DTLBK_UPDATE_BATCH.ps1
+Command
+powershell.exe -ExecutionPolicy Bypass -File "D:\UATR3\AMLDataMigrator\DTLBK\DTLBK_UPDATE_BATCH.ps1"
 
 
 
 
-
-
-
-
-  sp_helptext 'NMCHK_GetRCMatchesByKey';
-
-  sp_helptext 'NMCHK_Detection_CombineResults';
-
-
-  exec NMCHK_Detection_CombineResults @uid=N'2026107'
-
-
-
-
-
-
-
-
-  -- 檢核比對結果歷程表（透過 NamePropertyBitCode & 1 = 1 判斷是否命中黑名單）  NamePropertyBitCode
-SELECT a.NamePropertyBitCode,* FROM NMCHK_ResultHistory  a
-JOIN NMCHK_Review_Main b on a.uid  = b.uid
-WHERE b.Created_Date  >'2026-09-02' 
-
-
-SELECT a.NamePropertyBitCode, a.relative_correlation, a.sdn_name, b.*
-FROM dbo.NMCHK_ResultHistory_FILTER_RC a
-JOIN dbo.NMCHK_Review_Main b ON a.uid = b.uid
-WHERE a.uid = '2026107';
-
-
-
-
-SELECT 
-    uid,
-    new_acct_key,
-    sdn_name,
-    sdn_type,
-    Ori_RC AS [外部引擎原始計算分數],
-    relative_correlation AS [最終分數(含扣分後)],
-    Reduction_IND AS [扣分項目旗標]
-FROM dbo.NMCHK_ResultHistory_FILTER_RC WITH (NOLOCK)
-WHERE uid = '2026107';
-
-
-SELECT 
-    uid,
-    new_acct_key,
-    sdn_name,
-    sdn_type,
-    Ori_RC AS [外部引擎原始計算分數],
-    relative_correlation AS [最終分數(含扣分後)],
-    Reduction_IND AS [扣分項目旗標]
-FROM dbo.NMCHK_ResultHistory WITH (NOLOCK)
-WHERE uid = '2026114';
-
--- 檢核比對結果歷程表（透過 NamePropertyBitCode & 1 = 1 判斷是否命中黑名單）  NamePropertyBitCode
-SELECT a.NamePropertyBitCode,* FROM NMCHK_ResultHistory  a
-JOIN NMCHK_Review_Main b on a.uid  = b.uid
-WHERE b.Created_Date  >'2026-09-02' AND a.uid = '2026121' AND sdn_grp_num = '11'
-
-SELECT * FROM NMCHK_Review_Main WHERE Created_Date >'2026-09-02'
-
-
-
-
-
-SELECT 
-    A.EntityId,
-    A.FullName AS SdnName,
-    CONVERT(VARCHAR, A.UpdatedDate_UTC, 112) AS UpdatedDate
-FROM BSADBJP..OFAC_SPEC f
-JOIN  BSADB.dbo.DJ_Entity A WITH (NOLOCK) on A.FullName = f.spec_name
-JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) 
-    ON A.EntityId = B.EntityId
-WHERE A.Deceased = 1 AND B.SanctionListReference LIKE '%Japanese Finance%' AND f.GROUPID = '5'
-
-
-
-
-
-
-
-  sp_helptext 'NMCHK_GetRCMatchesByKey';
-
-  sp_helptext 'NMCHK_Detection_CombineResults';
-
-
-  exec NMCHK_Detection_CombineResults @uid=N'2026107'
-
-
-
-
-
-
-
-
-  -- 檢核比對結果歷程表（透過 NamePropertyBitCode & 1 = 1 判斷是否命中黑名單）  NamePropertyBitCode
-SELECT a.NamePropertyBitCode,* FROM NMCHK_ResultHistory  a
-JOIN NMCHK_Review_Main b on a.uid  = b.uid
-WHERE b.Created_Date  >'2026-09-02' 
-
-
-SELECT a.NamePropertyBitCode, a.relative_correlation, a.sdn_name, b.*
-FROM dbo.NMCHK_ResultHistory_FILTER_RC a
-JOIN dbo.NMCHK_Review_Main b ON a.uid = b.uid
-WHERE a.uid = '2026107';
-
-
-Pitono, Joko
-
-
-SELECT 
-    uid,
-    new_acct_key,
-    sdn_name,
-    sdn_type,
-    Ori_RC AS [外部引擎原始計算分數],
-    relative_correlation AS [最終分數(含扣分後)],
-    Reduction_IND AS [扣分項目旗標]
-FROM dbo.NMCHK_ResultHistory_FILTER_RC WITH (NOLOCK)
-WHERE uid = '2026107';
-
-
-SELECT 
-    uid,
-    new_acct_key,
-    sdn_name,
-    sdn_type,
-    Ori_RC AS [外部引擎原始計算分數],
-    relative_correlation AS [最終分數(含扣分後)],
-    Reduction_IND AS [扣分項目旗標]
-FROM dbo.NMCHK_ResultHistory WITH (NOLOCK)
-WHERE uid = '2026114';
-.
-
--- 檢核比對結果歷程表（透過 NamePropertyBitCode & 1 = 1 判斷是否命中黑名單）  NamePropertyBitCode
-SELECT a.NamePropertyBitCode,* FROM NMCHK_ResultHistory  a
-JOIN NMCHK_Review_Main b on a.uid  = b.uid
-WHERE b.Created_Date  >'2026-09-02' AND a.uid = '2026118' AND sdn_grp_num = '4'
-
-SELECT * FROM NMCHK_Review_Main WHERE Created_Date >'2026-09-02'
-
-Created_Date
-2016-10-21 22:00:19.940
-
-
-
-SELECT * 
-FROM BSADBJP..NMCHK_ResultHistory A WITH(NOLOCK)   
-JOIN dbo.NMCHK_CustInfo B WITH(NOLOCK) ON A.UID = B.UID AND A.new_acct_key = B.new_acct_key  
-LEFT JOIN dbo.lowrisklistgroups C WITH(NOLOCK) ON A.sdn_type IN('SPEC', 'SPEC_CN') AND A.sdn_grp_num = C.GROUPID  
-LEFT JOIN BSADB.dbo.lowrisklistgroups D WITH(NOLOCK) ON A.sdn_type IN('GLSPEC', 'GLSPEC_CN') AND A.sdn_grp_num = D.GROUPID  
-LEFT JOIN BlackList_PriorityList_dim E WITH (NOLOCK) ON A.sdn_type = E.List  
-WHERE A.UID = @RANDNUM   
-AND A.NEW_ACCT_KEY = @KEY  
-ORDER BY A.RELATIVE_CORRELATION DESC, E.Priority, A.sdn_name  
-
-
-
-
-SELECT * 
-FROM dbo.NMCHK_ResultHistory WITH (NOLOCK)
-WHERE UID = '' 
-  AND new_acct_key = '';
-
-  exec NMCHK_GetRCMatchesByKey @RANDNUM=N'',@Key=N'',@Type=N''
-
-
-
-
-
-
--- 群組總數：24 筆 (來源、輸入結果兩者一致)。
-SELECT COUNT(*) FROM BSADBJP..lowrisklistgroups
-SELECT * FROM BSADBJP..lowrisklistgroups
-
-
-
-
-SELECT 
-    A.EntityId,
-    A.FullName AS SdnName,
-    CONVERT(VARCHAR, A.UpdatedDate_UTC, 112) AS UpdatedDate
-FROM BSADBJP..OFAC_SPEC f
-JOIN  BSADB.dbo.DJ_Entity A WITH (NOLOCK) on A.FullName = f.spec_name
-JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) 
-    ON A.EntityId = B.EntityId
-WHERE A.Deceased = 1 AND B.SanctionListReference LIKE '%Japanese Finance%' AND f.GROUPID = '5'
-
-
-
-SELECT 
-f.*
-FROM BSADBJP..OFAC_SPEC f
-JOIN  BSADB.dbo.DJ_Entity A WITH (NOLOCK) on A.FullName = f.spec_name
-JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) 
-    ON A.EntityId = B.EntityId
-WHERE A.Deceased = 1 AND B.SanctionListReference LIKE '%Japanese Finance%' AND f.GROUPID = '5'
-
-
-
-SELECT * FROM BSADBJP..OFAC_SPEC 
-
-
-SELECT * FROM BSADBJP..OFAC_SPEC  WHERE GROUPID = '5'
-4
-4
-
-
-
-幫我把這些東西整理一下跟註解
+幫我整理一下 我是要放到word
