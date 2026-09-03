@@ -1,26 +1,8 @@
-這張表的筆數把整個架構的底牌翻開了：
- * OFAC_SPEC 有 326,221 筆，且沒有其他衍生字典表有筆數（OFAC_SPEC_PARSED 確定是 0）。
- * 這證明比對引擎就是直接以 OFAC_SPEC 作為黑名單來源。
-既然「阪下透」在同一張表能命中，而「Stojilkovic, Vlajko」在初篩 NMCHK_OtherListDetectionResults_Temp 卻連進都沒進去，原因可以直接鎖定在以下 3 個具體位置：
-1. 比對服務（Daemon）的記憶體快取（In-Memory Cache）尚未載入
-後端比對服務（Windows Service、C#/.NET 比對程式或 Java Daemon）為了效能，在啟動時會將整張 OFAC_SPEC 載入記憶體（In-Memory List/Trie Tree/Lucene 索引）：
- * 「阪下透」是 2016/2017 年就存在的舊資料，早已在記憶體中。
- * 「Stojilkovic, Vlajko」如果是近期才補進 OFAC_SPEC、或是你在資料庫手動 UPDATE 欄位，比對服務的記憶體裡根本沒有這筆資料。
- * 處理方式：檢查比對服務（通常叫 NameScreeningService、NMCHKService 或在 IIS AppPool / Windows Services）是否能重啟，或者是否有管理後台按鈕可以「Reload Cache / 重建索引」。
-2. 檢視進件暫存表：確認系統傳入的「名字長相」
-系統在比對前，會先將送審資料寫入暫存或進件表。執行以下查詢，看看系統實際拿什麼名字去比對：
-SELECT * 
+   SELECT * 
 FROM dbo.NMCHK_CustInfo 
 WHERE uid = '2026128';
 
-請特別檢查：
- * new_acct_name：系統傳進去的值究竟是 Stojilkovic, Vlajko、Stojilkovic Vlajko 還是 Vlajko Stojilkovic？
- * NameCategory：傳入的是 1（個人 Individual）還是 2（法人/公司）？
- * 看第一張圖，Stojilkovic, Vlajko 在 OFAC_SPEC 裡的欄位：
-   * 是否有 TAXID 或其他代表「個人/企業」的旗標？如果比對引擎依據類別過濾，類別不符會直接略過。
-3. 字串正規化（Comma 逗號是最大殺手）
-如果進件輸入 Vlajko Stojilkovic，而資料庫存 Stojilkovic, Vlajko：
- * 很多英文比對核心（例如 Jaro-Winkler、Levenshtein、Edit Distance）如果沒有啟用 Tokenize（分詞倒裝比對），這兩個字串計算出來的原始相似度會低於 60%（甚至被逗號切斷判定成不同單詞）。
- * 一旦低於初篩門檻，後端程式根本不會去呼叫 NMCHK_InsertResultsIntoTempTable。
-最快的單一驗證動作：
-在進件端，直接把名字填成跟資料庫完全一致的 Stojilkovic, Vlajko（保留逗號與空格），執行一次審核。如果這樣能進暫存表，問題就完全出在英文姓名倒裝處理；如果依然進不來，100% 是比對服務的 Memory Cache 根本還沒吃到這筆資料。
+
+uid	userid	rel_corr_chosen	new_acct_key	relationship	address	city	country	new_acct_name	user_brnch_nbr	TAXID	IDENT	IDENTO	ISSBY	IDNUM	REMARK	DOB	Source_IND	last_updated_date	last_updated_date_UTC	REFNO	DETECTED	CHANNEL	IsFalsePositive	Ori_REFNO	Nationality	IsSyncWithDBCheck	NameSource	CombineKey	Gender	NameCategory	VesselIMONo
+2026128	1141923             	50	1	CustomerName				Stojilkovic, Vlajko	0923							NULL	W	2026-09-03 12:05:31.263	2026-09-03 03:05:31.263	20260903000005	Y	NULL	NULL	NULL		NULL	NULL	NULL		0	
+
