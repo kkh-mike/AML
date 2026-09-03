@@ -1,54 +1,36 @@
-   INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
-    SELECT 
-        A.EntNum, 
-        A.SdnName, 
-        MAX(A.UpdatedDate) AS UpdatedDate
-    FROM BSADB.dbo.DJ_List_Data_A A
-    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
-    WHERE A.NamePropertyBitCode & 1 > 0
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-    GROUP BY A.EntNum, A.SdnName;
-    /*
-        ============================================================
-        多加入死亡名單掃描，所有的BL、PEP、NN都會納入掃描
-        ============================================================
-    */
-	INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
-	SELECT 
-		A.EntityId, 
-        A.FullName, 
-        MAX(CONVERT(VARCHAR,A.UpdatedDate_UTC,112)) AS UpdatedDate
-    FROM BSADB.dbo.DJ_Entity A
-    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-    WHERE A.Deceased = 1
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-	  AND NOT EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE X.EntNum = A.EntityId)
-    GROUP BY A.EntityId, A.FullName;
+可以。既然你的目的是測試第二段「死亡名單同步」的反向條件，我建議你這樣寫，最清楚也最不容易被測試人員誤解。
 
-
-我是這樣的條件
-
-我反向案例這樣對?
 反向案例
-TC-04：Deceased 旗標不符（非死亡名單不應入選）
 
+TC-04：Deceased 旗標不符
 
+* 測試目的： 驗證 Deceased 不為 1 時，不會透過死亡名單邏輯新增資料。
+* 前置資料準備：
+    * DJ_Entity：EntityId = 90003、Deceased = 0
+    * DJ_SanctionListReference：SanctionListReference = 'Japanese Finance'
+    * DJ_List_Data_A：無 EntityId = 90003 的資料，確保不會由第一段邏輯寫入
+* 執行動作： 執行 SP。
+* 預期結果：
+    * BSADBJP..OFAC_SPEC 不應新增 remark = '90003' 的資料。
 
- * 測試目的：驗證非死亡人口不會誤入第二批同步。
- * 前置資料準備：
-   * DJ_Entity：EntityId = 90003, Deceased = 0（或 NULL），且有 Japanese Finance 標籤。
-   * DJ_List_Data_A：無此資料。
- * 執行動作：執行 SP。
- * 預期結果：
-   * BSADBJP..OFAC_SPEC 不應 新增 remark = '90003' 的資料。
+⸻
 
+TC-05：制裁清單非 Japanese Finance
 
-TC-05：制裁清單非 Japanese Finance（標籤比對反向測試）
-驗證制裁名單過濾條件精準度。
-DJ_Entity：EntityId = 90004, Deceased = 1。
-   * DJ_SanctionListReference：SanctionListReference = 'OFAC SDN'（無 Japanese Finance 字樣）。
- * 執行動作：執行 SP。
- * 預期結果：
-   * BSADBJP..OFAC_SPEC（GROUPID = 11）不應 出現 remark = '90004'。
+* 測試目的： 驗證制裁清單未包含 Japanese Finance 時，不會新增資料。
+* 前置資料準備：
+    * DJ_Entity：EntityId = 90004、Deceased = 1
+    * DJ_SanctionListReference：SanctionListReference = 'OFAC SDN'
+    * DJ_List_Data_A：無 EntityId = 90004 的資料，確保不會由第一段邏輯寫入
+* 執行動作： 執行 SP。
+* 預期結果：
+    * BSADBJP..OFAC_SPEC（GROUPID = 11）不應出現 remark = '90004' 的資料。
 
+⸻
 
+這樣兩個案例分別打：
+
+TC-04 → Deceased ≠ 1
+TC-05 → Japanese Finance 不存在
+
+而且都把第一段可能寫入的路徑排除掉，所以測試結果會非常乾淨。
