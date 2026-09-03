@@ -1,26 +1,3 @@
-SELECT ent_num, spec_name, GROUPID, DInd, EnterFlag, ApprovedBy, ApprovedDate
-FROM dbo.OFAC_SPEC 
-WHERE spec_name = 'Stojilkovic, Vlajko';
-
-
-ent_num	spec_name	GROUPID	DInd	EnterFlag	ApprovedBy	ApprovedDate
-694925	Stojilkovic, Vlajko	5	N	U	System Admin	2026-08-14 17:16:46.720
-802784	Stojilkovic, Vlajko	11	N	NULL	System Admin	2026-09-02 17:06:32.713
-
-
-SELECT ent_num, spec_name, GROUPID, DInd, EnterFlag, ApprovedBy, ApprovedDate
-FROM dbo.OFAC_SPEC 
-WHERE spec_name = '阪下透';
-
-ent_num	spec_name	GROUPID	DInd	EnterFlag	ApprovedBy	ApprovedDate
-2643	阪下透	2	N	U	System Admin	2016-12-29 16:37:39.280
-21970	阪下透	4	N	U	System Admin	2017-02-13 13:39:31.307
-16388	阪下透	2	N	U	System Admin	2016-12-29 16:40:20.183
-11004	阪下透	2	N	U	System Admin	2016-12-29 16:37:39.280
-19855	阪下透	3	N	U	System Admin	2017-02-13 09:49:57.367
-7624	阪下透	2	N	U	System Admin	2016-12-29 16:37:39.280
-2400	阪下透	2	N	U	System Admin	2016-12-29 16:37:39.280
-
-
-我下面這個 Stojilkovic, Vlajko  的 EnterFlag  改成U 了一樣沒中阿
-694925	Stojilkovic, Vlajko	5	N	U	System Admin	2026-08-14 17:16:46.720
+UPDATE dbo.OFAC_SPEC 
+SET spec_name = 'Stojilkovic, Vlajko' 
+WHERE ent_num = 2400;
