@@ -1,7 +1,37 @@
-可是
-   SELECT * FROM OFAC_SPEC_PARSED
+如果 SELECT * FROM OFAC_SPEC_PARSED 整張表是完全空的，那代表連命中的「阪下透」都不是靠這張表抓到的，千萬不要貿然往這張表盲目補資料。
+請直接停下來確認系統架構：比對引擎實際比對的「母表」究竟是哪一張。
+1. 為什麼整張表是空的？
+在先前的 OFACTDB_ProcessSPECList 裡，有一段被註解掉（/* ... */）的邏輯：
+ * 系統以前設計過將英中分詞寫入 OFAC_SPEC_PARSED / OFAC_SPEC_CN_PARSED，但後來這段架構顯然被棄用或重構成直接查別張表。
+ * 如果連正常命中的「阪下透」都不在 OFAC_SPEC_PARSED 裡，就證實比對引擎當前運作完全沒有讀取這張表。
+2. 那「阪下透」到底是在哪裡被命中的？
+「阪下透」有出現在你一開始提供的 BSADBJP..OFAC_SPEC 截圖中。
+在呼叫 NMCHK_InsertResultsIntoTempTable 之前，比對引擎是先查詢了某張表才把命中資料塞進暫存表。請下這段語法，反查後端常用的「預先清洗／索引暫存表」：
+SELECT 
+    t.name AS table_name,
+    p.rows AS total_rows
+FROM sys.tables t
+JOIN sys.partitions p ON t.object_id = p.object_id
+WHERE p.index_id IN (0, 1)
+  AND (
+       t.name LIKE '%SPEC%' 
+    OR t.name LIKE '%Cleanse%' 
+    OR t.name LIKE '%Search%'
+    OR t.name LIKE '%Index%'
+  )
+ORDER BY p.rows DESC;
 
-
-他裡面完全是沒東西的耶
-
-insert 進去對?
+3. 最關鍵核心：比對你的「進件查詢輸入值」
+既然「阪下透」會中，代表整個審核 pipeline 與 OFAC_SPEC 是通的。為什麼同在 OFAC_SPEC 裡的「Stojilkovic, Vlajko」不中？
+請檢查你在測試「Stojilkovic」時，進件畫面（或傳入參數）到底填了什麼：
+ * 送審姓名是否有帶「逗號 ,」？
+   * OFAC_SPEC 資料庫裡存的是：Stojilkovic, Vlajko（有逗號）。
+   * 如果你進件時輸入的是 Stojilkovic Vlajko 或 Vlajko Stojilkovic（沒有逗號），舊版比對核心若只做字串完全匹配或簡易模糊比對，會因標點符號不同而直接判定未命中。
+ * 送審姓名是否有帶多餘空格？
+   * 例如後面有隱藏空格或前後沒 Trim。
+ * 進件的「客戶類型 / 語系」設定：
+   * 是否進件時將該筆客戶標記成了「漢字/中文客戶」，導致系統只派發了漢字比對規則，根本跳過英文模糊比對？
+請先嘗試：
+在進件介面上，直接把姓名輸入成與資料庫 一模一樣、連逗號與空格都不差 的字串：
+Stojilkovic, Vlajko
+送審跑一次，看是否會命中。
