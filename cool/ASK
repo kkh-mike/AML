@@ -1,13 +1,160 @@
-TC-03：死亡名單重複時以 DJ_List_Data_A 為主（NOT EXISTS 驗證）
- * 測試目的：驗證同一 EntityId 同時符合兩邊條件時，不會產生主鍵衝突或重覆寫入。
- * 前置資料準備：
-   * DJ_List_Data_A：EntNum = 90002, SdnName = 'NAME FROM LIST_A', BitCode & 1 > 0。
-   * DJ_Entity：EntityId = 90002, FullName = 'NAME FROM ENTITY', Deceased = 1。
-   * 兩者皆關聯至 Japanese Finance。
- * 執行動作：執行 SP。
- * 預期結果：
-   * #tempDJBlacklistJP 只有 1 筆 EntNum = 90002。
-   * spec_name 為 'NAME FROM LIST_A'（確保第一段優先，第二段被 NOT EXISTS 濾除）。
+這個 TC-03 的重點是驗證 「第一段 DJ_List_Data_A 已經抓到 90002，所以第二段 DJ_Entity 不應再抓一次」。
 
+如果你的 SP 邏輯是用 NOT EXISTS 排除，那測試 SQL 可以這樣寫。
 
-那這要怎麼寫
+① 先驗證兩邊資料都存在
+
+SELECT
+    A.EntityId,
+    A.FullName,
+    C.EntNum,
+    C.SdnName,
+    C.BitCode
+FROM BSADB..DJ_Entity A
+JOIN BSADB..DJ_SanctionListReference B
+    ON A.EntityId = B.EntityId
+JOIN BSADB..DJ_List_Data_A C
+    ON A.EntityId = C.EntNum
+WHERE A.EntityId = 90002
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND A.Deceased = 1
+  AND (C.BitCode & 1) > 0;
+
+預期會看到：
+
+EntityId   FullName          EntNum   SdnName             BitCode
+90002      NAME FROM ENTITY  90002    NAME FROM LIST_A    xxx
+
+代表 兩邊都符合條件。
+
+⸻
+
+② 驗證第一段資料
+
+如果 #tempDJBlacklistJP 是 SP 裡面建立的 temporary table，SP 執行完後通常看不到，因為 SP 結束後 #temp 就消失了。
+
+所以如果你可以在 SP 裡面加測試 SELECT：
+
+SELECT *
+FROM #tempDJBlacklistJP
+WHERE EntNum = 90002;
+
+預期：
+
+EntNum   spec_name
+90002    NAME FROM LIST_A
+
+而且只能有 1 筆。
+
+⸻
+
+③ 最重要：直接模擬你的 NOT EXISTS 邏輯
+
+假設你的 SP 第二段大概是這種：
+
+SELECT
+    A.EntityId AS EntNum,
+    A.FullName AS spec_name
+FROM BSADB..DJ_Entity A
+JOIN BSADB..DJ_SanctionListReference B
+    ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM BSADB..DJ_List_Data_A C
+      WHERE C.EntNum = A.EntityId
+        AND (C.BitCode & 1) > 0
+  );
+
+你可以直接針對 90002 驗證：
+
+SELECT
+    A.EntityId,
+    A.FullName
+FROM BSADB..DJ_Entity A
+JOIN BSADB..DJ_SanctionListReference B
+    ON A.EntityId = B.EntityId
+WHERE A.EntityId = 90002
+  AND A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM BSADB..DJ_List_Data_A C
+      WHERE C.EntNum = A.EntityId
+        AND (C.BitCode & 1) > 0
+  );
+
+預期結果
+
+應該是 0 筆。
+
+因為：
+
+DJ_Entity
+90002
+   ↓
+Deceased = 1 ✅
+Japanese Finance ✅
+   ↓
+DJ_List_Data_A
+EntNum = 90002
+BitCode & 1 > 0 ✅
+   ↓
+NOT EXISTS ❌
+   ↓
+第二段不應抓出來
+
+所以最後 #tempDJBlacklistJP 應該只留下第一段的：
+
+90002 | NAME FROM LIST_A
+
+⸻
+
+⭐ 如果你要寫成正式 TC-03 驗證 SQL
+
+我會建議分成 3 個檢查：
+
+-- TC-03-1：確認兩邊資料皆符合條件
+SELECT
+    A.EntityId,
+    A.FullName,
+    C.EntNum,
+    C.SdnName,
+    C.BitCode
+FROM BSADB..DJ_Entity A
+JOIN BSADB..DJ_SanctionListReference B
+    ON A.EntityId = B.EntityId
+JOIN BSADB..DJ_List_Data_A C
+    ON A.EntityId = C.EntNum
+WHERE A.EntityId = 90002
+  AND A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND (C.BitCode & 1) > 0;
+-- TC-03-2：確認 NOT EXISTS 會排除 DJ_Entity
+SELECT
+    A.EntityId,
+    A.FullName
+FROM BSADB..DJ_Entity A
+JOIN BSADB..DJ_SanctionListReference B
+    ON A.EntityId = B.EntityId
+WHERE A.EntityId = 90002
+  AND A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM BSADB..DJ_List_Data_A C
+      WHERE C.EntNum = A.EntityId
+        AND (C.BitCode & 1) > 0
+  );
+-- 預期：0 筆
+-- TC-03-3：SP 執行後確認結果
+SELECT
+    EntNum,
+    spec_name
+FROM #tempDJBlacklistJP
+WHERE EntNum = 90002;
+-- 預期：1 筆
+-- spec_name = 'NAME FROM LIST_A'
+
+一句話講，TC-03 最核心就是：DJ_List_Data_A 有 90002 → NOT EXISTS 讓 DJ_Entity 那一段抓不到 90002 → 最後只留下 NAME FROM LIST_A。
