@@ -1,7 +1,8 @@
+SELECT * FROM BSADBJP..OFAC_SPEC where spec_name = 'Stojilkovic, Vlajko'
 
-SELECT * FROM TBL_CMPEMPAPP
+IDENT
+4
+GROUPID
+11
 
-SELECT * FROM HREMPM_N
-
-
-這兩個表要幹嘛的
+我要更新 IDENT  把它改成空 
