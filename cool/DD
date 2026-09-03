@@ -1,6 +1,48 @@
-SELECT * FROM BSADBJP..BlackListData A
-JOIN OFAC_SPEC B ON  B.spec_name = A.sdn_name 
+如果你的意思是：
 
-我要清除 BlackListData
-我要把 BlackListData 有 但 OFAC_SPEC 的 資料刪掉
+刪除 BlackListData 裡面有，但 OFAC_SPEC 沒有對應資料的資料
 
+那你要用 NOT EXISTS，而不是 JOIN：
+
+DELETE A
+FROM BSADBJP..BlackListData A
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM OFAC_SPEC B
+    WHERE B.spec_name = A.sdn_name
+);
+
+🔍 建議先確認會刪哪些資料
+
+正式 DELETE 前先跑：
+
+SELECT A.*
+FROM BSADBJP..BlackListData A
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM OFAC_SPEC B
+    WHERE B.spec_name = A.sdn_name
+);
+
+確認結果沒問題，再執行 DELETE。
+
+⸻
+
+但如果你真正想要的是：
+
+BlackListData 有，而且 OFAC_SPEC 也有對應資料的那些，從 BlackListData 刪掉
+
+那就是你原本 JOIN 的條件：
+
+DELETE A
+FROM BSADBJP..BlackListData A
+JOIN OFAC_SPEC B
+    ON B.spec_name = A.sdn_name;
+
+也就是：
+
+目的	SQL
+BlackListData 有，但 OFAC_SPEC 沒有	NOT EXISTS
+BlackListData 有，而且 OFAC_SPEC 也有	JOIN
+
+你說的「BlackListData 有，但 OFAC_SPEC 的資料刪掉」如果是指「只保留兩邊都有的，刪掉 BlackListData 多出來的資料」，就是第一個 NOT EXISTS。
