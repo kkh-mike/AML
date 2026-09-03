@@ -1,8 +1,3 @@
-SELECT * FROM BSADBJP..OFAC_SPEC where spec_name = 'Stojilkovic, Vlajko'
-
-IDENT
-4
-GROUPID
-11
-
-我要更新 IDENT  把它改成空 
+UPDATE BSADBJP..OFAC_SPEC
+SET IDENT = NULL
+WHERE spec_name = 'Stojilkovic, Vlajko';
