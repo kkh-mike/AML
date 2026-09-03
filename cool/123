@@ -1,12 +1,4 @@
-如果 SELECT * FROM OFAC_SPEC_PARSED 整張表是完全空的，那代表連命中的「阪下透」都不是靠這張表抓到的，千萬不要貿然往這張表盲目補資料。
-請直接停下來確認系統架構：比對引擎實際比對的「母表」究竟是哪一張。
-1. 為什麼整張表是空的？
-在先前的 OFACTDB_ProcessSPECList 裡，有一段被註解掉（/* ... */）的邏輯：
- * 系統以前設計過將英中分詞寫入 OFAC_SPEC_PARSED / OFAC_SPEC_CN_PARSED，但後來這段架構顯然被棄用或重構成直接查別張表。
- * 如果連正常命中的「阪下透」都不在 OFAC_SPEC_PARSED 裡，就證實比對引擎當前運作完全沒有讀取這張表。
-2. 那「阪下透」到底是在哪裡被命中的？
-「阪下透」有出現在你一開始提供的 BSADBJP..OFAC_SPEC 截圖中。
-在呼叫 NMCHK_InsertResultsIntoTempTable 之前，比對引擎是先查詢了某張表才把命中資料塞進暫存表。請下這段語法，反查後端常用的「預先清洗／索引暫存表」：
+
 SELECT 
     t.name AS table_name,
     p.rows AS total_rows
@@ -21,17 +13,134 @@ WHERE p.index_id IN (0, 1)
   )
 ORDER BY p.rows DESC;
 
-3. 最關鍵核心：比對你的「進件查詢輸入值」
-既然「阪下透」會中，代表整個審核 pipeline 與 OFAC_SPEC 是通的。為什麼同在 OFAC_SPEC 裡的「Stojilkovic, Vlajko」不中？
-請檢查你在測試「Stojilkovic」時，進件畫面（或傳入參數）到底填了什麼：
- * 送審姓名是否有帶「逗號 ,」？
-   * OFAC_SPEC 資料庫裡存的是：Stojilkovic, Vlajko（有逗號）。
-   * 如果你進件時輸入的是 Stojilkovic Vlajko 或 Vlajko Stojilkovic（沒有逗號），舊版比對核心若只做字串完全匹配或簡易模糊比對，會因標點符號不同而直接判定未命中。
- * 送審姓名是否有帶多餘空格？
-   * 例如後面有隱藏空格或前後沒 Trim。
- * 進件的「客戶類型 / 語系」設定：
-   * 是否進件時將該筆客戶標記成了「漢字/中文客戶」，導致系統只派發了漢字比對規則，根本跳過英文模糊比對？
-請先嘗試：
-在進件介面上，直接把姓名輸入成與資料庫 一模一樣、連逗號與空格都不差 的字串：
-Stojilkovic, Vlajko
-送審跑一次，看是否會命中。
+
+
+
+
+table_name	total_rows
+ofac_spec_log	2994765
+OFAC_SPEC_ListUpdateBuffer	516704
+OFAC_SPEC	326221
+OFAC_SPEC_Buffer	134785
+OFAC_SPEC_20230628	31615
+TEMP_OFAC_GLSPEC_LIST_PROCESSED	198
+OFAC_SPEC_FORMAT	81
+All_BulkFile_ReviewCase_FileSpec	66
+OFAC_SPEC_DownloadedFiles	50
+OFAC_SPEC_RestrictedCountry	37
+SpecCatgryDef_Sub	30
+OFAC_GLSPEC_LIST_UPDATES_STATUS	24
+OFAC_SPEC_GROUP_LOG	16
+OFAC_GLSpec_FORMAT	15
+OFAC_GLSpec_Log	13
+SuspectRelationshipToInstitution_Dim	12
+SARB2300001_SuspectAccountNumber	12
+SARB2300001_SuspectAccountNumber_Log	12
+SARB2100001_SuspectAccountNumber	12
+SARB2100001_SuspectAccountNumber_Log	12
+TEMP_OFAC_SPEC_LIST_PROCESSED	11
+SAR_FullBatchSuspect	10
+SAR_FullBatchSuspectLog	10
+SAR_Batch_SuspectExt_TW	10
+PendingSpecialListCSV	9
+OFAC_SpecType_Dim	7
+SpecCatgry_Sub	7
+SARB2100001_SuspectAddress	5
+SARB2100001_SuspectAddress_Log	5
+SARB2100001_SuspectIdentification	5
+SARB2100001_SuspectIdentification_Log	5
+SARB2100001_SuspectTIN	5
+SARB2100001_SuspectTIN_Log	5
+SARB2300001_SuspectAddress	5
+SARB2300001_SuspectAddress_Log	5
+SARB2300001_SUSPECT	5
+SARB2300001_SuspectTIN	5
+SARB2300001_SuspectTIN_Log	5
+SARB2300001_SuspectPhone	4
+SARB2300001_SuspectPhone_Log	4
+SuspectRelationshipToInstitutionStatus_Dim	4
+TEMP_OFAC_SPEC_BATCH_UPDATES	4
+SpecCatgry_Main	4
+OFAC_SPEC_SOURCE_DIM	3
+OFAC_GLSpec_Source_Dim	3
+SuspectSuspiciousActivityRole_Dim	3
+TEMP_OFAC_GLSPEC_BATCH_UPDATES	3
+OFAC_SPEC_GROUP_ATTACH	2
+OFAC_SPEC_REMARK	2
+PB_FinancialSpecialist_Log	0
+OFAC_SPEC_20230628_1	0
+OFAC_GLSpec_Remark	0
+SARB2300001_SuspectIdentification	0
+SARB2300001_SuspectIdentification_Log	0
+SARB2300001_SuspectAlternateName	0
+SARB2300001_SuspectAlternateName_Log	0
+OFAC_SPEC_UPLOAD_1061592             	0
+SARB2100001_SUSPECT	0
+SARB2100001_SUSPECT_LOG	0
+TEMP_OFAC_SPEC_LIST_UPDATES	0
+SARB2300001_SuspectEmail	0
+SARB2300001_SuspectEmail_Log	0
+SARB2300001_SuspectWebsite	0
+SARB2300001_SuspectWebsite_Log	0
+SARB2300001_SuspectRelationship	0
+SARB2300001_SuspectRelationship_Log	0
+SARB2300001_SUSPECT_LOG	0
+OFAC_SPEC_UPLOAD_922798              	0
+PB_FinancialSpecialist_Fact	0
+OFAC_GLSpec_Buffer	0
+OFAC_SPEC_UPLOAD_1091707	0
+OFAC_SPEC_NAMES_REPLACE	0
+OFAC_SPEC_PARSED	0
+OFAC_SPEC_UPLOAD	0
+OFAC_SPEC_RestrictedCountry_Buffer	0
+OFAC_SPEC_RestrictedCountry_Log	0
+SAR_Batch_SuspectExt_TW_Log	0
+SARHIST_SUSPECT	0
+SARHIST_SuspectExt_TW	0
+SARWTR_Suspect	0
+SARWTR_Suspect_Log	0
+SARWTR_SuspectExt_TW	0
+SARWTR_SuspectExt_TW_Log	0
+OFAC_GLSpec_Upload	0
+OFAC_GLSpec_Parsed	0
+OFAC_GLSpec_Parsed_Temp	0
+OFAC_SPEC_GROUP	0
+OFAC_GLSpec_Group_Attach	0
+OFAC_GLSpec_Group_Log	0
+OFAC_GLSpec	0
+OFAC_GLSpec_DownloadedFiles	0
+DBCHK_DetectedSuspect	0
+DBCHK_PendingCaseSuspect_Buffer	0
+OFAC_GLSPEC_GroupCountry	0
+OFAC_GLSPEC_GroupCountryLog	0
+TEMP_OFAC_GLSPEC_LIST_UPDATES	0
+SARB2100001_SuspectAlternateName	0
+SARB2100001_SuspectAlternateName_Log	0
+SARB2100001_SuspectPhone	0
+SARB2100001_SuspectPhone_Log	0
+SARB2100001_SuspectEmail	0
+SARB2100001_SuspectEmail_Log	0
+SARB2100001_SuspectWebsite	0
+SARB2100001_SuspectWebsite_Log	0
+SARB2100001_SuspectRelationship	0
+SARB2100001_SuspectRelationship_Log	0
+ofac_spec_parsed_temp	0
+OFAC_SPEC_UPLOAD_941069              	0
+OFAC_SPEC_UPLOAD_1040628             	0
+OFAC_SPEC_BatchProcessedBuffer	0
+OFAC_SPEC_BatchProcessingLog	0
+OFAC_SPEC_CountryListBuffer	0
+OFAC_SPEC_DJCCCListBuffer	0
+OFAC_SPEC_NameListBuffer	0
+OFAC_SPEC_DJDualGoodListBuffer	0
+OFAC_SPEC_DJPortCityListBuffer	0
+OFAC_SPEC_UPLOAD_1041348             	0
+OFAC_SPEC_DJ_Buffer	0
+TRADE_TXN_FACT_OldSpecBackup	0
+TRADE_LOC_TXN_FACT_OldSpecBackup	0
+TRADE_EXCEPTION_FACT_OldSpecBackup	0
+TRADE_LOC_EXCEPTION_FACT_OldSpecBackup	0
+OFAC_SPEC_UPLOAD_1071562             	0
+OFAC_SPEC_BankBIC	0
+OFAC_SPEC_BankBIC_Log	0
+OFAC_SPEC_BankBICBuffer	0
