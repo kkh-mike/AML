@@ -1,3 +1,44 @@
-UPDATE BSADBJP..OFAC_SPEC
-SET IDENT = NULL
-WHERE spec_name = 'Stojilkovic, Vlajko';
+可以透過 SQL Server 的系統視圖，反向搜尋所有引用了 OFAC_SPEC 或含有審核相關關鍵字的 Stored Procedure。
+直接在該資料庫（BSADBJP）開一個新查詢視窗，執行以下任一組語法：
+方法一：直接查 SQL 定義內容（最常用、最準確）
+USE BSADBJP;
+GO
+
+SELECT 
+    o.name AS sp_name,
+    o.type_desc,
+    o.modify_date,
+    m.definition
+FROM sys.sql_modules m
+JOIN sys.objects o ON m.object_id = o.object_id
+WHERE m.definition LIKE '%OFAC_SPEC%'
+  AND o.type IN ('P', 'FN', 'IF', 'TF') -- 包含 SP 與 Function
+ORDER BY o.modify_date DESC;
+
+方法二：利用物件依賴關聯（sys.sql_expression_dependencies）
+如果程式碼有標準參照該表，可以用相依性直接抓出上層 SP：
+USE BSADBJP;
+GO
+
+SELECT 
+    OBJECT_NAME(referencing_id) AS referencing_object_name,
+    o.type_desc,
+    o.modify_date
+FROM sys.sql_expression_dependencies d
+JOIN sys.objects o ON d.referencing_id = o.object_id
+WHERE referenced_entity_name = 'OFAC_SPEC'
+ORDER BY o.modify_date DESC;
+
+方法三：如果比對邏輯跨 Database（例如在別的 DB 調用 BSADBJP..OFAC_SPEC）
+若審核 SP 放在預設的系統庫或主業務庫中，可切換到該資料庫執行：
+SELECT 
+    o.name AS sp_name,
+    o.type_desc,
+    o.modify_date
+FROM sys.sql_modules m
+JOIN sys.objects o ON m.object_id = o.object_id
+WHERE m.definition LIKE '%BSADBJP%OFAC_SPEC%'
+   OR m.definition LIKE '%OFAC_SPEC%'
+ORDER BY o.modify_date DESC;
+
+查出 SP 名稱後，對著 SP 右鍵按 「編寫預存程序為指令碼」->「CREATE 至」->「新增查詢編輯器視窗」，直接搜尋 OFAC_SPEC 的關聯條件（WHERE 或 JOIN），就能看到比對時套用了哪些過濾欄位。
