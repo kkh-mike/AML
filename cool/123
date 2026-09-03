@@ -1,3 +1,16 @@
-UPDATE dbo.OFAC_SPEC 
-SET spec_name = 'Stojilkovic, Vlajko' 
-WHERE ent_num = 2400;
+ -- 找出死人名單
+SELECT 
+	 H.sdn_grp_num,
+    A.EntityId,
+    A.FullName AS SdnName,
+	F.IDENT,
+    CONVERT(VARCHAR, A.UpdatedDate_UTC, 112) AS UpdatedDate
+FROM BSADBJP..OFAC_SPEC f
+JOIN  BSADB.dbo.DJ_Entity A WITH (NOLOCK) on A.FullName = f.spec_name
+JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) 
+    ON A.EntityId = B.EntityId
+JOIN BSADBJP..BlackListData H ON f.spec_name = H.sdn_name
+WHERE A.Deceased = 1 AND B.SanctionListReference LIKE '%Japanese Finance%' 
+
+
+我想要改成找出 不再BSADBJP..BlackListData  裡面的資料
