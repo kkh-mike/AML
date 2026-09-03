@@ -1,114 +1,54 @@
-對，如果你現在查不到資料，這個 TC-03 不能直接照原本的前置條件測。但先不要急著改測試案例，因為要先確認到底是哪個條件不成立。
+   INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
+    SELECT 
+        A.EntNum, 
+        A.SdnName, 
+        MAX(A.UpdatedDate) AS UpdatedDate
+    FROM BSADB.dbo.DJ_List_Data_A A
+    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
+    WHERE A.NamePropertyBitCode & 1 > 0
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+    GROUP BY A.EntNum, A.SdnName;
+    /*
+        ============================================================
+        多加入死亡名單掃描，所有的BL、PEP、NN都會納入掃描
+        ============================================================
+    */
+	INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate)
+	SELECT 
+		A.EntityId, 
+        A.FullName, 
+        MAX(CONVERT(VARCHAR,A.UpdatedDate_UTC,112)) AS UpdatedDate
+    FROM BSADB.dbo.DJ_Entity A
+    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+    WHERE A.Deceased = 1
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+	  AND NOT EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE X.EntNum = A.EntityId)
+    GROUP BY A.EntityId, A.FullName;
 
-你現在這支 SQL 要同時滿足：
 
-* DJ_Entity.EntityId = DJ_List_Data_A.EntNum
-* A.Deceased = 1
-* B.SanctionListReference 有 Japanese Finance
-* C.NamePropertyBitCode & 1 > 0
+我是這樣的條件
 
-任何一個不符合就會變成 0 筆。
+我反向案例這樣對?
+反向案例
+TC-04：Deceased 旗標不符（非死亡名單不應入選）
 
-先這樣查 90002
 
-SELECT
-    A.EntityId,
-    A.FullName,
-    A.Deceased,
-    B.SanctionListReference,
-    C.EntNum,
-    C.SdnName,
-    C.NamePropertyBitCode
-FROM BSADB..DJ_Entity A
-LEFT JOIN BSADB..DJ_SanctionListReference B
-    ON A.EntityId = B.EntityId
-LEFT JOIN BSADB..DJ_List_Data_A C
-    ON A.EntityId = C.EntNum
-WHERE A.EntityId = 90002;
 
-這支比較重要，因為用了 LEFT JOIN，你可以看到 到底是哪一個條件沒有資料。
+ * 測試目的：驗證非死亡人口不會誤入第二批同步。
+ * 前置資料準備：
+   * DJ_Entity：EntityId = 90003, Deceased = 0（或 NULL），且有 Japanese Finance 標籤。
+   * DJ_List_Data_A：無此資料。
+ * 執行動作：執行 SP。
+ * 預期結果：
+   * BSADBJP..OFAC_SPEC 不應 新增 remark = '90003' 的資料。
 
-⸻
 
-如果 90002 根本不存在
+TC-05：制裁清單非 Japanese Finance（標籤比對反向測試）
+驗證制裁名單過濾條件精準度。
+DJ_Entity：EntityId = 90004, Deceased = 1。
+   * DJ_SanctionListReference：SanctionListReference = 'OFAC SDN'（無 Japanese Finance 字樣）。
+ * 執行動作：執行 SP。
+ * 預期結果：
+   * BSADBJP..OFAC_SPEC（GROUPID = 11）不應 出現 remark = '90004'。
 
-那你的 TC-03 前置資料就跟實際 DB 不一致。
 
-這種情況我會建議你不要硬改 TC-03 的測試目的，而是把測試案例改成「使用實際存在、符合條件的 EntityId」。
-
-例如先找一筆真正符合條件的：
-
-SELECT TOP 20
-    A.EntityId,
-    A.FullName,
-    A.Deceased,
-    C.EntNum,
-    C.SdnName,
-    C.NamePropertyBitCode
-FROM BSADB..DJ_Entity A
-JOIN BSADB..DJ_SanctionListReference B
-    ON A.EntityId = B.EntityId
-JOIN BSADB..DJ_List_Data_A C
-    ON A.EntityId = C.EntNum
-WHERE B.SanctionListReference LIKE '%Japanese Finance%'
-  AND A.Deceased = 1
-  AND (C.NamePropertyBitCode & 1) > 0;
-
-如果這支也 完全沒資料，那就代表目前環境根本沒有「兩邊同時符合」的測試資料。
-
-⸻
-
-那 TC-03 要不要改？
-
-測試目的不用改。
-
-因為你的目的其實非常合理：
-
-驗證同一 EntityId 同時存在於 DJ_List_Data_A 與 DJ_Entity 時，DJ_List_Data_A 優先，第二段透過 NOT EXISTS 排除。
-
-但 前置資料的 90002 要改成實際存在的測試資料。
-
-可以改成：
-
-TC-03：死亡名單重複時以 DJ_List_Data_A 為主（NOT EXISTS 驗證）
-
-測試目的：
-驗證同一 EntityId 同時符合 DJ_List_Data_A 與 DJ_Entity 條件時，不會產生主鍵衝突或重複寫入。
-
-前置資料準備：
-
-* DJ_List_Data_A：EntNum = [實際測試 EntityId]，SdnName = 'NAME FROM LIST_A'，NamePropertyBitCode & 1 > 0。
-* DJ_Entity：EntityId = [相同 EntityId]，FullName = 'NAME FROM ENTITY'，Deceased = 1。
-* 兩者皆關聯至 Japanese Finance。
-
-執行動作：
-
-* 執行 SP。
-
-預期結果：
-
-* #tempDJBlacklistJP 僅有 1 筆該 EntityId。
-* spec_name 為 NAME FROM LIST_A。
-* DJ_Entity 第二段因 NOT EXISTS 條件被排除。
-
-最重要的是
-
-你現在這個查詢沒資料，不代表 SQL 寫錯。
-
-反而很可能代表：
-
-90002
- ↓
-DJ_List_Data_A 有？
- ↓
-NamePropertyBitCode & 1 > 0？
- ↓
-DJ_Entity 有？
- ↓
-Deceased = 1？
- ↓
-Japanese Finance 有？
-
-其中某一關沒過。
-
-你把剛剛那支 LEFT JOIN 查詢的結果貼給我，我可以直接幫你判斷 是哪一個條件不符合，以及 TC-03 應該怎麼改最合理。
