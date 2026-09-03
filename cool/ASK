@@ -34,3 +34,16 @@ TC-04 → Deceased ≠ 1
 TC-05 → Japanese Finance 不存在
 
 而且都把第一段可能寫入的路徑排除掉，所以測試結果會非常乾淨。
+
+
+要怎麼寫啊
+我寫的怪怪的
+ 
+ 
+SELECT 
+*
+FROM  BSADB.dbo.DJ_Entity A WITH (NOLOCK)    
+JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK)    ON A.EntityId = B.EntityId
+JOIN BSADB.dbo.DJ_List_Data_A F  ON F.EntNum = B.EntityId
+WHERE A.Deceased = 0   AND B.SanctionListReference LIKE '%Japanese Finance%' AND F.EntNum is NULL
+ 
