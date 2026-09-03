@@ -1,8 +1,35 @@
-   SELECT * 
-FROM dbo.NMCHK_CustInfo 
-WHERE uid = '2026128';
+問題出在最後兩個欄位與比對 SP 的過濾邏輯：
+1. 致命原因：NameCategory = 0 與 SP 中的過濾條件
+在先前的 NMCHK_Detection_CombineResults 中，有一段針對 NameCategory 的篩選邏輯：
+-- Name Category 篩選
+IF EXISTS(SELECT NULL FROM #NMCHK_CustInfo WHERE NameCategory <> 0)
+BEGIN
+    DELETE A
+    FROM dbo.NMCHK_OtherListDetectionResults_Temp A
+    WHERE NOT EXISTS(
+        SELECT NULL FROM #NMCHK_CustInfo X
+        WHERE A.NameKey = X.new_acct_key
+          AND X.NameCategory & A.name_cat <> 0
+    )
+    ...
 
+ * 你的進件資料中 NameCategory 填的是 0（未分類 / Unknown）。
+ * 在第一張圖中，Stojilkovic, Vlajko 的 TaxID 填的是 4（代表它是特定實體類型或法人/特定人員分類），而「阪下透」的 TaxID 全部都是 NULL。
+ * 當後端服務在初步過濾時，如果比對引擎針對 NameCategory = 0 的客戶只走預設或自然人邏輯，只要名單端的分類與客戶分類無法透過 Bitwise 吻合，就會在前端被直接拋棄。
+2. 比對服務（Backend Service）的快取（Memory Cache）未重載
+進件名字完全一致（都是 Stojilkovic, Vlajko），且門檻值（rel_corr_chosen）已經低到 50 分：
+ * 完全一致的字串算出來的相似度絕對是 100 分。
+ * 既然是 100 分卻連 NMCHK_OtherListDetectionResults_Temp 都沒被寫入，代表後端比對服務根本沒在它記憶體清單裡找到這筆資料。
+ * OFAC_SPEC 是直接在資料庫更新或手動維護的，但比對服務通常是在開機時把整張表載入快取（Cache）。
+ * 驗證與排除：請重啟執行比對的那台 AP 主機上的比對 Windows Service / IIS Application Pool，讓服務重新從 OFAC_SPEC 載入完整名單。
+3. 名單的有效性旗標（DInd 與 ApprovedDate）
+請下 SQL 檢查 OFAC_SPEC 裡該筆資料的狀態旗標：
+SELECT ent_num, spec_name, GROUPID, DInd, EnterFlag, ApprovedBy, ApprovedDate
+FROM dbo.OFAC_SPEC 
+WHERE spec_name = 'Stojilkovic, Vlajko';
 
-uid	userid	rel_corr_chosen	new_acct_key	relationship	address	city	country	new_acct_name	user_brnch_nbr	TAXID	IDENT	IDENTO	ISSBY	IDNUM	REMARK	DOB	Source_IND	last_updated_date	last_updated_date_UTC	REFNO	DETECTED	CHANNEL	IsFalsePositive	Ori_REFNO	Nationality	IsSyncWithDBCheck	NameSource	CombineKey	Gender	NameCategory	VesselIMONo
-2026128	1141923             	50	1	CustomerName				Stojilkovic, Vlajko	0923							NULL	W	2026-09-03 12:05:31.263	2026-09-03 03:05:31.263	20260903000005	Y	NULL	NULL	NULL		NULL	NULL	NULL		0	
-
+後端在載入比對字典時，絕大多數都帶有以下條件：
+ * DInd = 'N'（未被邏輯刪除）
+ * ApprovedDate IS NOT NULL（必須已完成主管覆核/放行）
+ * EnterFlag 必須是審核通過的狀態代碼
+如果 ApprovedDate 是 NULL 或 EnterFlag 處於暫存/待覆核狀態，後端服務載入名單時只會 SELECT ... WHERE ApprovedDate IS NOT NULL AND DInd = 'N'，這筆英文名單就不會被視為生效名單。
