@@ -1,49 +1,104 @@
-可以。既然你的目的是測試第二段「死亡名單同步」的反向條件，我建議你這樣寫，最清楚也最不容易被測試人員誤解。
+對，你這個 SQL 會怪，是因為你用了：
 
-反向案例
+JOIN BSADB.dbo.DJ_List_Data_A F
 
-TC-04：Deceased 旗標不符
+這是 INNER JOIN，所以 F.EntNum IS NULL 基本上不可能成立。
 
-* 測試目的： 驗證 Deceased 不為 1 時，不會透過死亡名單邏輯新增資料。
-* 前置資料準備：
-    * DJ_Entity：EntityId = 90003、Deceased = 0
-    * DJ_SanctionListReference：SanctionListReference = 'Japanese Finance'
-    * DJ_List_Data_A：無 EntityId = 90003 的資料，確保不會由第一段邏輯寫入
-* 執行動作： 執行 SP。
-* 預期結果：
-    * BSADBJP..OFAC_SPEC 不應新增 remark = '90003' 的資料。
+你這裡是要驗證「DJ_List_Data_A 不存在」，應該用 NOT EXISTS，最乾淨。
 
-⸻
+TC-04 可以這樣查
 
-TC-05：制裁清單非 Japanese Finance
-
-* 測試目的： 驗證制裁清單未包含 Japanese Finance 時，不會新增資料。
-* 前置資料準備：
-    * DJ_Entity：EntityId = 90004、Deceased = 1
-    * DJ_SanctionListReference：SanctionListReference = 'OFAC SDN'
-    * DJ_List_Data_A：無 EntityId = 90004 的資料，確保不會由第一段邏輯寫入
-* 執行動作： 執行 SP。
-* 預期結果：
-    * BSADBJP..OFAC_SPEC（GROUPID = 11）不應出現 remark = '90004' 的資料。
-
-⸻
-
-這樣兩個案例分別打：
-
-TC-04 → Deceased ≠ 1
-TC-05 → Japanese Finance 不存在
-
-而且都把第一段可能寫入的路徑排除掉，所以測試結果會非常乾淨。
-
-
-要怎麼寫啊
-我寫的怪怪的
- 
- 
 SELECT 
-*
-FROM  BSADB.dbo.DJ_Entity A WITH (NOLOCK)    
-JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK)    ON A.EntityId = B.EntityId
-JOIN BSADB.dbo.DJ_List_Data_A F  ON F.EntNum = B.EntityId
-WHERE A.Deceased = 0   AND B.SanctionListReference LIKE '%Japanese Finance%' AND F.EntNum is NULL
- 
+    A.EntityId,
+    A.FullName,
+    A.Deceased,
+    B.SanctionListReference
+FROM BSADB.dbo.DJ_Entity A WITH (NOLOCK)
+JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK)
+    ON A.EntityId = B.EntityId
+WHERE A.Deceased = 0
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM BSADB.dbo.DJ_List_Data_A F WITH (NOLOCK)
+      WHERE F.EntNum = A.EntityId
+  );
+
+這支 SQL 的意思就是：
+
+找出「非死亡 + Japanese Finance + DJ_List_Data_A 不存在」的人。
+
+如果查得到 90003，就很適合拿來當 TC-04 測試資料。
+
+⸻
+
+TC-05
+
+同樣邏輯：
+
+SELECT 
+    A.EntityId,
+    A.FullName,
+    A.Deceased,
+    B.SanctionListReference
+FROM BSADB.dbo.DJ_Entity A WITH (NOLOCK)
+JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK)
+    ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1
+  AND B.SanctionListReference NOT LIKE '%Japanese Finance%'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM BSADB.dbo.DJ_List_Data_A F WITH (NOLOCK)
+      WHERE F.EntNum = A.EntityId
+  );
+
+這支找的是：
+
+死亡 + 非 Japanese Finance + DJ_List_Data_A 不存在
+
+⸻
+
+但我更建議 TC-05 不要用 NOT LIKE
+
+因為 SanctionListReference 如果是 NULL：
+
+B.SanctionListReference NOT LIKE '%Japanese Finance%'
+
+不會成立。
+
+你如果只是要找「明確不是 Japanese Finance」，可以用：
+
+AND (
+    B.SanctionListReference IS NULL
+    OR B.SanctionListReference NOT LIKE '%Japanese Finance%'
+)
+
+不過如果你的測試資料明確是：
+
+OFAC SDN
+
+那就直接：
+
+AND B.SanctionListReference = 'OFAC SDN'
+
+反而最好。
+
+最終我會這樣準備測試資料
+
+TC-04：
+
+WHERE A.Deceased = 0
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND NOT EXISTS (...)
+
+→ 找到一筆，例如 90003
+
+TC-05：
+
+WHERE A.Deceased = 1
+  AND B.SanctionListReference = 'OFAC SDN'
+  AND NOT EXISTS (...)
+
+→ 找到一筆，例如 90004
+
+這樣就非常精準地對應你的 SP 兩個條件了。
