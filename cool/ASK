@@ -1,16 +1,10 @@
-2. 底層資料庫是怎麼串起這層關係的？
-從 View 內的 JOIN 條件可以看出串接的底層邏輯：
-FROM dbo.WBS_CIF_STOCKHOLDER SH
-JOIN dbo.WBS_CIF_CUST_INFO CIF 
-  ON SH.CIF_CUST_INFO_SEQ = CIF.CIF_CUST_INFO_SEQ
-
- * 關聯樞紐：CIF_CUST_INFO_SEQ
-   * dbo.WBS_CIF_CUST_INFO 是客戶主檔，定義了客戶代號 CUSTOMER_ID 與它的流水序號 CIF_CUST_INFO_SEQ。
-   * dbo.WBS_CIF_STOCKHOLDER 是關聯人/股東明細檔，裡面的外鍵（FK）欄位就是 CIF_CUST_INFO_SEQ。
- * 一對多（1 : N）結構：
-   * 一個 CUSTOMER_ID（一筆 CIF_CUST_INFO_SEQ）在 WBS_CIF_STOCKHOLDER 中可以對應多筆紀錄。
-   * 因此，當你對該 View 進行查詢時，同一個 CustomerID 會出現多行，每一行就代表該客戶旗下的一名董事、監察人或大股東。
-
-
-
-簡單說明
+用最白話的「存摺與聯絡人」概念來說明：
+ * WBS_CIF_CUST_INFO（客戶主檔）
+   * 就像公司的基本檔案夾。
+   * 系統給每家公司發一張號碼牌 CIF_CUST_INFO_SEQ（例如編號 1001 對應客戶代號 A公司）。
+ * WBS_CIF_STOCKHOLDER（關係人名冊）
+   * 就像一張張董監事名片。
+   * 每張名片背面都蓋上所屬公司的編號 1001（CIF_CUST_INFO_SEQ）。
+ * JOIN 串接在做的事
+   * 系統拿著編號 1001，把背面蓋有 1001 的名片通通挑出來，並在每張名片上補印「這是 A公司 的人」。
+   * 一家公司通常有多位董監事（一對多），所以查詢結果中，同一個 A公司 會分行列出張三（董事）、李四（監察人）等人。
