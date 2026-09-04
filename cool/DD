@@ -1,3 +1,75 @@
+
+改寫後的 SQL 驗證腳本（直接輸出驗證名稱與筆數）
+-- 驗證 1：來源名單完整性（漏網之魚檢查）
+;WITH SourceEntities AS
+(
+    SELECT A.EntNum AS EntityId, A.SdnName
+    FROM BSADB.dbo.DJ_List_Data_A A
+    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
+    WHERE (A.NamePropertyBitCode & 1) > 0
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+
+    UNION
+
+    SELECT A.EntityId, A.FullName AS SdnName
+    FROM BSADB.dbo.DJ_Entity A
+    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+    WHERE A.Deceased = 1
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+)
+SELECT 
+    '1. 來源名單同步完整性（未同步或未生效筆數）' AS [驗證項目],
+    COUNT(1) AS [異常筆數 (預期為 0)]
+FROM SourceEntities S
+LEFT JOIN BSADBJP..OFAC_SPEC T 
+       ON T.GROUPID = 5 
+      AND T.spec_name = S.SdnName 
+      AND T.remark = CAST(S.EntityId AS VARCHAR(100))
+WHERE T.ent_num IS NULL 
+   OR T.DInd <> 'N';
+
+
+-- 驗證 2：名單下架與軟刪除正確性（幽靈名單檢查）
+;WITH SourceEntities AS
+(
+    SELECT A.EntNum AS EntityId, A.SdnName
+    FROM BSADB.dbo.DJ_List_Data_A A
+    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
+    WHERE (A.NamePropertyBitCode & 1) > 0
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+
+    UNION
+
+    SELECT A.EntityId, A.FullName AS SdnName
+    FROM BSADB.dbo.DJ_Entity A
+    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+    WHERE A.Deceased = 1
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+)
+SELECT 
+    '2. 排除名單下架正確性（未正確軟刪除筆數）' AS [驗證項目],
+    COUNT(1) AS [異常筆數 (預期為 0)]
+FROM BSADBJP..OFAC_SPEC T
+LEFT JOIN SourceEntities S 
+       ON T.spec_name = S.SdnName 
+      AND T.remark = CAST(S.EntityId AS VARCHAR(100))
+WHERE T.GROUPID = 5 
+  AND T.DInd = 'N'
+  AND S.EntityId IS NULL;
+
+報告文字撰寫建議
+反向驗證說明
+ * 原本項目保留：名單同步寫入後，既有 GROUPID = 5 有效資料未受非預期覆蓋，原有規則持續正常命中。
+ * 項目 1：名單同步完整性驗證（無漏網名單）
+   * 驗證方式：比對來源名單（一般制裁 + 死亡名單）與目標表 OFAC_SPEC (GROUPID=5)，確認來源資料全數成功寫入且狀態均為有效（DInd = 'N'）。
+   * 預期結果：異常筆數為 0 筆。
+ * 項目 2：名單下架與軟刪除驗證（無幽靈名單）
+   * 驗證方式：清查目前目標表中生效中（DInd = 'N'）的名單，是否皆存在於最新來源資料中，確認不在來源中的舊資料皆已正確標記軟刪除（DInd = 'Y'）。
+   * 預期結果：異常筆數為 0 筆。
+
+
+
+
 ;WITH SourceEntities AS
 (
     -- 1. 正常名單
