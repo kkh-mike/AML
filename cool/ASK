@@ -1,24 +1,3 @@
-在這段 View 的結構中，要知道某個 CustomerID 對應到哪些關聯人（Related Parties），主要依賴 兩個欄位的對應關係 以及 關聯建立的鍵值（Key）。
-1. View 產出結果如何對應？
-在查詢結果中，每一筆紀錄代表**「一個客戶的其中一位關聯人」**：
-| 欄位名稱 | 意義 | 說明 |
-|---|---|---|
-| CustomerID | 主客戶 | 目前是誰的帳戶／公司 |
-| Related_Parties_ID | 關聯人唯一識別碼 | 關聯人身分證號/統一編號；若為空則為系統自編代碼（CustomerID_SEQ） |
-| Name | 關聯人英文姓名 | 取自來源的 HOLDER_ENG_NAME |
-| Native_Name | 關聯人中文/本名 | 取自來源的 HOLDER_NAME |
-| Related_Parties_Type | 關聯身分別 | BOD（董監事）、MS（大股東）、APP（指派人）、OTH（其他） |
-如何查詢特定客戶的所有關聯人：
-SELECT 
-    CustomerID,
-    Related_Parties_ID,
-    Related_Parties_Type,
-    Name AS EngName,
-    Native_Name AS LocalName,
-    Status
-FROM [dbo].[RAW_CUSTOMER_RP]
-WHERE CustomerID = '想要查詢的客戶代號';
-
 2. 底層資料庫是怎麼串起這層關係的？
 從 View 內的 JOIN 條件可以看出串接的底層邏輯：
 FROM dbo.WBS_CIF_STOCKHOLDER SH
@@ -31,14 +10,7 @@ JOIN dbo.WBS_CIF_CUST_INFO CIF
  * 一對多（1 : N）結構：
    * 一個 CUSTOMER_ID（一筆 CIF_CUST_INFO_SEQ）在 WBS_CIF_STOCKHOLDER 中可以對應多筆紀錄。
    * 因此，當你對該 View 進行查詢時，同一個 CustomerID 會出現多行，每一行就代表該客戶旗下的一名董事、監察人或大股東。
-3. 如果想統計每位客戶底下的關聯人數量
-可以透過簡單的 GROUP BY 查看哪些客戶擁有關聯人以及人數：
-SELECT 
-    CustomerID,
-    COUNT(1) AS Total_RP_Count,
-    -- 統計活躍狀態的關聯人數量
-    SUM(CASE WHEN Status = 'O' THEN 1 ELSE 0 END) AS Active_RP_Count
-FROM [dbo].[RAW_CUSTOMER_RP]
-GROUP BY CustomerID
-ORDER BY Total_RP_Count DESC;
 
+
+
+簡單說明
