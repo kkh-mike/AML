@@ -1,7 +1,28 @@
-Rui Shan 的問題非常單純，他是在問：
-> 「為什麼新聞都報了唐浩（Tang Hao）涉嫌洗錢跟外銀關戶，但我們的 AML 系統不管是自動批次掃描（CDC），還是人工手動查名單（Name Check），都完全沒有跳出警示（Alert）抓到這件事？」
-> 
-具體來說，他向你反映了兩件事：
- * CDC（批次掃描）沒反應： 系統定期比對客戶名單時，沒有針對這位客戶/關聯人跳出負面警示。
- * Name Check（手動查核）也查無資料： 他們事後拿新聞裡的人名去系統手動查詢，系統一樣完全沒有檢核出任何負面新聞紀錄。
-因此他發信要求系統端協助調查：到底是什麼原因導致系統沒有把這些負面消息過濾/警示出來？
+Dear 貫軒 
+
+Recently, BU discovered some adverse news related to our client. However AML system CDC screenings did not generate any alerts on the related parties. When we conducted manual Name Check on the individuals’ names (eg. Tang Hao, 唐浩) mentioned in the articles below, the system also did not detect any of the negative news. 
+
+•	JPMorgan shut China tycoon's account that made millions for bank - The Business Times
+•	AI Darling to Crime World Laundromat? AppLovin Tanks on Short-Seller's Bombshell Report - 24/7 Wall St.
+•	AppLovin Corporation (NASDAQ: APP) Was Accused of Laundering Mone
+•	6 years ago, the hard-earned money of 220,000 people in Dongguan flowed into a US stock that surged 38 times - Odaily 
+•	Hao Tang v. Culper Research et al: (‘Defamation by Short-Sellers’) - OffshoreAlert
+
+Could you please assist to look into why these negative news were not flagged out by AML system name screening?
+
+Thank you.
+Best Regards
+Rui Shan
+
+
+我懂他的問題了，他是說他看到的那些新聞為什麼都沒在命中原因裡面 而不是不會命中
+
+但那些新聞為什麼沒出現，這要問DJ 道瓊，這個我們不會知道，系統是根據DJ去判斷會不會命中
+主要是要能命中這個人
+
+至於為什麼沒有這些新聞要問DJ了
+
+
+
+
+我要怎麼回復?
