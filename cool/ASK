@@ -1,6 +1,19 @@
-主旨： 【測試委託】自建名單納入 Dow Jones 死亡制裁名單驗證與 TK 回覆
-Dear 姵君,
-有關「自建名單納入 Dow Jones 死亡制裁名單」，附件提供符合條件的 Blacklist 資料。
-麻煩協助安排測試，並於完成後回覆 TK，謝謝！
-Best regards,
-[你的名字]
+Dear 貫軒 
+
+Recently, BU discovered some adverse news related to our client. However AML system CDC screenings did not generate any alerts on the related parties. When we conducted manual Name Check on the individuals’ names (eg. Tang Hao, 唐浩) mentioned in the articles below, the system also did not detect any of the negative news. 
+
+•	JPMorgan shut China tycoon's account that made millions for bank - The Business Times
+•	AI Darling to Crime World Laundromat? AppLovin Tanks on Short-Seller's Bombshell Report - 24/7 Wall St.
+•	AppLovin Corporation (NASDAQ: APP) Was Accused of Laundering Mone
+•	6 years ago, the hard-earned money of 220,000 people in Dongguan flowed into a US stock that surged 38 times - Odaily 
+•	Hao Tang v. Culper Research et al: (‘Defamation by Short-Sellers’) - OffshoreAlert
+
+Could you please assist to look into why these negative news were not flagged out by AML system name screening?
+
+Thank you.
+Best Regards
+Rui Shan
+
+
+
+他什麼意思
