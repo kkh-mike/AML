@@ -1,104 +1,45 @@
-對，你這個 SQL 會怪，是因為你用了：
+USE [MYDB]
+GO
 
-JOIN BSADB.dbo.DJ_List_Data_A F
+/****** Object:  View [dbo].[RAW_CUSTOMER_RP]    Script Date: 2026/9/4 上午 11:25:30 ******/
+SET ANSI_NULLS ON
+GO
 
-這是 INNER JOIN，所以 F.EntNum IS NULL 基本上不可能成立。
+SET QUOTED_IDENTIFIER ON
+GO
 
-你這裡是要驗證「DJ_List_Data_A 不存在」，應該用 NOT EXISTS，最乾淨。
+ALTER View [dbo].[RAW_CUSTOMER_RP] AS
+	SELECT 
+		CIF.CUSTOMER_ID AS CustomerID ,SH.RP_TYPE AS Related_Parties_Type ,ISNULL(SH.HOLDER_ID,CONCAT(CIF.CUSTOMER_ID,'_',SH.CIF_STOCKHOLDER_SEQ)) AS Related_Parties_ID
+		,'' AS Other_Related_Parties_Type ,'' AS Other_Related_Parties_Desc
+		,CASE WHEN SH.HOLDER_ENG_NAME IS NULL THEN ' ' ELSE SH.HOLDER_ENG_NAME END Name ,'' AS Aliases ,'I' AS Type
+		,CASE WHEN SH.ESTABLISH_DATE IS NOT NULL THEN SUBSTRING(SH.ESTABLISH_DATE,1,4) + '-' + SUBSTRING(SH.ESTABLISH_DATE,5,2) + '-' + RIGHT(SH.ESTABLISH_DATE,2)
+			 ELSE SH.ESTABLISH_DATE END AS DOB
+		,'' AS Nationality
+		,'' AS P_Addr1 ,'' AS P_Addr2 ,'' AS P_Addr3 ,'' AS P_Country
+		,'' AS C_Addr1 ,'' AS C_Addr2 ,'' AS C_Addr3 ,'' AS C_Country
+		,'' AS Contact_Phone_No ,'' AS Email
+		,'' AS ID_Type ,'' AS ID_Num ,'' AS ID_Issue_Date ,'' AS ID_Expiry_Date ,'' AS ID_Issuing_Country
+		,'' AS Remark ,SH.STATUS AS Status ,CONVERT(VARCHAR(10), DATEADD(D,-1,GETDATE()), 20) AS Processing_Date
+		,'' AS OPENING_DATE ,'' AS CLOSED_DATE
+		,'MYWBS' AS CoreSystem
+		,SH.HOLDER_NAME AS Native_Name
+	FROM (
+		SELECT 
+			CIF_CUST_INFO_SEQ ,HOLDER_ID
+			,CASE WHEN HOLD_TYPE = '01' THEN 'BOD' WHEN HOLD_TYPE = '02' THEN 'MS' WHEN HOLD_TYPE = '03' THEN 'APP' ELSE 'OTH' END AS RP_TYPE
+			,CIF_STOCKHOLDER_SEQ ,HOLDER_NAME ,HOLDER_ENG_NAME ,ESTABLISH_DATE
+			,CASE WHEN STATUS = '1' THEN 'O' ELSE 'C' END AS STATUS     	  
+		FROM dbo.WBS_CIF_STOCKHOLDER
+	) SH
+	JOIN ( SELECT CIF_CUST_INFO_SEQ,CUSTOMER_ID FROM dbo.WBS_CIF_CUST_INFO ) CIF ON SH.CIF_CUST_INFO_SEQ = CIF.CIF_CUST_INFO_SEQ
+	--WHERE SH.HOLDER_ID IS NOT NULL	--正式也有NULL
+GO
 
-TC-04 可以這樣查
 
-SELECT 
-    A.EntityId,
-    A.FullName,
-    A.Deceased,
-    B.SanctionListReference
-FROM BSADB.dbo.DJ_Entity A WITH (NOLOCK)
-JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK)
-    ON A.EntityId = B.EntityId
-WHERE A.Deceased = 0
-  AND B.SanctionListReference LIKE '%Japanese Finance%'
-  AND NOT EXISTS (
-      SELECT 1
-      FROM BSADB.dbo.DJ_List_Data_A F WITH (NOLOCK)
-      WHERE F.EntNum = A.EntityId
-  );
+SELECT Name, * FROM [RAW_CUSTOMER_RP]
 
-這支 SQL 的意思就是：
 
-找出「非死亡 + Japanese Finance + DJ_List_Data_A 不存在」的人。
 
-如果查得到 90003，就很適合拿來當 TC-04 測試資料。
-
-⸻
-
-TC-05
-
-同樣邏輯：
-
-SELECT 
-    A.EntityId,
-    A.FullName,
-    A.Deceased,
-    B.SanctionListReference
-FROM BSADB.dbo.DJ_Entity A WITH (NOLOCK)
-JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK)
-    ON A.EntityId = B.EntityId
-WHERE A.Deceased = 1
-  AND B.SanctionListReference NOT LIKE '%Japanese Finance%'
-  AND NOT EXISTS (
-      SELECT 1
-      FROM BSADB.dbo.DJ_List_Data_A F WITH (NOLOCK)
-      WHERE F.EntNum = A.EntityId
-  );
-
-這支找的是：
-
-死亡 + 非 Japanese Finance + DJ_List_Data_A 不存在
-
-⸻
-
-但我更建議 TC-05 不要用 NOT LIKE
-
-因為 SanctionListReference 如果是 NULL：
-
-B.SanctionListReference NOT LIKE '%Japanese Finance%'
-
-不會成立。
-
-你如果只是要找「明確不是 Japanese Finance」，可以用：
-
-AND (
-    B.SanctionListReference IS NULL
-    OR B.SanctionListReference NOT LIKE '%Japanese Finance%'
-)
-
-不過如果你的測試資料明確是：
-
-OFAC SDN
-
-那就直接：
-
-AND B.SanctionListReference = 'OFAC SDN'
-
-反而最好。
-
-最終我會這樣準備測試資料
-
-TC-04：
-
-WHERE A.Deceased = 0
-  AND B.SanctionListReference LIKE '%Japanese Finance%'
-  AND NOT EXISTS (...)
-
-→ 找到一筆，例如 90003
-
-TC-05：
-
-WHERE A.Deceased = 1
-  AND B.SanctionListReference = 'OFAC SDN'
-  AND NOT EXISTS (...)
-
-→ 找到一筆，例如 90004
-
-這樣就非常精準地對應你的 SP 兩個條件了。
+我想要知道他的邏輯
+以及什麼情形會寫入name 資訊
