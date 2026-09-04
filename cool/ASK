@@ -1,28 +1,6 @@
-Dear 貫軒 
-
-Recently, BU discovered some adverse news related to our client. However AML system CDC screenings did not generate any alerts on the related parties. When we conducted manual Name Check on the individuals’ names (eg. Tang Hao, 唐浩) mentioned in the articles below, the system also did not detect any of the negative news. 
-
-•	JPMorgan shut China tycoon's account that made millions for bank - The Business Times
-•	AI Darling to Crime World Laundromat? AppLovin Tanks on Short-Seller's Bombshell Report - 24/7 Wall St.
-•	AppLovin Corporation (NASDAQ: APP) Was Accused of Laundering Mone
-•	6 years ago, the hard-earned money of 220,000 people in Dongguan flowed into a US stock that surged 38 times - Odaily 
-•	Hao Tang v. Culper Research et al: (‘Defamation by Short-Sellers’) - OffshoreAlert
-
-Could you please assist to look into why these negative news were not flagged out by AML system name screening?
-
-Thank you.
-Best Regards
-Rui Shan
-
-
-我懂他的問題了，他是說他看到的那些新聞為什麼都沒在命中原因裡面 而不是不會命中
-
-但那些新聞為什麼沒出現，這要問DJ 道瓊，這個我們不會知道，系統是根據DJ去判斷會不會命中
-主要是要能命中這個人
-
-至於為什麼沒有這些新聞要問DJ了
-
-
-
-
-我要怎麼回復?
+Dear Rui Shan,
+Our AML Name Check relies directly on the Dow Jones (DJ) database.
+The system only displays adverse media that DJ has officially collected. These specific articles did not appear because Dow Jones has not linked them to this person's profile yet, not because of an internal system error. As long as the individual exists in DJ's list, the system will flag the hit, but the attached news depends entirely on DJ's records.
+If Compliance needs these articles added to the profile, we can help raise a request to Dow Jones to review and update their data.
+Best regards,
+Kuan Hsuan (Mike)
