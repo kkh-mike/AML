@@ -1,7 +1,3 @@
-報錯是因為暫存表 #tempDJBlacklistDetailsJP 已經在原查詢視窗結束時被清除了。
-以下是最核心、不依賴任何暫存表的 2 大關鍵反向驗證：直接用「實體來源表」對比「目標表」，回傳 0 筆 即代表驗證通過。
-驗證 1：有沒有漏掉名單？（來源有的，目標表必須存在且 DInd = 'N'）
--- 預期筆數：0 筆（若有查出代表同步失敗、有漏抓或未生效的名單）
 ;WITH SourceEntities AS
 (
     -- 1. 正常名單
@@ -29,9 +25,14 @@ LEFT JOIN BSADBJP..OFAC_SPEC T
 WHERE T.ent_num IS NULL 
    OR T.DInd <> 'N';
 
-驗證 2：有沒有該刪除卻沒刪的？（目前目標表 DInd = 'N' 的，必須在來源內）
--- 預期筆數：0 筆（若有查出代表已經從來源消失，卻沒有被軟刪除 DInd = 'Y'）
-;WITH SourceEntities AS
+
+
+
+
+
+
+
+   ;WITH SourceEntities AS
 (
     SELECT A.EntNum AS EntityId, A.SdnName
     FROM BSADB.dbo.DJ_List_Data_A A
@@ -56,3 +57,10 @@ WHERE T.GROUPID = 5
   AND T.DInd = 'N'
   AND S.EntityId IS NULL;
 
+
+這兩個我報告要怎麼改
+目前是這樣
+反向驗證 
+寫入後不影響原本groupid = 5 的資料，一樣可以命中
+
+然後可以顯示數量嗎不用顯示資料
