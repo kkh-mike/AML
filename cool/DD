@@ -1,9 +1,19 @@
-要驗證這段同步邏輯（包含 MERGE 的 Insert / Update / Soft Delete 及 Log 行為），單純驗證「原本的命中」不夠。
-以下是針對這段 SQL 邏輯設計的 5 大維度反向驗證腳本：
-1. 漏網之魚驗證（來源名單是否全部成功轉移）
-驗證來源暫存表 #tempDJBlacklistDetailsJP 中的每一筆，是否都已經存在於 OFAC_SPEC（GROUPID = 5 且 DInd = 'N'）。若有回傳筆數，代表同步存在漏網之魚。
--- 預期筆數：0 筆
-SELECT S.*
+這是一份可直接在執行同步後跑的自動化反向驗證腳本。
+它包含 6 大檢查項，並使用錯誤計數器彙整結果。若有任何項目失敗，會直接印出錯誤項目與抓出異常資料清單。
+SET NOCOUNT ON;
+
+DECLARE @ErrCount INT = 0;
+PRINT '============================================================';
+PRINT '開始執行 OFAC_SPEC (GROUPID=5) 同步反向驗證';
+PRINT '============================================================';
+
+-- -------------------------------------------------------------
+-- 1. 漏網之魚驗證：來源暫存名單是否 100% 成功寫入目標表且為有效 (DInd = 'N')
+-- -------------------------------------------------------------
+IF OBJECT_ID('tempdb..#MissedInTarget') IS NOT NULL DROP TABLE #MissedInTarget;
+
+SELECT S.EntNum, S.SdnName, S.UpdatedDate
+INTO #MissedInTarget
 FROM #tempDJBlacklistDetailsJP S
 LEFT JOIN BSADBJP..OFAC_SPEC T 
        ON T.GROUPID = 5 
@@ -12,10 +22,25 @@ LEFT JOIN BSADBJP..OFAC_SPEC T
 WHERE T.ent_num IS NULL 
    OR T.DInd <> 'N';
 
-2. 幽靈名單與軟刪除驗證（不在來源的是否都有被軟刪除）
-若 OFAC_SPEC 中 GROUPID = 5 且狀態為 DInd = 'N'，它 必須 存在於當前的來源暫存表。若不存在，代表 NOT MATCHED BY SOURCE 的刪除條件沒有觸發成功。
--- 預期筆數：0 筆
-SELECT T.*
+IF EXISTS (SELECT 1 FROM #MissedInTarget)
+BEGIN
+    SET @ErrCount = @ErrCount + 1;
+    PRINT '❌ [失敗] 1. 漏網之魚檢查：有來源資料未成功同步至目標表或未處於有效狀態！';
+    SELECT '[失敗1-漏網之魚清單]' AS CheckItem, * FROM #MissedInTarget;
+END
+ELSE
+BEGIN
+    PRINT '✅ [通過] 1. 漏網之魚檢查：來源名單已全數正確同步且 DInd = ''N''。';
+END
+
+
+-- -------------------------------------------------------------
+-- 2. 幽靈名單驗證：不在本次來源中的有效名單，是否都已正確被軟刪除 (DInd = 'Y')
+-- -------------------------------------------------------------
+IF OBJECT_ID('tempdb..#GhostRecords') IS NOT NULL DROP TABLE #GhostRecords;
+
+SELECT T.ent_num, T.spec_name, T.remark, T.DInd, T.updated_date
+INTO #GhostRecords
 FROM BSADBJP..OFAC_SPEC T
 LEFT JOIN #tempDJBlacklistDetailsJP S 
        ON T.spec_name = S.SdnName 
@@ -24,53 +49,138 @@ WHERE T.GROUPID = 5
   AND T.DInd = 'N'
   AND S.EntNum IS NULL;
 
-3. 唯一性與編號安全驗證（檢查重複與 Num 遞增缺陷）
-你程式碼中使用的 @MAXNo = @MAXNo + 1 變數遞增方式，在 SQL Server 集合操作中容易產生 重複編號（非循序遞增保證）。此查詢驗證是否有主鍵或名稱衝突：
--- 驗證 1：ent_num 是否有重複分配（預期筆數：0 筆）
-SELECT ent_num, COUNT(1) AS Cnt
-FROM BSADBJP..OFAC_SPEC
-GROUP BY ent_num
-HAVING COUNT(1) > 1;
+IF EXISTS (SELECT 1 FROM #GhostRecords)
+BEGIN
+    SET @ErrCount = @ErrCount + 1;
+    PRINT '❌ [失敗] 2. 幽靈名單檢查：目標表有不在來源名單中卻未被軟刪除的資料！';
+    SELECT '[失敗2-未軟刪除清單]' AS CheckItem, * FROM #GhostRecords;
+END
+ELSE
+BEGIN
+    PRINT '✅ [通過] 2. 幽靈名單檢查：非來源中的歷史資料已全數標記為軟刪除。';
+END
 
--- 驗證 2：同一 (spec_name, remark) 是否在同 Group 產生多筆資料（預期筆數：0 筆）
-SELECT spec_name, remark, COUNT(1) AS Cnt
+
+-- -------------------------------------------------------------
+-- 3. 業務唯一鍵重複驗證：同一個 (spec_name + remark) 在 GROUPID=5 是否出現多筆
+-- -------------------------------------------------------------
+IF OBJECT_ID('tempdb..#DuplicateKeys') IS NOT NULL DROP TABLE #DuplicateKeys;
+
+SELECT spec_name, remark, COUNT(1) AS DuplicateCount
+INTO #DuplicateKeys
 FROM BSADBJP..OFAC_SPEC
 WHERE GROUPID = 5
 GROUP BY spec_name, remark
 HAVING COUNT(1) > 1;
 
-4. 軟刪除欄位完整性驗證
-當 DInd = 'Y' 時，所有的刪除稽核欄位（DelDate、DelUserID 等）必須被填入；反之，若 DInd = 'N'，這些刪除欄位必須全部被清空。
--- 預期筆數：0 筆
-SELECT ent_num, spec_name, DInd, DelDate, DelUserID, ApproveDelDate
+IF EXISTS (SELECT 1 FROM #DuplicateKeys)
+BEGIN
+    SET @ErrCount = @ErrCount + 1;
+    PRINT '❌ [失敗] 3. 唯一鍵檢查：存在重複的 (spec_name, remark) 資料！';
+    SELECT '[失敗3-重複Key清單]' AS CheckItem, * FROM #DuplicateKeys;
+END
+ELSE
+BEGIN
+    PRINT '✅ [通過] 3. 唯一鍵檢查：無重複的業務主鍵。';
+END
+
+
+-- -------------------------------------------------------------
+-- 4. 主鍵 (ent_num) 重複驗證：確認全表 ent_num 是否唯一
+-- -------------------------------------------------------------
+IF OBJECT_ID('tempdb..#DuplicateEntNum') IS NOT NULL DROP TABLE #DuplicateEntNum;
+
+SELECT ent_num, COUNT(1) AS DuplicateCount
+INTO #DuplicateEntNum
+FROM BSADBJP..OFAC_SPEC
+GROUP BY ent_num
+HAVING COUNT(1) > 1;
+
+IF EXISTS (SELECT 1 FROM #DuplicateEntNum)
+BEGIN
+    SET @ErrCount = @ErrCount + 1;
+    PRINT '❌ [失敗] 4. 主鍵重複檢查：ent_num 出現重複編號！';
+    SELECT '[失敗4-重複ent_num清單]' AS CheckItem, * FROM #DuplicateEntNum;
+END
+ELSE
+BEGIN
+    PRINT '✅ [通過] 4. 主鍵重複檢查：ent_num 序號無重複。';
+END
+
+
+-- -------------------------------------------------------------
+-- 5. 軟刪除稽核欄位一致性驗證：DInd 狀態與刪除欄位值是否匹配
+-- -------------------------------------------------------------
+IF OBJECT_ID('tempdb..#AuditMismatch') IS NOT NULL DROP TABLE #AuditMismatch;
+
+SELECT ent_num, spec_name, DInd, DelDate, DelUserID, ApproveDelDate, DelDate_UTC
+INTO #AuditMismatch
 FROM BSADBJP..OFAC_SPEC
 WHERE GROUPID = 5
   AND (
-      -- 狀態為無效但刪除資訊為空
+      -- 軟刪除但缺少刪除人/時間
       (DInd = 'Y' AND (DelDate IS NULL OR DelUserID IS NULL OR ApproveDelDate IS NULL))
       OR
-      -- 狀態為有效但殘留刪除資訊
+      -- 有效名單卻殘留刪除註記
       (DInd = 'N' AND (DelDate IS NOT NULL OR DelUserID IS NOT NULL OR ApproveDelDate IS NOT NULL))
   );
 
-5. 稽核日誌（OFAC_SPEC_LOG）雙向對照
-驗證 OFAC_SPEC 最新狀態與寫入 OFAC_SPEC_LOG 的動作代碼是否吻合：
-| 狀態變化 | 預期 ActionCD |
-|---|---|
-| 新增 / 復原有效（Re-activate） | '01' |
-| 欄位資料異動 | '02' |
-| 軟刪除（DInd 變為 Y） | '03' |
--- 檢查本次執行 (以最近 5 分鐘為例) LOG 與實體表狀態是否矛盾
--- 預期筆數：0 筆
+IF EXISTS (SELECT 1 FROM #AuditMismatch)
+BEGIN
+    SET @ErrCount = @ErrCount + 1;
+    PRINT '❌ [失敗] 5. 軟刪除欄位一致性檢查：DInd 狀態與刪除欄位值不符！';
+    SELECT '[失敗5-欄位異常清單]' AS CheckItem, * FROM #AuditMismatch;
+END
+ELSE
+BEGIN
+    PRINT '✅ [通過] 5. 軟刪除欄位一致性檢查：刪除狀態與刪除欄位完全匹配。';
+END
+
+
+-- -------------------------------------------------------------
+-- 6. Log 記錄對齊驗證：檢查最近執行的 Log ActionCD 是否與目標表目前狀態矛盾
+-- -------------------------------------------------------------
+IF OBJECT_ID('tempdb..#LogMismatch') IS NOT NULL DROP TABLE #LogMismatch;
+
+;WITH LatestLog AS
+(
+    SELECT ent_num, ActionCD, ActionDT_UTC,
+           ROW_NUMBER() OVER (PARTITION BY ent_num ORDER BY ActionDT_UTC DESC) AS rn
+    FROM BSADBJP.dbo.OFAC_SPEC_LOG
+    WHERE ActionDT_UTC >= DATEADD(MINUTE, -10, GETUTCDATE())
+)
 SELECT L.ent_num, L.ActionCD, T.DInd, L.ActionDT_UTC
-FROM BSADBJP.dbo.OFAC_SPEC_LOG L
+INTO #LogMismatch
+FROM LatestLog L
 JOIN BSADBJP..OFAC_SPEC T ON L.ent_num = T.ent_num
-WHERE L.ActionDT_UTC >= DATEADD(MINUTE, -5, GETUTCDATE())
+WHERE L.rn = 1
   AND (
-      -- 做了軟刪除，但現在目標表卻不是 'Y'
+      -- 寫入刪除 Log (03)，實體表狀態卻不是 Y
       (L.ActionCD = '03' AND T.DInd <> 'Y')
       OR
-      -- 做了新增/復原，但現在目標表卻不是 'N'
+      -- 寫入新增/重啟 Log (01)，實體表狀態卻不是 N
       (L.ActionCD = '01' AND T.DInd <> 'N')
   );
+
+IF EXISTS (SELECT 1 FROM #LogMismatch)
+BEGIN
+    SET @ErrCount = @ErrCount + 1;
+    PRINT '❌ [失敗] 6. LOG 對齊檢查：OFAC_SPEC_LOG 的動作代碼與實體表目前狀態衝突！';
+    SELECT '[失敗6-Log狀態不一致清單]' AS CheckItem, * FROM #LogMismatch;
+END
+ELSE
+BEGIN
+    PRINT '✅ [通過] 6. LOG 對齊檢查：最近 10 分鐘內日誌行為與資料表狀態相符。';
+END
+
+
+-- -------------------------------------------------------------
+-- 最終結算輸出
+-- -------------------------------------------------------------
+PRINT '============================================================';
+IF @ErrCount = 0
+    PRINT '🎉 恭喜！所有反向驗證測試全數通過（無異常）。';
+ELSE
+    PRINT '⚠️ 驗證完畢：共發現 ' + CAST(@ErrCount AS VARCHAR(10)) + ' 項邏輯異常，請檢視上方 Result 清單！';
+PRINT '============================================================';
 
