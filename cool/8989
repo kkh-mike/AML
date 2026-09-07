@@ -1,23 +1,8 @@
-各資料表職責說明
- * dbo.WORKFLOW_MGMT_USERS（流程指派名單與設定表）
-   核心職責：存放當前各工作佇列（Queue）中有權限處理案件的使用者清單。
-   關鍵欄位：QUEUEID（群組代號）、USERID（人員帳號/工號）、ROLE（角色等級）、以及郵件/系統警示開關（如 ALERTMAIN、ALERTPERSONAL）。
-   來源特性：由預存程序 WORKFLOW_AutomatedUSERS 定期從人資/集中員工表（GCMAINDB.dbo.AutomatedEmployees）同步過來。
-
- * dbo.WORKFLOW_MGMT_QUEUE（工作佇列／工作群組主表）
-   * 核心職責：定義系統中所有的作業群組（Queue），例如匯款審查、名單比對、不同分行別或業務模組。
-   * 關鍵欄位：QUEUEID（群組唯一識別碼）、QUEUENAME（群組顯示名稱，如 0900 CIP）、MODULE（業務模組）、DEL_FLAG（刪除註記）。
- * dbo.WORKFLOW_MGMT_ROLE（工作流程角色字典表）
-   * 核心職責：定義作業審查的層級與權限角色。
-   * 角色架構：
-     * 1：Operator - Maker（經辦／初審）
-     * 2：Operator - Checker（主管／覆核）
-     * 3：AML Officer - Checker 1（第三層洗錢防制審查人員）
-     * 4：AML Officer - Checker 2（第四層洗錢防制高階審查人員）
-
-	 */
-
-
-
-
-這邊寫重點就好
+資料表核心職責簡表
+ * WORKFLOW_MGMT_USERS（作業人員對應表）
+   * 重點：記錄「誰」在哪個「工作群組」扮演什麼「角色」。
+   * 來源：由排程定期從人事表（GCMAINDB.dbo.AutomatedEmployees）同步。
+ * WORKFLOW_MGMT_QUEUE（工作群組清單）
+   * 重點：定義作業關卡與業務佇列（如 0900 CIP、匯款審查等）。
+ * WORKFLOW_MGMT_ROLE（審查層級字典表）
+   * 重點：定義簽核權限等級（1: 經辦、2: 主管覆核、3~4: AML 高階審查人員）。
