@@ -1,30 +1,9 @@
-沒錯，就是這段語法！從查詢結果（如 0900 CIP 對應工號與 Operator - Maker）可以看出完全正確。
-整理完整的 SQL 註解以及各 Table 負責的業務架構如下：
-SELECT 
-    q.QUEUENAME AS WorkGroup,      -- 工作群組名稱 (例如: 0900 CIP、Name check、Mt 等)
-    u.USERID,                      -- 使用者員工工號/帳號 (對應 A.CN)
-    r.ID AS ROLE_ID,               -- 角色代碼 (1: 經辦, 2: 主管/覆核, 3: AML Officer...)
-    r.ROLE_DESC,                   -- 角色英文說明 (Operator - Maker / Operator - Checker)
-    r.ROLE_DESC_zh_TW              -- 角色中文說明 (經辦 / 主管)
-FROM dbo.WORKFLOW_MGMT_USERS u
--- 串接工作群組主表：藉由 QUEUEID 取得工作群組代碼與名稱
-JOIN dbo.WORKFLOW_MGMT_QUEUE q 
-    ON u.QUEUEID = q.QUEUEID
--- 串接權限角色字典表：藉由 ROLE (ID) 取得角色階層與中英文名稱
-JOIN dbo.WORKFLOW_MGMT_ROLE r 
-    ON u.ROLE = r.ID
-WHERE q.DEL_FLAG = 'N'             -- 過濾掉已被軟刪除/停用的工作群組
-  -- AND u.ROLE = 2                -- 若只要查 Checker (主管)，可把前面的註解「--」拿掉
-ORDER BY 
-    q.QUEUENAME,                   -- 依群組排序
-    r.ID,                          -- 同群組內依角色階層排序 (Maker 先、Checker 後)
-    u.USERID;                      -- 依工號排序
-
 各資料表職責說明
  * dbo.WORKFLOW_MGMT_USERS（流程指派名單與設定表）
-   * 核心職責：存放當前各工作佇列（Queue）中有權限處理案件的使用者清單。
-   * 關鍵欄位：QUEUEID（群組代號）、USERID（人員帳號/工號）、ROLE（角色等級）、以及郵件/系統警示開關（如 ALERTMAIN、ALERTPERSONAL）。
-   * 來源特性：由預存程序 WORKFLOW_AutomatedUSERS 定期從人資/集中員工表（GCMAINDB.dbo.AutomatedEmployees）同步過來。
+   核心職責：存放當前各工作佇列（Queue）中有權限處理案件的使用者清單。
+   關鍵欄位：QUEUEID（群組代號）、USERID（人員帳號/工號）、ROLE（角色等級）、以及郵件/系統警示開關（如 ALERTMAIN、ALERTPERSONAL）。
+   來源特性：由預存程序 WORKFLOW_AutomatedUSERS 定期從人資/集中員工表（GCMAINDB.dbo.AutomatedEmployees）同步過來。
+
  * dbo.WORKFLOW_MGMT_QUEUE（工作佇列／工作群組主表）
    * 核心職責：定義系統中所有的作業群組（Queue），例如匯款審查、名單比對、不同分行別或業務模組。
    * 關鍵欄位：QUEUEID（群組唯一識別碼）、QUEUENAME（群組顯示名稱，如 0900 CIP）、MODULE（業務模組）、DEL_FLAG（刪除註記）。
@@ -35,3 +14,10 @@ ORDER BY
      * 2：Operator - Checker（主管／覆核）
      * 3：AML Officer - Checker 1（第三層洗錢防制審查人員）
      * 4：AML Officer - Checker 2（第四層洗錢防制高階審查人員）
+
+	 */
+
+
+
+
+這邊寫重點就好
