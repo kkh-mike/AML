@@ -1,48 +1,48 @@
-這支 SP 完全抓到關鍵了。
-從程式碼第 23~29 行可以看到，使用者與角色的對應資料表是 WORKFLOW_MGMT_USERS（來源則是跨庫的 GCMAINDB.dbo.AutomatedEmployees）：
-INSERT INTO dbo.WORKFLOW_MGMT_USERS_temp
-    (QUEUEID, USERID, ROLE, ALERTMAIN, ALERTPERSONAL)
-SELECT DISTINCT B.QUEUEID, A.CN, A.ROLE, 'Y', 'Y'
-FROM GCMAINDB.dbo.AutomatedEmployees A
-JOIN dbo.WORKFLOW_MGMT_QUEUE B ON B.QUEUENAME = A.WORKGROUP AND ...
-WHERE ...
-  EXISTS (SELECT 1 FROM dbo.WORKFLOW_MGMT_ROLE D WHERE A.ROLE = D.ID AND D.FLAG = 'N')
-
-欄位對應關係為：
- * A.CN ＝ USERID
- * A.ROLE ＝ WORKFLOW_MGMT_ROLE.ID
-如何找出對應到 Checker 的 UserID
-執行以下查詢，直接查當前資料庫的 WORKFLOW_MGMT_USERS：
-SELECT DISTINCT 
+從剛剛那支 SP 的邏輯：
+ * dbo.WORKFLOW_MGMT_USERS 裡面記錄的是 QUEUEID 與 USERID。
+ * dbo.WORKFLOW_MGMT_QUEUE 存放的是 Queue/群組資訊（包含 QUEUENAME 即工作群組名稱，如 Name check、Mt、Mx 等）。
+ * 外部來源表 GCMAINDB.dbo.AutomatedEmployees 則直接帶有 WORKGROUP 欄位。
+你可以透過以下兩種方式查詢每個工作群組對應的人員與角色：
+方法一：從系統設定表查詢（推薦，關聯 Queue 與 Role）
+直接關聯 WORKFLOW_MGMT_USERS、WORKFLOW_MGMT_QUEUE 與 WORKFLOW_MGMT_ROLE：
+SELECT 
+    q.QUEUENAME AS WorkGroup,
     u.USERID,
-    u.ROLE AS ROLE_ID,
+    r.ID AS ROLE_ID,
     r.ROLE_DESC,
     r.ROLE_DESC_zh_TW
 FROM dbo.WORKFLOW_MGMT_USERS u
+JOIN dbo.WORKFLOW_MGMT_QUEUE q ON u.QUEUEID = q.QUEUEID
 JOIN dbo.WORKFLOW_MGMT_ROLE r ON u.ROLE = r.ID
-WHERE u.ROLE = 2  -- 2 為 Operator - Checker (主管)
-ORDER BY u.USERID;
+WHERE q.DEL_FLAG = 'N'
+  -- 若只要查 Checker (主管)，可解除下一行註解：
+  -- AND u.ROLE = 2
+ORDER BY q.QUEUENAME, r.ID, u.USERID;
 
-如果想查所有主管（包含 Checker 1、Checker 2）：
-SELECT DISTINCT 
-    u.USERID,
-    u.ROLE AS ROLE_ID,
-    r.ROLE_DESC,
-    r.ROLE_DESC_zh_TW
-FROM dbo.WORKFLOW_MGMT_USERS u
-JOIN dbo.WORKFLOW_MGMT_ROLE r ON u.ROLE = r.ID
-WHERE u.ROLE IN (2, 3, 4)
-ORDER BY u.ROLE, u.USERID;
-
-備用：直接從來源人事/員工表查詢
-如果 WORKFLOW_MGMT_USERS 裡面是空的（或只放目前被指派的案件暫存），直接查同步來源表：
-SELECT DISTINCT 
+方法二：直接查員工來源表（若想看原始對應的 WorkGroup）
+如果是看來源同步檔 GCMAINDB.dbo.AutomatedEmployees：
+SELECT 
+    A.WORKGROUP AS WorkGroup,
     A.CN AS USERID,
-    A.WORKGROUP,
-    A.ROLE AS ROLE_ID,
+    r.ID AS ROLE_ID,
     r.ROLE_DESC,
     r.ROLE_DESC_zh_TW
 FROM GCMAINDB.dbo.AutomatedEmployees A
-JOIN dbo.WORKFLOW_MGMT_ROLE r ON A.ROLE = r.ID
-WHERE A.ROLE = 2;
+LEFT JOIN dbo.WORKFLOW_MGMT_ROLE r ON A.ROLE = r.ID
+WHERE A.WORKGROUP IN ('Name check', 'Mt', 'Mx', 'CDC', 'Rm') -- 或使用 A.WORKGROUP LIKE '%...'
+  -- 若只要查 Checker，可加：AND A.ROLE = 2
+ORDER BY A.WORKGROUP, A.ROLE, A.CN;
+
+方法三：依工作群組彙整人員名單（群組檢視）
+如果想一眼看各群組有哪些 Checker，可以使用 STRING_AGG 把人名串在一起：
+SELECT 
+    q.QUEUENAME AS WorkGroup,
+    r.ROLE_DESC_zh_TW AS RoleName,
+    STRING_AGG(u.USERID, ', ') AS UserList
+FROM dbo.WORKFLOW_MGMT_USERS u
+JOIN dbo.WORKFLOW_MGMT_QUEUE q ON u.QUEUEID = q.QUEUEID
+JOIN dbo.WORKFLOW_MGMT_ROLE r ON u.ROLE = r.ID
+WHERE q.DEL_FLAG = 'N'
+GROUP BY q.QUEUENAME, r.ROLE_DESC_zh_TW
+ORDER BY q.QUEUENAME;
 
