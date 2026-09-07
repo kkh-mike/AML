@@ -1,13 +1,5 @@
-Dear Coco,
-
-本次 AML 共 7 個檔案，僅 2 個檔案與新光提供的 AML_CHECK_SUM_1.csv 相符，其餘 5 個檔案 MD5 不一致。
-
-不一致的檔案如下：
-
-* AML_CUST.csv
-* AML_SPEC_OFAC_SPEC.csv
-* AML_NameProperty_RP.csv
-* AML_LoadTrxn.csv
-* AML_Acct.csv
-
-再麻煩協助轉寄新煜確認上述檔案是否有異常，謝謝。
+Hi 鈺婷,
+目前測試區的 Dow Jones 資料並非全量，因此資料庫中暫無部分別名（如日文假名）等資訊，此為正常現象。
+現階段請先以我提供的 Deceased_Japanese_Finance.csv 清單，協助確認「死亡名單是否能正常命中」的功能邏輯即可。完整的資料內容與別名，待實際上線串接正式庫後才能一併確認。
+再麻煩協助測試，謝謝！
+貫軒
