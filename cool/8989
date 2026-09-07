@@ -1,61 +1,48 @@
-從你的 Stored Procedure 清單命名慣例來看，這套系統針對案件指派與覆核使用的是 %_GetAssignSupervisor 系列（Supervisor 即對應 Checker/主管層級），以及 %_GetRole 系列。
-如果你要查**「有哪些 UserID 對應到 Checker（ROLE_ID = 2 或包含 Checker 的角色）」**，有兩種最快的方式：
-方法一：直接查關聯資料表（最直接、最推薦）
-在這種 Workflow / AML 系統架構中，WORKFLOW_MGMT_ROLE 通常會跟使用者表透過中間表做多對多關聯。你可以先用以下 SQL 找出有哪些包含 ROLE 與 USER 的資料表：
--- SQL Server
-SELECT TABLE_NAME 
-FROM INFORMATION_SCHEMA.TABLES 
-WHERE TABLE_NAME LIKE '%USER%ROLE%' 
-   OR TABLE_NAME LIKE '%ROLE%USER%'
-   OR TABLE_NAME LIKE 'WORKFLOW%USER%';
+這支 SP 完全抓到關鍵了。
+從程式碼第 23~29 行可以看到，使用者與角色的對應資料表是 WORKFLOW_MGMT_USERS（來源則是跨庫的 GCMAINDB.dbo.AutomatedEmployees）：
+INSERT INTO dbo.WORKFLOW_MGMT_USERS_temp
+    (QUEUEID, USERID, ROLE, ALERTMAIN, ALERTPERSONAL)
+SELECT DISTINCT B.QUEUEID, A.CN, A.ROLE, 'Y', 'Y'
+FROM GCMAINDB.dbo.AutomatedEmployees A
+JOIN dbo.WORKFLOW_MGMT_QUEUE B ON B.QUEUENAME = A.WORKGROUP AND ...
+WHERE ...
+  EXISTS (SELECT 1 FROM dbo.WORKFLOW_MGMT_ROLE D WHERE A.ROLE = D.ID AND D.FLAG = 'N')
 
-常見的關聯結構如下，查到表名後直接 JOIN 查詢：
--- 常見關聯表名推估（請替換為實際表名，如 WORKFLOW_MGMT_USER_ROLE 或 SEC_USER_ROLE）
-SELECT 
-    u.USER_ID,
-    u.USER_NAME,
-    r.ID AS ROLE_ID,
+欄位對應關係為：
+ * A.CN ＝ USERID
+ * A.ROLE ＝ WORKFLOW_MGMT_ROLE.ID
+如何找出對應到 Checker 的 UserID
+執行以下查詢，直接查當前資料庫的 WORKFLOW_MGMT_USERS：
+SELECT DISTINCT 
+    u.USERID,
+    u.ROLE AS ROLE_ID,
     r.ROLE_DESC,
     r.ROLE_DESC_zh_TW
-FROM WORKFLOW_MGMT_USER_ROLE ur
-JOIN WORKFLOW_MGMT_ROLE r ON ur.ROLE_ID = r.ID
-JOIN SEC_USER u ON ur.USER_ID = u.USER_ID
-WHERE r.ID = 2  -- 2 為 Operator - Checker (主管)
-   OR r.ROLE_DESC LIKE '%Checker%';
+FROM dbo.WORKFLOW_MGMT_USERS u
+JOIN dbo.WORKFLOW_MGMT_ROLE r ON u.ROLE = r.ID
+WHERE u.ROLE = 2  -- 2 為 Operator - Checker (主管)
+ORDER BY u.USERID;
 
-方法二：看現有的 Stored Procedure 定義
-在你的清單中，這幾支 SP 內部百分之百有寫到 User 與 Checker/Supervisor 關聯的 SELECT 語法：
- * 主管名單取得：
-   * DWire_GetAssignSupervisor
-   * DBCHK_GetAssignSupervisor
-   * SWIFT_GetAssignSupervisor
-   * TradeFin_GetAssignSupervisor
-   * CIP_GetAssignSupervisor
-   * FEDWIRE_GetAssignSupervisor
- * 使用者角色對應：
-   * DWire_GetRoleForUser
-   * WORKFLOW_AutomatedUSERS
-   * Workflow_Mgmt_GetActionSettingsByQueueAndRole
-快速偷看 SP 內容（以 SQL Server 為例）：
-直接執行以下指令檢視內容，看它是從哪張 Table 取出 User ID：
-sp_helptext 'DWire_GetAssignSupervisor';
--- 或
-sp_helptext 'DWire_GetRoleForUser';
+如果想查所有主管（包含 Checker 1、Checker 2）：
+SELECT DISTINCT 
+    u.USERID,
+    u.ROLE AS ROLE_ID,
+    r.ROLE_DESC,
+    r.ROLE_DESC_zh_TW
+FROM dbo.WORKFLOW_MGMT_USERS u
+JOIN dbo.WORKFLOW_MGMT_ROLE r ON u.ROLE = r.ID
+WHERE u.ROLE IN (2, 3, 4)
+ORDER BY u.ROLE, u.USERID;
 
-方法三：反查哪張表有 Foreign Key 指向 WORKFLOW_MGMT_ROLE
-如果不確定中介表叫什麼名字，直接查資料庫外鍵約束：
-SELECT 
-    fk.name AS FK_Name,
-    tp.name AS ParentTable_With_UserID,
-    cp.name AS ParentColumn,
-    tr.name AS ReferencedTable,
-    cr.name AS ReferencedColumn
-FROM sys.foreign_keys fk
-INNER JOIN sys.tables tp ON fk.parent_object_id = tp.object_id
-INNER JOIN sys.tables tr ON fk.referenced_object_id = tr.object_id
-INNER JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
-INNER JOIN sys.columns cp ON fkc.parent_column_id = cp.column_id AND cp.object_id = tp.object_id
-INNER JOIN sys.columns cr ON fkc.referenced_column_id = cr.column_id AND cr.object_id = tr.object_id
-WHERE tr.name = 'WORKFLOW_MGMT_ROLE';
+備用：直接從來源人事/員工表查詢
+如果 WORKFLOW_MGMT_USERS 裡面是空的（或只放目前被指派的案件暫存），直接查同步來源表：
+SELECT DISTINCT 
+    A.CN AS USERID,
+    A.WORKGROUP,
+    A.ROLE AS ROLE_ID,
+    r.ROLE_DESC,
+    r.ROLE_DESC_zh_TW
+FROM GCMAINDB.dbo.AutomatedEmployees A
+JOIN dbo.WORKFLOW_MGMT_ROLE r ON A.ROLE = r.ID
+WHERE A.ROLE = 2;
 
-只要執行 sp_helptext 'DWire_GetAssignSupervisor' 或查出使用者角色對應表（如 WORKFLOW_USER_ROLE），就能立刻列出所有 Checker 的帳號清單。
