@@ -1,5 +1,19 @@
-Hi 鈺婷,
-目前測試區的 Dow Jones 資料並非全量，因此資料庫中暫無部分別名（如日文假名）等資訊，此為正常現象。
-現階段請先以我提供的 Deceased_Japanese_Finance.csv 清單，協助確認「死亡名單是否能正常命中」的功能邏輯即可。完整的資料內容與別名，待實際上線串接正式庫後才能一併確認。
-再麻煩協助測試，謝謝！
-貫軒
+
+SELECT count(*) FROM BSADB.dbo.DJ_Entity WHERE FullName like '%ハリール%'
+SELECT count(*) FROM BSADB.dbo.DJ_Entity WHERE FullName like '%アフメド%'
+SELECT count(*) FROM BSADB.dbo.DJ_Entity WHERE FullName like '%ハッカーニ%'
+SELECT count(*) FROM BSADB.dbo.DJ_Entity WHERE FullName like '%Khalil ur Rahman Haqqani%'
+SELECT count(*) FROM BSADB.dbo.DJ_Entity WHERE FullName = 'Khalil Al-Rahman Haqqani'
+SELECT count(*) FROM BSADB.dbo.DJ_Entity WHERE FullName = 'Khalil ur Rahman Haqqani'
+SELECT count(*) FROM BSADB.dbo.DJ_Entity WHERE FullName = 'Khaleel Haqqani'
+
+
+SELECT count(*) FROM BSADB.dbo.DJ_List_Data_A WHERE SdnName like  '%ハリール%'
+SELECT count(*) FROM BSADB.dbo.DJ_List_Data_A WHERE SdnName like '%アフメド%'
+SELECT count(*) FROM BSADB.dbo.DJ_List_Data_A WHERE SdnName like '%ハッカーニ%'
+SELECT count(*) FROM BSADB.dbo.DJ_List_Data_A WHERE SdnName like '%Khalil ur Rahman Haqqani%'
+SELECT count(*) FROM BSADB.dbo.DJ_List_Data_A WHERE SdnName = 'Khalil ur Rahman Haqqani'
+SELECT count(*) FROM BSADB.dbo.DJ_List_Data_A WHERE SdnName = 'Khaleel Haqqani'
+SELECT count(*) FROM BSADB.dbo.DJ_List_Data_A WHERE SdnName = 'Khalil Al-Rahman Haqqani'
+
+幫我整理
