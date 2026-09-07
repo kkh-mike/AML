@@ -1,105 +1,57 @@
+從截圖抓到了兩個關鍵原因，這就是為什麼你的帳號查不到、以及直接改可能會失效的原因：
+ * 分行代號（BANKNO）不符：
+   * 當前資料庫是 HK（香港，REPLACE('BSADBHK', 'BSADB', '') = 'HK'）。
+   * 下方你的帳號 1141923 目前登記的 BANKNO 是 TW（台灣）。SP 第一關過濾 A.BANKNO = 'HK' 就直接把你的帳號濾掉了。
+ * 工作群組與角色欄位是空的：
+   * 上下兩張圖的 WORKGROUP 與 ROLE 全都是 NULL。這表示 GCMAINDB.dbo.AutomatedEmployees 很可能本身也是被某個人資 AD 排程整批洗寫進來的來源表（若直接在上面 UPDATE 也極可能被上游整批蓋回 NULL）。
+最穩健的解法：在來源表新增一筆「香港 (HK)」專屬記錄
+因為你的帳號本身在 TW，要在當前的 HK 環境使用且不被上游台灣的人事檔覆蓋，直接為你的帳號在 HK 新增一筆記錄：
+INSERT INTO GCMAINDB.dbo.AutomatedEmployees (
+    CN,
+    BANKNO,
+    BRANCH,
+    USERGROUP,
+    WORKGROUP,
+    ROLE,
+    FULLNAME,
+    MODULE,
+    EMAIL
+)
+VALUES (
+    '1141923',
+    'HK',                                   -- 符合當前資料庫的 BANKNO
+    '0900',                                 -- 參考上方 HK 的分行代號
+    '海外事業處香港分行作業組作業三組',        -- 參考上方同組名稱
+    '0900 CIP',                             -- 目標工作群組名稱 (請確保與 WORKFLOW_MGMT_QUEUE 的 QUEUENAME 完全一致)
+    2,                                      -- 角色代碼：2 為 Checker (主管)
+    '高OO',                                 -- 你的姓名
+    NULL,
+    '1141923@tbtmail.com'                   -- 你的 Email
+);
+
+> 注意： 若 GCMAINDB.dbo.AutomatedEmployees 有 (CN, BANKNO) 或 (CN, WORKGROUP) 的唯一限制（Unique Constraint），直接新增如果報錯，再改用以下語法修改現有那筆資料測試：
+> UPDATE GCMAINDB.dbo.AutomatedEmployees
+> SET BANKNO = 'HK',
+>     BRANCH = '0900',
+>     WORKGROUP = '0900 CIP',
+>     ROLE = 2
+> WHERE CN = '1141923';
+> 
+> 
+步驟驗證
+執行寫入或更新後，執行以下語法進行同步與驗證：
+-- 1. 執行同步預存程序
+EXEC dbo.WORKFLOW_AutomatedUSERS;
+
+-- 2. 驗證本機表是否成功帶入
 SELECT 
-    CASE 
-        WHEN T.remark IS NULL THEN '預計 INSERT (全新新增)'
-        WHEN T.DInd = 'Y' THEN '預計 UPDATE (重新上架)'
-        WHEN MAX(C.UpdatedDate) <> T.updated_date THEN '預計 UPDATE (日期更新)'
-        ELSE '資料一致 (不異動)'
-    END AS [Expected_Action],
-    
-    -- 寫入條件檢核欄位
-    A.PersonStatus                      AS [條件:人員狀態(Active/Inactive)],
-    CASE 
-        WHEN B.Description2 = 'Sanctions Lists' THEN 'Sanctions Lists (主清單)'
-        ELSE B.Description3 
-    END                                 AS [條件:符合制裁分類],
-    D.IdentificationType                AS [條件:19類證件類型],
-    D.IdentificationNumber              AS [spec_name(證照/通訊碼)],
-    A.EntityId                          AS [remark(EntityId)],
-    MAX(C.UpdatedDate)                  AS [updated_date],
-    
-    -- 預計寫入目標表的組合欄位
-    D.IdentificationType + '; Please go to Dowjones website for more detail' AS [預計寫入ADDRESS欄位],
-    T.DInd                              AS [目前Target表DInd]
-FROM BSADB.dbo.DJ_Entity A WITH (NOLOCK)
-JOIN BSADB.dbo.DJ_ListCategory B WITH (NOLOCK) ON A.EntityId = B.EntityId
-JOIN BSADB.dbo.DJ_List_Data_A C WITH (NOLOCK) ON A.EntityId = C.EntNum
-JOIN BSADB.dbo.DJ_IdentificationTypeInfo D WITH (NOLOCK) ON A.EntityId = D.EntityId
-LEFT JOIN BSADB.dbo.OFAC_GLSpec T WITH (NOLOCK)
-       ON T.GROUPID = 10
-      AND T.spec_name = D.IdentificationNumber
-      AND T.remark = CAST(A.EntityId AS VARCHAR(100))
-      AND REPLACE(T.ADDRESS, '; Please go to Dowjones website for more detail', '') = D.IdentificationType
-WHERE A.PersonStatus <> 'Inactive'
-  AND (
-        B.Description2 = 'Sanctions Lists'
-     OR B.Description3 IN (
-            'OFAC Related - Majority Owned',
-            'OFAC Related - Control',
-            'OFAC - Regional Sanctions Related - Majority Owned',
-            'OFAC - Regional Sanctions Related - Control',
-            'EU Related - Majority Owned',
-            'EU Related - Control',
-            'EU - Regional Sanctions Related - Majority Owned',
-            'EU - Regional Sanctions Related - Control'
-        )
-      )
-  AND B.Deleted = 0
-  AND D.IdentificationType IN (
-        'Aircraft Construction, Line, Fleet or Serial Number',
-        'Aircraft Manufacturer''s Serial Number (MSN)',
-        'Bank Identifier Code (BIC)',
-        'Central Registration Depository (CRD)',
-        'Company Identification No.',
-        'Driving Licence No.',
-        'DUNS Number',
-        'International Maritime Organization (IMO) Ship No.',
-        'International Securities Identification Number (ISIN)',
-        'Legal Entity Identifier (LEI)',
-        'National ID',
-        'National Provider Identifier (NPI)',
-        'National Tax No.',
-        'Others',
-        'Passport No.',
-        'Social Security No.',
-        'Email',
-        'Fax',
-        'Phone'
-      )
-  AND D.Deleted = 0
-GROUP BY 
-    A.EntityId, 
-    A.PersonStatus,
-    B.Description2,
-    B.Description3,
-    D.IdentificationType, 
-    D.IdentificationNumber,
-    T.remark,
-    T.DInd,
-    T.updated_date
-ORDER BY [Expected_Action] DESC, A.EntityId;
+    q.QUEUENAME AS WorkGroup,
+    u.USERID,
+    u.ROLE AS ROLE_ID,
+    r.ROLE_DESC,
+    r.ROLE_DESC_zh_TW
+FROM dbo.WORKFLOW_MGMT_USERS u
+JOIN dbo.WORKFLOW_MGMT_QUEUE q ON u.QUEUEID = q.QUEUEID
+JOIN dbo.WORKFLOW_MGMT_ROLE r ON u.ROLE = r.ID
+WHERE u.USERID = '1141923';
 
-
-這段TC 要怎麼寫
-需求是 新增制裁實體識別碼同步(Sanctions IDs) : 自動同步OFAC與EU制裁對象之19類證件與通訊，強化交易與客戶名單檢核能力
-
-我死亡的寫好了
-TC-JP-01：已故人員（Deceased = 1）納入日本名單驗證
-測試目的： 
-驗證已故實體若具備 Japanese Finance 標籤，無論其是否在 DJ_List_Data_A 擁有本名，皆能透過新增邏輯同步至 GROUPID = 5。
-
-Before 
- 
- 
- 
-After
-
-反向驗證
-已故但「非日本金融制裁」，驗證已故實體若未包含 Japanese Finance 標籤
- 
-
-
-現在剩下
-需求是 新增制裁實體識別碼同步(Sanctions IDs) : 自動同步OFAC與EU制裁對象之19類證件與通訊，強化交易與客戶名單檢核能力
-
-
-要怎麼寫
