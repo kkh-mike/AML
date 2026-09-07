@@ -1,4 +1,6 @@
-SELECT * FROM   WORKFLOW_MGMT_ROLE
-
-
-要怎麼找哪個sp有用到這個table
+SELECT 
+    OBJECT_SCHEMA_NAME(referencing_id) AS SchemaName,
+    OBJECT_NAME(referencing_id) AS ProcedureName
+FROM sys.sql_expression_dependencies
+WHERE referenced_entity_name = 'WORKFLOW_MGMT_ROLE'
+  AND OBJECTPROPERTY(referencing_id, 'IsProcedure') = 1;
