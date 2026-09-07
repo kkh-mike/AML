@@ -1,113 +1,61 @@
-DBCHK_GetDBCHKRemarkLog
-FLRS_GetFLRSRemarkLog
-OUTSOURCE_GetOUTSOURCERemarkLog
-SWIFT_GetSWIFTRemarkLog
-SAR_GetSARRemarkLog
-OFAC_314A_Automatic_GetReconciliationRpt
-OFAC_314A_Automatic_GetResultFilter
-OFAC_314A_Automatic_GetRemarkLog
-ForeignTransaction_GetForeignTransactionRemarkLog
-FedWire_GetFedWireRemarkLog
-FedWire_GETReconciliationRpt
-NMCHK_GetNMCHKRemarkLog
-FedWire_GetFedWireByFilter
-DBCHK_GetResultFilter
-OFAC_314A_GetRemarkLog
-TradeFin_GetTradeFinByFilter
-TradeFin_GetReconciliationRpt
-WLCONFIG_MakerCheckerLogRpt
-SAR_GETSARLOG
-TradeFin_PROCESSEMAIL
-SWIFTMX_GETReconciliationRpt
-TradeFin_GetReviewRemark
-SDS_GetLogRecords
-CASEDETECTOR_PROCESSEMAIL
-WORKFLOW_AutomatedUSERS
-TradeFin_GetTradeFinLog
-HRS_GetHRSByFilter
-CASEDETECTOR_PROCESSEMAIL_AutoDone
-MSGDETECTOR_PROCESSBATCHSTATISTIC
-DBCHK_GetDBCHKRole
-DBCHK_GETDIAGRAM
-SWIFTMX_GetMessageList
-SWIFTMX_GetHistoryMessageList
-FedWire_GETFedWireLOG
-DWire_GetNameMatchRpt
-SWIFT_GetActionDetail
-DBCHK_InsertReviewMain2
-HRS_GETHRSLOG
-HRS_GetHRSRemark
-HRS_GetHRSRole
-OFAC_314A_Automatic_Get314ARole
-OFAC_314A_Automatic_GetActionDetail
-DWire_GetReconciliationRpt
-DWire_GetAssignSupervisor
-CIP_GetCasesPerformanceRpt
-TradeFin_GetTradeFinRemarkLog
-CIP_GETReconciliationRpt
-OFAC_314A_Automatic_GetDiagram
-DWire_GetRemarkLog
-NMCHK_GetResultFilter
-CIP_GetCIPByFilter
-DWire_GetReviewAdvancedCaseAssignment
-DWire_GetReviewHistory
-SWIFT_GETReconciliationRpt
-DWire_GetReviewPersonalQueue
-HRS_GetHRSRemarkLog
-SWIFTMX_GetMakerCheckerLog
-DWire_GetRoleForUser
-SWIFTMX_GetHandledBy
-WLCONFIG_GetMakerCheckerLog
-SAR_RptAllDetails_Part1
-NMCHK_GetActionDetail
-CIP_GETCIPLOG
-NMCHK_GETDIAGRAM
-Fedwire_GetActionDetail
-UserDashboard_GetQueueStatistic
-SWIFT_GETNameMatchRpt
-DBCHK_GetResultFilter
-OFAC_314A_Automatic_GetAssignSupervisor
-Outsource_GetActionDetail
-DBCHK_GetActionDetail
-CIP_GetAssignSupervisor
-DBCHK_GetAssignSupervisor
-SWIFT_GetRptCaseStatisticSub
-FEDWIRE_GetAssignSupervisor
-SWIFT_GETSWIFTLOG
-FLRS_GetAssignSupervisor
-ForeignTransaction_GetAssignSupervisor
-WlConfig_GetWlReviewExemptionLog
-HRS_GetAssignSupervisor
-GetQueueAndActionSettings
-NMCHK_GetAssignSupervisor
-OUTSOURCE_GetAssignSupervisor
-SAR_GetAssignSupervisor
-SWIFT_ProcessMail_Branch
-Workflow_Mgmt_GetActionSettingsByQueue
-SWIFT_GetAssignSupervisor
-FLRS_GetActionDetail
-Workflow_Mgmt_GetActionSettingsByQueueAndRole
-TradeFin_GetAssignSupervisor
-CIP_GetCIPRemarkLog
-Workflow_Mgmt_GetDefaultActionSettings
-TradeFin_GetRole
-DWire_GetReviewMainResult
-ServerAdmin_GetWorkgroupActionSettingsRpt
-TradeFin_GetTradeFinByFilter
-DBCHK_GETReconciliationRpt
-NMCHK_GETReconciliationRpt
-DWire_PROCESSEMAIL
-DWire_GetDiagramByTransId
+從你的 Stored Procedure 清單命名慣例來看，這套系統針對案件指派與覆核使用的是 %_GetAssignSupervisor 系列（Supervisor 即對應 Checker/主管層級），以及 %_GetRole 系列。
+如果你要查**「有哪些 UserID 對應到 Checker（ROLE_ID = 2 或包含 Checker 的角色）」**，有兩種最快的方式：
+方法一：直接查關聯資料表（最直接、最推薦）
+在這種 Workflow / AML 系統架構中，WORKFLOW_MGMT_ROLE 通常會跟使用者表透過中間表做多對多關聯。你可以先用以下 SQL 找出有哪些包含 ROLE 與 USER 的資料表：
+-- SQL Server
+SELECT TABLE_NAME 
+FROM INFORMATION_SCHEMA.TABLES 
+WHERE TABLE_NAME LIKE '%USER%ROLE%' 
+   OR TABLE_NAME LIKE '%ROLE%USER%'
+   OR TABLE_NAME LIKE 'WORKFLOW%USER%';
 
+常見的關聯結構如下，查到表名後直接 JOIN 查詢：
+-- 常見關聯表名推估（請替換為實際表名，如 WORKFLOW_MGMT_USER_ROLE 或 SEC_USER_ROLE）
+SELECT 
+    u.USER_ID,
+    u.USER_NAME,
+    r.ID AS ROLE_ID,
+    r.ROLE_DESC,
+    r.ROLE_DESC_zh_TW
+FROM WORKFLOW_MGMT_USER_ROLE ur
+JOIN WORKFLOW_MGMT_ROLE r ON ur.ROLE_ID = r.ID
+JOIN SEC_USER u ON ur.USER_ID = u.USER_ID
+WHERE r.ID = 2  -- 2 為 Operator - Checker (主管)
+   OR r.ROLE_DESC LIKE '%Checker%';
 
-------
-SELECT * FROM   WORKFLOW_MGMT_ROLE
+方法二：看現有的 Stored Procedure 定義
+在你的清單中，這幾支 SP 內部百分之百有寫到 User 與 Checker/Supervisor 關聯的 SELECT 語法：
+ * 主管名單取得：
+   * DWire_GetAssignSupervisor
+   * DBCHK_GetAssignSupervisor
+   * SWIFT_GetAssignSupervisor
+   * TradeFin_GetAssignSupervisor
+   * CIP_GetAssignSupervisor
+   * FEDWIRE_GetAssignSupervisor
+ * 使用者角色對應：
+   * DWire_GetRoleForUser
+   * WORKFLOW_AutomatedUSERS
+   * Workflow_Mgmt_GetActionSettingsByQueueAndRole
+快速偷看 SP 內容（以 SQL Server 為例）：
+直接執行以下指令檢視內容，看它是從哪張 Table 取出 User ID：
+sp_helptext 'DWire_GetAssignSupervisor';
+-- 或
+sp_helptext 'DWire_GetRoleForUser';
 
-ID	FLAG	ROLE_DESC	ROLE_DESC_zh_TW
-1	N	Operator - Maker	經辦
-2	N	Operator - Checker	主管
-3	N	AML Officer - Checker 1	第三層審查人員
-4	N	AML Officer - Checker 2	第四層審查人員
+方法三：反查哪張表有 Foreign Key 指向 WORKFLOW_MGMT_ROLE
+如果不確定中介表叫什麼名字，直接查資料庫外鍵約束：
+SELECT 
+    fk.name AS FK_Name,
+    tp.name AS ParentTable_With_UserID,
+    cp.name AS ParentColumn,
+    tr.name AS ReferencedTable,
+    cr.name AS ReferencedColumn
+FROM sys.foreign_keys fk
+INNER JOIN sys.tables tp ON fk.parent_object_id = tp.object_id
+INNER JOIN sys.tables tr ON fk.referenced_object_id = tr.object_id
+INNER JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+INNER JOIN sys.columns cp ON fkc.parent_column_id = cp.column_id AND cp.object_id = tp.object_id
+INNER JOIN sys.columns cr ON fkc.referenced_column_id = cr.column_id AND cr.object_id = tr.object_id
+WHERE tr.name = 'WORKFLOW_MGMT_ROLE';
 
-
-我是要找到有哪個userid 是對應到checker 怎麼找
+只要執行 sp_helptext 'DWire_GetAssignSupervisor' 或查出使用者角色對應表（如 WORKFLOW_USER_ROLE），就能立刻列出所有 Checker 的帳號清單。
