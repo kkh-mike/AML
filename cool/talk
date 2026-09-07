@@ -1,42 +1,12 @@
-從你提供的 SP 原始碼分析，系統中真正會**新增、修改、刪除（寫入）**人員權限資料表（WORKFLOW_MGMT_USERS / WORKFLOW_MGMT_QUEUEACCESS）的核心 SP 共有以下 5 支：
-一、真正會動到權限資料的 5 大關鍵 SP
-1. WORKFLOW_MGMT_SAVUSERS（系統畫面：單一人員權限存檔）
- * 觸發時機：管理員在後台 UI 介面為某個 Workgroup/Queue 新增或修改作業人員時呼叫。
- * 行為：
-   * 直接 INSERT INTO dbo.WORKFLOW_MGMT_USERS。
-   * 包含一段保護復原邏輯：比對暫存表 WORKFLOW_MGMT_DELETEDUSERS_buffer，如果該人員原本是 AD 同步進來的，會將其 IsAutomated 更新回 'TRUE'。
-2. WORKFLOW_MGMT_DELQUEUEINFO（系統畫面：刪除/清空整個工作群組）
- * 觸發時機：後台管理者刪除或清空某個 Queue 的成員設定時。
- * 行為：
-   * 先將即將刪除的人員備份至 WORKFLOW_MGMT_DELETEDUSERS_buffer。
-   * 依序清空該 Queue 的關聯設定：WORKFLOW_MGMT_USERS、WORKFLOW_MGMT_QUEUEACCESS、WORKFLOW_MGMT_BRANCH 等。
-3. WORKFLOW_MGMT_SAVQUEUEINFO（系統畫面：工作群組成員異動備份歷程）
- * 觸發時機：後台管理者在編輯 Workgroup 點擊儲存前，系統先做的歷史留痕。
- * 行為：
-   * 將當前 WORKFLOW_MGMT_USERS 完整複製一份至 WORKFLOW_MGMT_USERS_HISTORY。
-   * 同時記錄稽核日誌至 dbo.WORKFLOW_MGMT_USERS_CHG_LOG（ActionCD = '3'）。
-4. Workflow_ResetForDeletedUsers（離職/刪除帳號連動清理程序）
- * 觸發時機：當某個帳號在主帳號表（UserAccounts）被標記刪除後，系統自動觸發本 SP。
- * 行為：
-   * 徹底刪除該人員名下所有的 Workgroup 權限：DELETE FROM dbo.WORKFLOW_MGMT_USERS WHERE USERID = @UserId。
-   * 清除佇列通行權限：DELETE FROM dbo.WORKFLOW_MGMT_QUEUEACCESS WHERE USERID = @UserId。
-   * 重置所有在途案件：將該員個人佇列（Personal Queue）中所有未審結的案子（SWIFT, FLRS, NMCHK, DBCHK, CIP 等）全部解除鎖定（HandledBy 清空為 NULL，退回關卡池中重新派案）。
-5. 其他分行/模組專用的自動同步排程
- * WORKFLOW_AutomatedUSERS_HNCB / WORKFLOW_AutomatedUSERS_TS
-   * 與 WORKFLOW_AutomatedUSERS 是同系列的排程程序（用於不同專案/分行如華南或台新）。
-   * 同樣透過 MERGE 寫入 WORKFLOW_MGMT_USERS，並且只刪除 IsAutomated = 'TRUE' 的人員。
-二、日常只讀取「權限對照」的業務 SP（不改寫權限）
-其餘出現在清單中的 SP 都是在案件流轉當下檢查誰有權限，主要分成三類：
- * 主管派案下拉選單（抓取誰是 Checker）：
-   * DWire_GetAssignSupervisor、CIP_GetAssignSupervisor、DBCHK_GetAssignSupervisor、SWIFT_GetAssignSupervisor、NMCHK_GetAssignSupervisor、FLRS_GetAssignSupervisor 等。
-   * 邏輯：從 WORKFLOW_MGMT_USERS 找出同群組且 ROLE 符合覆核標準的使用者清單供畫面挑選。
- * 待辦清單過濾（決定誰能領案）：
-   * SWIFTMX_GetMessageList、NMCHK_GetResultFilter、TradeFin_GetTradeFinByFilter 等。
-   * 邏輯：經辦登入時，用 EXISTS (SELECT 1 FROM WORKFLOW_MGMT_USERS WHERE USERID = @USERID AND QUEUEID = A.QUEUEID) 來過濾該員能看到的案子。
- * EDD 審查防呆檢查：
-   * EDD_SaveAnswerBatchStatus、EDD_CheckUserPermissionForCase。
-   * 邏輯：送出 EDD 產權或問卷時，防呆驗證登入者在 WORKFLOW_MGMT_USERS 裡面是否具備 Maker (1) 或 Checker (2~4) 身分。
-關鍵安全結論
-在現有架構下，唯一會主動殺掉 WORKFLOW_MGMT_USERS 資料的只有兩處：
- * WORKFLOW_AutomatedUSERS 系列排程：但因為你在新增時設定了 IsAutomated = 'FALSE'，這支排程會直接放行跳過。
- * Workflow_ResetForDeletedUsers：只有在主表 dbo.UserAccounts 將該員帳號刪除（離職流程）時，才會真正清除此人員的權限。
+權限異動 SP 核心重點
+真正的權限異動只由以下 4 支 SP 負責：
+ * WORKFLOW_MGMT_SAVUSERS（後台 UI 存檔）
+   管理員在畫面新增／修改權限時執行，直接寫入 WORKFLOW_MGMT_USERS。
+ * Workflow_ResetForDeletedUsers（離職清理）
+   當同仁從主帳號表（UserAccounts）被刪除時執行，會清空該員所有工作群組權限並將未結案件退回關卡池。
+ * WORKFLOW_MGMT_DELQUEUEINFO（群組清空）
+   管理者刪除整個工作群組（Queue）時，清空底下所有人員。
+ * WORKFLOW_MGMT_SAVQUEUEINFO（歷程留痕）
+   修改群組時備份當前人員名單至 WORKFLOW_MGMT_USERS_HISTORY 與 Log 表。
+核心結論
+其餘所有 SP（如 %_GetAssignSupervisor、%_GetByFilter 等）都是純查詢（Read-only）。只要帳號沒有在 UserAccounts 被刪除、且新增時有設定 IsAutomated = 'FALSE'，權限就絕對不會被任何 SP 自動洗掉。
