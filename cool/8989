@@ -1,21 +1,144 @@
--- 1. 查詢 DJ_Entity 各條件筆數
+/*
+TC-01：新增死亡名單
+*/
+\
+-- Before   自建名單表 OFAC_SPEC（GROUPID=5）原僅有 1 筆資料。
+SELECT * FROM  OFAC_SPEC  WHERE GROUPID = '5'  
+SELECT count(*) FROM  OFAC_SPEC  WHERE GROUPID = '5'  
+-- 系統內屬於「死亡名單」及「Japanese Finance」之資料筆數為 0 筆。   
 SELECT 
-    COUNT(CASE WHEN FullName LIKE '%ハリール%' THEN 1 END) AS [FullName_ハリール],
-    COUNT(CASE WHEN FullName LIKE '%アフメド%' THEN 1 END) AS [FullName_アフメド],
-    COUNT(CASE WHEN FullName LIKE '%ハッカーニ%' THEN 1 END) AS [FullName_ハッカーニ],
-    COUNT(CASE WHEN FullName LIKE '%Khalil ur Rahman Haqqani%' THEN 1 END) AS [FullName_Like_Khalil_ur_Rahman_Haqqani],
-    COUNT(CASE WHEN FullName = 'Khalil Al-Rahman Haqqani' THEN 1 END) AS [FullName_Equal_Khalil_Al-Rahman_Haqqani],
-    COUNT(CASE WHEN FullName = 'Khalil ur Rahman Haqqani' THEN 1 END) AS [FullName_Equal_Khalil_ur_Rahman_Haqqani],
-    COUNT(CASE WHEN FullName = 'Khaleel Haqqani' THEN 1 END) AS [FullName_Equal_Khaleel_Haqqani]
-FROM BSADB.dbo.DJ_Entity;
+count(*)
+FROM BSADBJP..OFAC_SPEC F
+JOIN BSADB.dbo.DJ_Entity A WITH (NOLOCK)    ON A.FullName = F.spec_name
+JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK)    ON A.EntityId = B.EntityId
+JOIN BSADBJP..BlackListData H    ON F.spec_name = H.sdn_name
+WHERE A.Deceased = 0   AND B.SanctionListReference LIKE '%Japanese Finance%' AND GROUPID = '5'
+-- 執行姓名檢核模擬測試，相關條件未命中。  
+SELECT 
+A.FullName,
+A.Deceased,
+B.EntityId,
+B.SanctionListReference
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK)    ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1  AND A.FullName = 'Bortsov, Nikolay Ivanovich'   AND B.SanctionListReference LIKE '%Japanese Finance%' 
 
--- 2. 查詢 DJ_List_Data_A 各條件筆數
+
+-- After 
+-- OFAC_SPEC（GROUPID=5）資料筆數更新為 72,086 筆。
+SELECT * FROM  OFAC_SPEC  WHERE GROUPID = '5'  
+SELECT count(*) FROM  OFAC_SPEC  WHERE GROUPID = '5'  
+--  「死亡名單」及「Japanese Finance」相關資料成功新增至 508 筆。
 SELECT 
-    COUNT(CASE WHEN SdnName LIKE '%ハリール%' THEN 1 END) AS [SdnName_ハリール],
-    COUNT(CASE WHEN SdnName LIKE '%アフメド%' THEN 1 END) AS [SdnName_アフメド],
-    COUNT(CASE WHEN SdnName LIKE '%ハッカーニ%' THEN 1 END) AS [SdnName_ハッカーニ],
-    COUNT(CASE WHEN SdnName LIKE '%Khalil ur Rahman Haqqani%' THEN 1 END) AS [SdnName_Like_Khalil_ur_Rahman_Haqqani],
-    COUNT(CASE WHEN SdnName = 'Khalil ur Rahman Haqqani' THEN 1 END) AS [SdnName_Equal_Khalil_ur_Rahman_Haqqani],
-    COUNT(CASE WHEN SdnName = 'Khaleel Haqqani' THEN 1 END) AS [SdnName_Equal_Khaleel_Haqqani],
-    COUNT(CASE WHEN SdnName = 'Khalil Al-Rahman Haqqani' THEN 1 END) AS [SdnName_Equal_Khalil_Al-Rahman_Haqqani]
-FROM BSADB.dbo.DJ_List_Data_A;
+count(*)
+FROM BSADBJP..OFAC_SPEC F
+JOIN BSADB.dbo.DJ_Entity A WITH (NOLOCK)    ON A.FullName = F.spec_name
+JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK)    ON A.EntityId = B.EntityId
+JOIN BSADBJP..BlackListData H    ON F.spec_name = H.sdn_name
+WHERE A.Deceased = 1   AND B.SanctionListReference LIKE '%Japanese Finance%' AND GROUPID = '5'
+ 
+
+/*
+TC-03：名單同步完整性驗證（無漏網名單）
+交叉比對來源檔（一般制裁 + 死亡名單）與目標表 OFAC_SPEC（GROUPID=5）。
+最新名單已 100% 完整寫入，有效狀態標記正確（DInd = 'N'），漏缺異常筆數為 0 筆，符合預期。
+
+*/
+ ;WITH SourceEntities AS
+(
+    SELECT A.EntNum AS EntityId, A.SdnName
+    FROM BSADB.dbo.DJ_List_Data_A A
+    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
+    WHERE (A.NamePropertyBitCode & 1) > 0
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+
+    UNION
+
+    SELECT A.EntityId, A.FullName AS SdnName
+    FROM BSADB.dbo.DJ_Entity A
+    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+    WHERE A.Deceased = 1
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+)
+SELECT 
+    COUNT(1) AS [異常筆數 (預期為 0)]
+FROM SourceEntities S
+LEFT JOIN BSADBJP..OFAC_SPEC T 
+       ON T.GROUPID = 5 
+      AND T.spec_name = S.SdnName 
+      AND T.remark = CAST(S.EntityId AS VARCHAR(100))
+WHERE T.ent_num IS NULL 
+   OR T.DInd <> 'N';
+
+
+
+
+ /*
+TC-04：名單下架與刪除驗證（無幽靈名單）
+檢查來源檔已移除/除名之舊名單，在目標表中的狀態轉換。
+已不在來源中的舊資料皆已正確更新為刪除/停用狀態（DInd = 'Y'），無殘留有效資料，異常筆數為 0 筆，符合預期。
+
+ */
+;WITH SourceEntities AS
+(
+    SELECT A.EntNum AS EntityId, A.SdnName
+    FROM BSADB.dbo.DJ_List_Data_A A
+    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
+    WHERE (A.NamePropertyBitCode & 1) > 0
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+
+    UNION
+
+    SELECT A.EntityId, A.FullName AS SdnName
+    FROM BSADB.dbo.DJ_Entity A
+    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+    WHERE A.Deceased = 1
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+)
+SELECT 
+    COUNT(1) AS [異常筆數 (預期為 0)]
+FROM BSADBJP..OFAC_SPEC T
+LEFT JOIN SourceEntities S        ON T.spec_name = S.SdnName       AND T.remark = CAST(S.EntityId AS VARCHAR(100))
+WHERE T.GROUPID = 5 
+  AND T.DInd = 'N'  AND S.EntityId IS NULL;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ /*
+    NMCHK 結果
+*/
+-- 姓名檢核審核主表（存放案件 UID、狀態、關卡 Role、負責人 HandledBy 等）
+SELECT * FROM NMCHK_Review_Main   WHERE Created_Date  >'2026-09-03' 
+
+-- 檢核比對結果歷程表（透過 NamePropertyBitCode & 1 = 1 判斷是否命中黑名單）  NamePropertyBitCode
+SELECT a.NamePropertyBitCode,* FROM NMCHK_ResultHistory  a
+JOIN NMCHK_Review_Main b on a.uid  = b.uid
+WHERE b.Created_Date  >'2026-09-03'  AND b.uid = '2026179'
+
+-- 查詢客戶基本資訊與來源指標（Source_IND）   NMCHK_CustInfo
+SELECT * FROM NMCHK_CustInfo  a
+JOIN NMCHK_Review_Main b on a.uid  = b.uid
+WHERE b.Created_Date  >'2026-09-02' 
+
+-- 核心紀錄表，存放審核備註、動作代碼、角色與更新時間等歷程資料。  NMCHK_REMARKLOG
+SELECT * FROM  NMCHK_REMARKLOG  a
+JOIN NMCHK_Review_Main b on a.uid  = b.uid
+WHERE b.Created_Date  >'2026-09-02' 
+
+
+
+
+--------------
+
+我要給user 驗收項目及說明要寫什麼?
