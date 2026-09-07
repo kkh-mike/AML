@@ -1,6 +1,113 @@
-SELECT 
-    OBJECT_SCHEMA_NAME(referencing_id) AS SchemaName,
-    OBJECT_NAME(referencing_id) AS ProcedureName
-FROM sys.sql_expression_dependencies
-WHERE referenced_entity_name = 'WORKFLOW_MGMT_ROLE'
-  AND OBJECTPROPERTY(referencing_id, 'IsProcedure') = 1;
+DBCHK_GetDBCHKRemarkLog
+FLRS_GetFLRSRemarkLog
+OUTSOURCE_GetOUTSOURCERemarkLog
+SWIFT_GetSWIFTRemarkLog
+SAR_GetSARRemarkLog
+OFAC_314A_Automatic_GetReconciliationRpt
+OFAC_314A_Automatic_GetResultFilter
+OFAC_314A_Automatic_GetRemarkLog
+ForeignTransaction_GetForeignTransactionRemarkLog
+FedWire_GetFedWireRemarkLog
+FedWire_GETReconciliationRpt
+NMCHK_GetNMCHKRemarkLog
+FedWire_GetFedWireByFilter
+DBCHK_GetResultFilter
+OFAC_314A_GetRemarkLog
+TradeFin_GetTradeFinByFilter
+TradeFin_GetReconciliationRpt
+WLCONFIG_MakerCheckerLogRpt
+SAR_GETSARLOG
+TradeFin_PROCESSEMAIL
+SWIFTMX_GETReconciliationRpt
+TradeFin_GetReviewRemark
+SDS_GetLogRecords
+CASEDETECTOR_PROCESSEMAIL
+WORKFLOW_AutomatedUSERS
+TradeFin_GetTradeFinLog
+HRS_GetHRSByFilter
+CASEDETECTOR_PROCESSEMAIL_AutoDone
+MSGDETECTOR_PROCESSBATCHSTATISTIC
+DBCHK_GetDBCHKRole
+DBCHK_GETDIAGRAM
+SWIFTMX_GetMessageList
+SWIFTMX_GetHistoryMessageList
+FedWire_GETFedWireLOG
+DWire_GetNameMatchRpt
+SWIFT_GetActionDetail
+DBCHK_InsertReviewMain2
+HRS_GETHRSLOG
+HRS_GetHRSRemark
+HRS_GetHRSRole
+OFAC_314A_Automatic_Get314ARole
+OFAC_314A_Automatic_GetActionDetail
+DWire_GetReconciliationRpt
+DWire_GetAssignSupervisor
+CIP_GetCasesPerformanceRpt
+TradeFin_GetTradeFinRemarkLog
+CIP_GETReconciliationRpt
+OFAC_314A_Automatic_GetDiagram
+DWire_GetRemarkLog
+NMCHK_GetResultFilter
+CIP_GetCIPByFilter
+DWire_GetReviewAdvancedCaseAssignment
+DWire_GetReviewHistory
+SWIFT_GETReconciliationRpt
+DWire_GetReviewPersonalQueue
+HRS_GetHRSRemarkLog
+SWIFTMX_GetMakerCheckerLog
+DWire_GetRoleForUser
+SWIFTMX_GetHandledBy
+WLCONFIG_GetMakerCheckerLog
+SAR_RptAllDetails_Part1
+NMCHK_GetActionDetail
+CIP_GETCIPLOG
+NMCHK_GETDIAGRAM
+Fedwire_GetActionDetail
+UserDashboard_GetQueueStatistic
+SWIFT_GETNameMatchRpt
+DBCHK_GetResultFilter
+OFAC_314A_Automatic_GetAssignSupervisor
+Outsource_GetActionDetail
+DBCHK_GetActionDetail
+CIP_GetAssignSupervisor
+DBCHK_GetAssignSupervisor
+SWIFT_GetRptCaseStatisticSub
+FEDWIRE_GetAssignSupervisor
+SWIFT_GETSWIFTLOG
+FLRS_GetAssignSupervisor
+ForeignTransaction_GetAssignSupervisor
+WlConfig_GetWlReviewExemptionLog
+HRS_GetAssignSupervisor
+GetQueueAndActionSettings
+NMCHK_GetAssignSupervisor
+OUTSOURCE_GetAssignSupervisor
+SAR_GetAssignSupervisor
+SWIFT_ProcessMail_Branch
+Workflow_Mgmt_GetActionSettingsByQueue
+SWIFT_GetAssignSupervisor
+FLRS_GetActionDetail
+Workflow_Mgmt_GetActionSettingsByQueueAndRole
+TradeFin_GetAssignSupervisor
+CIP_GetCIPRemarkLog
+Workflow_Mgmt_GetDefaultActionSettings
+TradeFin_GetRole
+DWire_GetReviewMainResult
+ServerAdmin_GetWorkgroupActionSettingsRpt
+TradeFin_GetTradeFinByFilter
+DBCHK_GETReconciliationRpt
+NMCHK_GETReconciliationRpt
+DWire_PROCESSEMAIL
+DWire_GetDiagramByTransId
+
+
+------
+SELECT * FROM   WORKFLOW_MGMT_ROLE
+
+ID	FLAG	ROLE_DESC	ROLE_DESC_zh_TW
+1	N	Operator - Maker	經辦
+2	N	Operator - Checker	主管
+3	N	AML Officer - Checker 1	第三層審查人員
+4	N	AML Officer - Checker 2	第四層審查人員
+
+
+我是要找到有哪個userid 是對應到checker 怎麼找
