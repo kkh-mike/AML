@@ -1,144 +1,26 @@
-/*
-TC-01：新增死亡名單
-*/
-\
--- Before   自建名單表 OFAC_SPEC（GROUPID=5）原僅有 1 筆資料。
-SELECT * FROM  OFAC_SPEC  WHERE GROUPID = '5'  
-SELECT count(*) FROM  OFAC_SPEC  WHERE GROUPID = '5'  
--- 系統內屬於「死亡名單」及「Japanese Finance」之資料筆數為 0 筆。   
-SELECT 
-count(*)
-FROM BSADBJP..OFAC_SPEC F
-JOIN BSADB.dbo.DJ_Entity A WITH (NOLOCK)    ON A.FullName = F.spec_name
-JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK)    ON A.EntityId = B.EntityId
-JOIN BSADBJP..BlackListData H    ON F.spec_name = H.sdn_name
-WHERE A.Deceased = 0   AND B.SanctionListReference LIKE '%Japanese Finance%' AND GROUPID = '5'
--- 執行姓名檢核模擬測試，相關條件未命中。  
-SELECT 
-A.FullName,
-A.Deceased,
-B.EntityId,
-B.SanctionListReference
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK)    ON A.EntityId = B.EntityId
-WHERE A.Deceased = 1  AND A.FullName = 'Bortsov, Nikolay Ivanovich'   AND B.SanctionListReference LIKE '%Japanese Finance%' 
-
-
--- After 
--- OFAC_SPEC（GROUPID=5）資料筆數更新為 72,086 筆。
-SELECT * FROM  OFAC_SPEC  WHERE GROUPID = '5'  
-SELECT count(*) FROM  OFAC_SPEC  WHERE GROUPID = '5'  
---  「死亡名單」及「Japanese Finance」相關資料成功新增至 508 筆。
-SELECT 
-count(*)
-FROM BSADBJP..OFAC_SPEC F
-JOIN BSADB.dbo.DJ_Entity A WITH (NOLOCK)    ON A.FullName = F.spec_name
-JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK)    ON A.EntityId = B.EntityId
-JOIN BSADBJP..BlackListData H    ON F.spec_name = H.sdn_name
-WHERE A.Deceased = 1   AND B.SanctionListReference LIKE '%Japanese Finance%' AND GROUPID = '5'
- 
-
-/*
-TC-03：名單同步完整性驗證（無漏網名單）
-交叉比對來源檔（一般制裁 + 死亡名單）與目標表 OFAC_SPEC（GROUPID=5）。
-最新名單已 100% 完整寫入，有效狀態標記正確（DInd = 'N'），漏缺異常筆數為 0 筆，符合預期。
-
-*/
- ;WITH SourceEntities AS
-(
-    SELECT A.EntNum AS EntityId, A.SdnName
-    FROM BSADB.dbo.DJ_List_Data_A A
-    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
-    WHERE (A.NamePropertyBitCode & 1) > 0
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-
-    UNION
-
-    SELECT A.EntityId, A.FullName AS SdnName
-    FROM BSADB.dbo.DJ_Entity A
-    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-    WHERE A.Deceased = 1
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-)
-SELECT 
-    COUNT(1) AS [異常筆數 (預期為 0)]
-FROM SourceEntities S
-LEFT JOIN BSADBJP..OFAC_SPEC T 
-       ON T.GROUPID = 5 
-      AND T.spec_name = S.SdnName 
-      AND T.remark = CAST(S.EntityId AS VARCHAR(100))
-WHERE T.ent_num IS NULL 
-   OR T.DInd <> 'N';
-
-
-
-
- /*
-TC-04：名單下架與刪除驗證（無幽靈名單）
-檢查來源檔已移除/除名之舊名單，在目標表中的狀態轉換。
-已不在來源中的舊資料皆已正確更新為刪除/停用狀態（DInd = 'Y'），無殘留有效資料，異常筆數為 0 筆，符合預期。
-
- */
-;WITH SourceEntities AS
-(
-    SELECT A.EntNum AS EntityId, A.SdnName
-    FROM BSADB.dbo.DJ_List_Data_A A
-    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
-    WHERE (A.NamePropertyBitCode & 1) > 0
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-
-    UNION
-
-    SELECT A.EntityId, A.FullName AS SdnName
-    FROM BSADB.dbo.DJ_Entity A
-    JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-    WHERE A.Deceased = 1
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-)
-SELECT 
-    COUNT(1) AS [異常筆數 (預期為 0)]
-FROM BSADBJP..OFAC_SPEC T
-LEFT JOIN SourceEntities S        ON T.spec_name = S.SdnName       AND T.remark = CAST(S.EntityId AS VARCHAR(100))
-WHERE T.GROUPID = 5 
-  AND T.DInd = 'N'  AND S.EntityId IS NULL;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
- /*
-    NMCHK 結果
-*/
--- 姓名檢核審核主表（存放案件 UID、狀態、關卡 Role、負責人 HandledBy 等）
-SELECT * FROM NMCHK_Review_Main   WHERE Created_Date  >'2026-09-03' 
-
--- 檢核比對結果歷程表（透過 NamePropertyBitCode & 1 = 1 判斷是否命中黑名單）  NamePropertyBitCode
-SELECT a.NamePropertyBitCode,* FROM NMCHK_ResultHistory  a
-JOIN NMCHK_Review_Main b on a.uid  = b.uid
-WHERE b.Created_Date  >'2026-09-03'  AND b.uid = '2026179'
-
--- 查詢客戶基本資訊與來源指標（Source_IND）   NMCHK_CustInfo
-SELECT * FROM NMCHK_CustInfo  a
-JOIN NMCHK_Review_Main b on a.uid  = b.uid
-WHERE b.Created_Date  >'2026-09-02' 
-
--- 核心紀錄表，存放審核備註、動作代碼、角色與更新時間等歷程資料。  NMCHK_REMARKLOG
-SELECT * FROM  NMCHK_REMARKLOG  a
-JOIN NMCHK_Review_Main b on a.uid  = b.uid
-WHERE b.Created_Date  >'2026-09-02' 
-
-
-
-
---------------
-
-我要給user 驗收項目及說明要寫什麼?
+【驗收項目與驗證說明】
+一、 驗收範圍與項目總覽
+| 項次 | 測試案例 (Test Case) | 驗收重點 / 預期結果 |
+|---|---|---|
+| TC-01 | 新增死亡名單機制驗證 | 死亡名單資料能正確轉入自建名單（GROUPID=5），筆數符合預期。 |
+| TC-03 | 名單同步完整性驗證 (無漏網) | 來源資料（一般制裁 + 死亡名單）100% 寫入目標表，無遺漏。 |
+| TC-04 | 名單下架除名驗證 (無幽靈) | 來源已除名之名單，目標表狀態能正確標記為失效停用（DInd = 'Y'）。 |
+| TC-05 | 姓名檢核（NMCHK）命中功能驗證 | 輸入死亡名單進行掃描比對時，系統能正常觸發黑名單命中並立案。 |
+二、 各項目詳細說明與驗證方式
+1. TC-01：自建名單匯入與死亡名單新增
+ * 業務說明：驗證系統能將 Dow Jones 中屬於「Japanese Finance」且標記為「死亡名單（Deceased=1）」之對象，自動新增寫入自建名單清單（GROUPID=5）。
+ * 驗收結果：
+   * 匯入前自建名單原僅 1 筆，且死亡名單筆數為 0。
+   * 匯入後目標表（OFAC_SPEC）總筆數更新為 72,086 筆，其中 Japanese Finance 死亡名單成功新增 508 筆。
+2. TC-03：名單同步完整性（無漏網名單）
+ * 業務說明：交叉比對來源端（一般制裁清單 + 死亡名單）與目標端自建名單表，確認無資料丟失。
+ * 驗收結果：比對結果差異筆數為 0 筆，所有來源名單皆 100% 寫入目標表，且有效狀態均標記為有效（DInd = 'N'）。
+3. TC-04：名單除名與下架同步（無幽靈名單）
+ * 業務說明：驗證若來源端移除或除名之舊資料，系統能否正確將其下架，避免持續殘留誤判。
+ * 驗收結果：已不在來源端的舊資料均自動標記為停用（DInd = 'Y'），異常殘留之有效名單為 0 筆，符合下架邏輯。
+4. TC-05：姓名檢核（NMCHK）掃描命中與案件建立
+ * 業務說明：驗證業務端以特定死亡名單對象進行姓名檢核比對時，系統功能是否能正常運作。
+ * 驗收結果：
+   * 立案檢核：案件能正常於審核主表（NMCHK_Review_Main）建立並分派關卡。
+   * 黑名單命中：歷程表（NMCHK_ResultHistory）正確標記命中制裁黑名單（NamePropertyBitCode & 1 = 1）。
+   * 客戶資訊與日誌：客戶資訊（CustInfo）及歷程動作日誌（REMARKLOG）均完整記錄軌跡。
