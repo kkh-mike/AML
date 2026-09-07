@@ -1,8 +1,54 @@
-資料表核心職責簡表
- * WORKFLOW_MGMT_USERS（作業人員對應表）
-   * 重點：記錄「誰」在哪個「工作群組」扮演什麼「角色」。
-   * 來源：由排程定期從人事表（GCMAINDB.dbo.AutomatedEmployees）同步。
- * WORKFLOW_MGMT_QUEUE（工作群組清單）
-   * 重點：定義作業關卡與業務佇列（如 0900 CIP、匯款審查等）。
- * WORKFLOW_MGMT_ROLE（審查層級字典表）
-   * 重點：定義簽核權限等級（1: 經辦、2: 主管覆核、3~4: AML 高階審查人員）。
+要保證資料不會被排程洗掉，最標準且不破壞系統機制的方法是將自己寫入排程的「來源資料表」。
+根據你前面截圖中的預存程序 WORKFLOW_AutomatedUSERS，排程同步的核心邏輯是：
+> 讀取 GCMAINDB.dbo.AutomatedEmployees 寫入暫存表，比對後更新/覆蓋本機表。
+> 
+因此，只要來源表有你的資料，每次排程執行時只會自動把你重新加進去，絕對不會被洗掉。
+步驟 1：先查看來源表需要填哪些欄位與格式
+執行以下查詢，參考別人是怎麼設定的：
+SELECT TOP 3 * 
+FROM GCMAINDB.dbo.AutomatedEmployees 
+WHERE BANKNO = REPLACE(DB_NAME(), 'BSADB', '');
+
+特別注意以下幾個關鍵欄位的填法：
+ * CN：通常是員工編號（例如 '1141923'）
+ * WORKGROUP：工作群組名稱（必須與 dbo.WORKFLOW_MGMT_QUEUE.QUEUENAME 完全一致，例如 '0900 CIP'）
+ * ROLE：角色代碼（1: 經辦、2: 主管/Checker）
+ * BANKNO：當前分行/資料庫代號（直接用 REPLACE(DB_NAME(), 'BSADB', '') 帶入即可）
+ * 狀態標記欄位（如 DEL_FLAG 或 IS_ACTIVE，通常填 'N' 或 'Y'）
+步驟 2：直接寫入來源表 GCMAINDB.dbo.AutomatedEmployees
+確認欄位後，使用 INSERT 將自己加入來源表：
+INSERT INTO GCMAINDB.dbo.AutomatedEmployees (
+    CN,
+    WORKGROUP,
+    ROLE,
+    BANKNO,
+    BRANCH,         -- 若無分行代碼可給 '' 或 NULL (依步驟1查詢結果填寫)
+    DEL_FLAG        -- 若該表有刪除標記欄位，通常填 'N'
+    -- 依步驟 1 檢查是否有其他 NOT NULL 欄位需補齊
+)
+VALUES (
+    '1141923',
+    '0900 CIP',                                  -- 替換為你的目標群組名稱
+    2,                                           -- 1:經辦 / 2:主管(Checker)
+    REPLACE(DB_NAME(), 'BSADB', ''),             -- 自動帶入當前庫的 BANKNO
+    '',
+    'N'
+);
+
+步驟 3：立即驗證與手動觸發同步
+寫入來源表後，手動執行一次同步 SP，看看本機表有沒有順利被更新：
+-- 1. 手動執行同步排程
+EXEC dbo.WORKFLOW_AutomatedUSERS;
+
+-- 2. 驗證本機表是否成功建立
+SELECT 
+    q.QUEUENAME AS WorkGroup,
+    u.USERID,
+    u.ROLE AS ROLE_ID,
+    r.ROLE_DESC_zh_TW
+FROM dbo.WORKFLOW_MGMT_USERS u
+JOIN dbo.WORKFLOW_MGMT_QUEUE q ON u.QUEUEID = q.QUEUEID
+JOIN dbo.WORKFLOW_MGMT_ROLE r ON u.ROLE = r.ID
+WHERE u.USERID = '1141923';
+
+只要這裡能查出資料，未來不論排程跑多少次，資料都會被完整保留。
