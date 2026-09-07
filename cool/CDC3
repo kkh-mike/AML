@@ -1,29 +1,64 @@
-你的測試內容非常完整且邏輯嚴密！目前表格與內文對不上主要是因為：內文其實驗證了 4 個測試案例（TC-01 到 TC-04），但你上方的表格只列了 3 項，且缺少了「TC-03 名單同步完整性驗證」。
-幫你把表格修正為 4 項，並把下方的文字敘述修飾得更工整、專業（修正錯字如「新增厚」→「新增後」），精簡又符合銀行端測試報告的高規格：
-測試個案與結果彙總表
-| 項目 | 交易功能 | 案例說明 | 預期結果 | 驗證結果 |
-|---|---|---|---|---|
-| 1 | 黑名單/受控名單維護 | 新增死亡名單 | 成功匯入並生效，狀態更新為受控且檢核可正常命中 | OK |
-| 2 | 資料完整性檢核 | 既有名單不受影響 | 原有名單筆數與狀態維持不變，檢核持續正常命中 | OK |
-| 3 | 資料同步完整性檢核 | 名單同步驗證（無漏網） | 來源之最新制裁與死亡名單皆完整寫入生效（DInd='N'），差異為 0 筆 | OK |
-| 4 | 名單生命週期維護 | 名單下架與刪除（無幽靈） | 來源已除名之名單皆正確標記停用（DInd='Y'），無殘留生效名單 | OK |
-詳細測試紀錄
-TC-01：新增死亡名單
- * 【Before 執行前】
-   * 自建名單表 OFAC_SPEC（GROUPID=5）原僅有 1 筆資料。
-   * 系統內屬於「死亡名單」及「Japanese Finance」之資料筆數為 0 筆。
-   * 執行姓名檢核模擬測試，相關條件未命中。
- * 【After 執行後】
-   * OFAC_SPEC（GROUPID=5）資料筆數更新為 72,086 筆。
-   * 「死亡名單」及「Japanese Finance」相關資料成功新增至 508 筆。
-   * 再次執行姓名檢核模擬測試，相關條件正常命中，符合預期。
-反向驗證
-TC-02：既有名單不受影響（正常命中）
- * 驗證說明：驗證批次寫入後，系統原本既有的有效名單未遭覆蓋或損壞。
- * 驗證結果：既有名單資料完整，各項比對規則與檢核持續正常命中，符合預期。
-TC-03：名單同步完整性驗證（無漏網名單）
- * 驗證說明：交叉比對來源檔（一般制裁 + 死亡名單）與目標表 OFAC_SPEC（GROUPID=5）。
- * 驗證結果：最新名單已 100% 完整寫入，有效狀態標記正確（DInd = 'N'），漏缺異常筆數為 0 筆，符合預期。
-TC-04：名單下架與刪除驗證（無幽靈名單）
- * 驗證說明：檢查來源檔已移除/除名之舊名單，在目標表中的狀態轉換。
- * 驗證結果：已不在來源中的舊資料皆已正確更新為刪除/停用狀態（DInd = 'Y'），無殘留有效資料，異常筆數為 0 筆，符合預期。
+完整看過這支 SP 後，真相大白了！
+這就是為什麼 922798 在 AutomatedEmployees 是 NULL 卻依然活在系統裡，也是你不會被洗掉的真正關鍵。
+真相解析：SP 到底會刪除誰？
+請看程式碼第 68 行與第 121 行的 MERGE 刪除邏輯：
+WHEN NOT MATCHED BY SOURCE AND MergeTarget.IsAutomated = 'TRUE' THEN 
+    /*delete only user created through ADDataImporter*/  
+    DELETE
+
+程式碼裡的註解寫得一清二楚：只刪除 IsAutomated = 'TRUE' 的人！
+ * 自動同步進來的人：SP 會把欄位 IsAutomated 標記為 'TRUE'。如果來源表找不到，SP 就認定此人離職或調組，執行 DELETE。
+ * 人工在畫面建立／手動塞入的人（例如 922798）：IsAutomated 是 NULL 或 'FALSE'。
+ * 因為不符合 MergeTarget.IsAutomated = 'TRUE'，排程執行時會直接跳過、絕對不會刪除！
+正確做法：直接手動 INSERT，設定 IsAutomated = 'FALSE'
+只要手動加進去，並把 IsAutomated 設為 'FALSE'（或留 NULL），排程跑一萬次都不會動到你。
+1. 複製 922798 的所有權限給自己（最快最全面）
+既然 922798 跟你同組且擁有所有權限，直接將他名下的所有 Queue 與角色複製一份給你：
+INSERT INTO dbo.WORKFLOW_MGMT_USERS (
+    QUEUEID, 
+    USERID, 
+    ROLE, 
+    ALERTMAIN, 
+    ALERTPERSONAL, 
+    IsAutomated
+)
+SELECT 
+    QUEUEID, 
+    '1141923', 
+    ROLE, 
+    ALERTMAIN, 
+    ALERTPERSONAL, 
+    'FALSE' -- 關鍵：設為 FALSE，排程 MERGE 時絕對不會刪除你
+FROM dbo.WORKFLOW_MGMT_USERS
+WHERE USERID = '922798'
+  AND NOT EXISTS (
+      SELECT 1 FROM dbo.WORKFLOW_MGMT_USERS 
+      WHERE USERID = '1141923' 
+        AND QUEUEID = dbo.WORKFLOW_MGMT_USERS.QUEUEID 
+        AND ROLE = dbo.WORKFLOW_MGMT_USERS.ROLE
+  );
+
+2. 若只想加入特定組別與特定角色（例如 0900 CIP 的 Checker）
+-- 查出該組的 QUEUEID
+DECLARE @TargetQueueID INT;
+SELECT @TargetQueueID = QUEUEID 
+FROM dbo.WORKFLOW_MGMT_QUEUE 
+WHERE QUEUENAME = '0900 CIP' AND DEL_FLAG = 'N';
+
+-- 寫入自己為 Checker (ROLE = 2)
+INSERT INTO dbo.WORKFLOW_MGMT_USERS (
+    QUEUEID, USERID, ROLE, ALERTMAIN, ALERTPERSONAL, IsAutomated
+)
+VALUES (
+    @TargetQueueID, '1141923', 2, 'Y', 'Y', 'FALSE'
+);
+
+步驟驗證（安心確認）
+ * 執行上方 INSERT 語法。
+ * 手動執行一次排程：
+   EXEC dbo.WORKFLOW_AutomatedUSERS;
+
+ * 再次查詢確認自己是否還在：
+   SELECT * FROM dbo.WORKFLOW_MGMT_USERS WHERE USERID = '1141923';
+
+只要 IsAutomated 不是 'TRUE'，資料就會一直保留在資料庫中。
