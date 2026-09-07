@@ -1,12 +1,97 @@
-Dear [對方名字],
-您好，
-針對您反映的兩點問題，我檢查了轉檔工具，原因如下：
-1. 為什麼 CSV 檔格式會跑掉？
- 原因：目前程式有一個設定是「如果畫面上滑鼠有點選或框選到格子，就只轉出框選的那幾格」。所以只要執行時不小心點到了畫面，匯出的檔案就會缺漏。
- 解法：我會把程式改成「固定轉出整張工作表的所有資料」，以後不管滑鼠點到哪裡都不會再跑掉。
-2. 為什麼別名（邦丸 賢治）只轉出「賢治」？
- 原因：原始檔案的別名分成兩欄（H 欄是姓、I 欄是名），目前程式抓取的位置往右偏了一格，只抓到「名」，漏掉了前面的「姓」。
- 解法：我會重新校對對應的欄位，將「本名、假名、別名、別名假名」這 4 組姓與名都完整合併轉出。
-後續處理：
-這兩處的修改方式已經準備好了。如果確認沒問題，我可以直接修改程式並提供新版本給您，您再用新版跑跑看，驗證結果是否符合預期，您看這樣方便嗎？
-謝謝！
+幫新同仁開通權限的完整標準作業程序（SOP）依序如下：
+第 1 步：確認新同仁是否已有權限（檢查現況）
+先確認該工號是否早已存在或有殘留設定，避免重複操作或狀態錯亂：
+SELECT 
+    q.QUEUENAME AS WorkGroup,
+    u.USERID,
+    u.ROLE AS ROLE_ID,
+    r.ROLE_DESC_zh_TW AS RoleName,
+    u.IsAutomated
+FROM dbo.WORKFLOW_MGMT_USERS u
+JOIN dbo.WORKFLOW_MGMT_QUEUE q ON u.QUEUEID = q.QUEUEID
+JOIN dbo.WORKFLOW_MGMT_ROLE r ON u.ROLE = r.ID
+WHERE u.USERID = '新同仁工號';
+
+ * 有查出資料：表示已有權限，只需補差額或修改。
+ * 查無資料：確認為全新人員，進入第 2 步。
+第 2 步：確認授權需求與範本帳號（確認目標）
+依據新同仁職務，決定授權模式：
+ * 模式 A（全功能權限／IT／測試人員）：直接以現有權限完整同仁（例如 922798）為範本進行整批複製。
+ * 模式 B（一般業務人員）：先查出對方所屬業務群組的 QUEUEID 與指派層級：
+   -- 查出群組名稱與 QUEUEID
+SELECT QUEUEID, QUEUENAME, SRC AS MODULE
+FROM dbo.WORKFLOW_MGMT_QUEUE
+WHERE DEL_FLAG = 'N' AND QUEUENAME LIKE '%業務名稱%'; -- 例如 %CIP%
+
+   * 經辦（初審）使用 ROLE = 1
+   * 主管（覆核）使用 ROLE = 2
+第 3 步：執行寫入並包覆交易（安全執行）
+若選擇模式 A（以現有人員整批複製）：
+BEGIN TRAN;
+
+INSERT INTO dbo.WORKFLOW_MGMT_USERS (
+    QUEUEID, 
+    USERID, 
+    ROLE, 
+    ALERTMAIN, 
+    ALERTPERSONAL, 
+    IsAutomated
+)
+SELECT 
+    QUEUEID, 
+    '新同仁工號', 
+    ROLE, 
+    ALERTMAIN, 
+    ALERTPERSONAL, 
+    'FALSE' -- 關鍵：設為 FALSE，防止被排程洗掉
+FROM dbo.WORKFLOW_MGMT_USERS
+WHERE USERID = '922798' -- 範本帳號
+  AND NOT EXISTS (
+      SELECT 1 FROM dbo.WORKFLOW_MGMT_USERS 
+      WHERE USERID = '新同仁工號' 
+        AND QUEUEID = dbo.WORKFLOW_MGMT_USERS.QUEUEID 
+        AND ROLE = dbo.WORKFLOW_MGMT_USERS.ROLE
+  );
+
+-- 檢查新增成果
+SELECT * FROM dbo.WORKFLOW_MGMT_USERS WHERE USERID = '新同仁工號';
+
+-- 確認筆數無誤後執行 COMMIT TRAN; 有問題執行 ROLLBACK TRAN;
+COMMIT TRAN;
+
+若選擇模式 B（單筆指派特定組別）：
+BEGIN TRAN;
+
+INSERT INTO dbo.WORKFLOW_MGMT_USERS (
+    QUEUEID, USERID, ROLE, ALERTMAIN, ALERTPERSONAL, IsAutomated
+)
+VALUES (
+    1,             -- 替換為第 2 步查到的 QUEUEID
+    '新同仁工號', 
+    1,             -- 1: 經辦 / 2: 主管
+    'Y', 
+    'Y', 
+    'FALSE'        -- 關鍵：設為 FALSE
+);
+
+SELECT * FROM dbo.WORKFLOW_MGMT_USERS WHERE USERID = '新同仁工號';
+
+COMMIT TRAN;
+
+第 4 步：耐受性測試（驗證防洗機制）
+手動觸發排程同步程序，確保新帳號不會被 MERGE ... DELETE 刪除：
+-- 1. 手動觸發同步排程
+EXEC dbo.WORKFLOW_AutomatedUSERS;
+
+-- 2. 再次確認新同仁資料是否依然存在
+SELECT 
+    q.QUEUENAME AS WorkGroup,
+    u.USERID,
+    r.ROLE_DESC_zh_TW AS RoleName,
+    u.IsAutomated
+FROM dbo.WORKFLOW_MGMT_USERS u
+JOIN dbo.WORKFLOW_MGMT_QUEUE q ON u.QUEUEID = q.QUEUEID
+JOIN dbo.WORKFLOW_MGMT_ROLE r ON u.ROLE = r.ID
+WHERE u.USERID = '新同仁工號';
+
+只要第 4 步能查出完整資料，即表示權限建立完成且具備永久耐受性。
