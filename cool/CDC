@@ -1,57 +1,42 @@
-從截圖抓到了兩個關鍵原因，這就是為什麼你的帳號查不到、以及直接改可能會失效的原因：
- * 分行代號（BANKNO）不符：
-   * 當前資料庫是 HK（香港，REPLACE('BSADBHK', 'BSADB', '') = 'HK'）。
-   * 下方你的帳號 1141923 目前登記的 BANKNO 是 TW（台灣）。SP 第一關過濾 A.BANKNO = 'HK' 就直接把你的帳號濾掉了。
- * 工作群組與角色欄位是空的：
-   * 上下兩張圖的 WORKGROUP 與 ROLE 全都是 NULL。這表示 GCMAINDB.dbo.AutomatedEmployees 很可能本身也是被某個人資 AD 排程整批洗寫進來的來源表（若直接在上面 UPDATE 也極可能被上游整批蓋回 NULL）。
-最穩健的解法：在來源表新增一筆「香港 (HK)」專屬記錄
-因為你的帳號本身在 TW，要在當前的 HK 環境使用且不被上游台灣的人事檔覆蓋，直接為你的帳號在 HK 新增一筆記錄：
-INSERT INTO GCMAINDB.dbo.AutomatedEmployees (
-    CN,
-    BANKNO,
-    BRANCH,
-    USERGROUP,
-    WORKGROUP,
-    ROLE,
-    FULLNAME,
-    MODULE,
-    EMAIL
-)
-VALUES (
-    '1141923',
-    'HK',                                   -- 符合當前資料庫的 BANKNO
-    '0900',                                 -- 參考上方 HK 的分行代號
-    '海外事業處香港分行作業組作業三組',        -- 參考上方同組名稱
-    '0900 CIP',                             -- 目標工作群組名稱 (請確保與 WORKFLOW_MGMT_QUEUE 的 QUEUENAME 完全一致)
-    2,                                      -- 角色代碼：2 為 Checker (主管)
-    '高OO',                                 -- 你的姓名
-    NULL,
-    '1141923@tbtmail.com'                   -- 你的 Email
-);
+這張圖抓到了極為關鍵的證據：
+ * 922798 跟你的帳號 1141923 在 AutomatedEmployees 的資料長得一模一樣：
+   * BANKNO 都是 TW
+   * BRANCH 都是 0999AEX
+   * WORKGROUP 與 ROLE 通通都是 NULL
+ * 但 922798 卻在 WORKFLOW_MGMT_USERS 裡面擁有幾乎全部的群組與所有角色（1, 2, 4）。
+這說明了一件事：這套系統有一段「特別邏輯」針對這類管理者/測試帳號開了綠燈，或者後面有另外一段 INSERT 邏輯。
+請回頭看預存程序 WORKFLOW_AutomatedUSERS，往下滑尋找下列兩種關鍵程式碼：
+原因一：SP 後半段有「全開名單」或第二段 INSERT（最有可能）
+請在 WORKFLOW_AutomatedUSERS 裡面搜尋 922798，或往下滑到註解：
+/*Check whether it is the full user list provide*/
+DECLARE @IsFullUserList AS CHAR(1) = ...
 
-> 注意： 若 GCMAINDB.dbo.AutomatedEmployees 有 (CN, BANKNO) 或 (CN, WORKGROUP) 的唯一限制（Unique Constraint），直接新增如果報錯，再改用以下語法修改現有那筆資料測試：
-> UPDATE GCMAINDB.dbo.AutomatedEmployees
-> SET BANKNO = 'HK',
->     BRANCH = '0900',
->     WORKGROUP = '0900 CIP',
->     ROLE = 2
-> WHERE CN = '1141923';
-> 
-> 
-步驟驗證
-執行寫入或更新後，執行以下語法進行同步與驗證：
--- 1. 執行同步預存程序
-EXEC dbo.WORKFLOW_AutomatedUSERS;
+在這一行之後，程式碼通常會寫：
+ * 依據特定群組（如 資訊服務處核心系統部風險管理系統組），或是
+ * 特定的 Hardcode 工號（包含 922798），或是
+ * 某張 Admin 對照表（例如 WORKFLOW_ADMIN_USERS / WORKFLOW_SUPERUSERS），
+直接對所有 QUEUEID 進行 CROSS JOIN，一口氣塞入角色 1、2、4。
+快速驗證：搜尋 SP 內文
+執行以下語法，直接抓出 922798 是怎麼被寫進去的：
+SELECT OBJECT_NAME(id) AS SP_Name, text
+FROM syscomments
+WHERE text LIKE '%922798%';
 
--- 2. 驗證本機表是否成功帶入
-SELECT 
-    q.QUEUENAME AS WorkGroup,
-    u.USERID,
-    u.ROLE AS ROLE_ID,
-    r.ROLE_DESC,
-    r.ROLE_DESC_zh_TW
-FROM dbo.WORKFLOW_MGMT_USERS u
-JOIN dbo.WORKFLOW_MGMT_QUEUE q ON u.QUEUEID = q.QUEUEID
-JOIN dbo.WORKFLOW_MGMT_ROLE r ON u.ROLE = r.ID
-WHERE u.USERID = '1141923';
+或者直接檢查這支 SP 後續的所有 INSERT：
+-- 查出 WORKFLOW_AutomatedUSERS 完整內文看看後半段是怎麼塞資料的
+EXEC sp_helptext 'WORKFLOW_AutomatedUSERS';
 
+如果要在不改 SP 的情況下加上自己
+若不想動 SP，但要享有跟 922798 一模一樣的權限，直接比照 922798 目前在 dbo.WORKFLOW_MGMT_USERS 的所有記錄，直接複製一份給 1141923：
+INSERT INTO dbo.WORKFLOW_MGMT_USERS (QUEUEID, USERID, ROLE, ALERTMAIN, ALERTPERSONAL)
+SELECT QUEUEID, '1141923', ROLE, ALERTMAIN, ALERTPERSONAL
+FROM dbo.WORKFLOW_MGMT_USERS
+WHERE USERID = '922798'
+  AND NOT EXISTS (
+      SELECT 1 FROM dbo.WORKFLOW_MGMT_USERS 
+      WHERE USERID = '1141923' 
+        AND QUEUEID = dbo.WORKFLOW_MGMT_USERS.QUEUEID 
+        AND ROLE = dbo.WORKFLOW_MGMT_USERS.ROLE
+  );
+
+塞入後，先執行一次 EXEC dbo.WORKFLOW_AutomatedUSERS;。如果執行完你的資料沒有消失，就代表這支 SP 的同步邏輯本來就允許這些帳號存在，不會被清掉。
