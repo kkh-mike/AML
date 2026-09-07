@@ -1,105 +1,1155 @@
-這裡為你提供針對 TC-SAN-01 ～ TC-SAN-04 的測試 SQL 腳本（包含測試前造資料/檢查 Before、執行同步 SP，以及執行後驗證 After）：
-TC-SAN-01：全新新增 (INSERT)
--- 【Before 準備與檢查】
--- 1. 確保來源端有符合條件資料 (例: EntityId = 990001)
--- 2. 確保目標表完全無該資料
-DELETE FROM BSADB.dbo.OFAC_GLSpec 
-WHERE GROUPID = 10 AND remark = '990001';
-
--- 3. 檢查來源端具備 Active、制裁清單、19類證件且 Deleted = 0
-SELECT A.EntityId, A.PersonStatus, B.Description2, D.IdentificationType, D.IdentificationNumber, C.UpdatedDate
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_ListCategory B ON A.EntityId = B.EntityId
-JOIN BSADB.dbo.DJ_List_Data_A C ON A.EntityId = C.EntNum
-JOIN BSADB.dbo.DJ_IdentificationTypeInfo D ON A.EntityId = D.EntityId
-WHERE A.EntityId = 990001 AND A.PersonStatus <> 'Inactive' AND B.Deleted = 0 AND D.Deleted = 0;
-
--- 【Action: 執行同步作業】
--- EXEC dbo.Your_Sync_StoredProcedure;
-
--- 【After 結果驗證】
-SELECT 
-    spec_name       AS [預期=證號],
-    remark          AS [預期='990001'],
-    GROUPID         AS [預期=10],
-    DInd            AS [預期='N'],
-    SOURCE          AS [預期='Sanctions IDs'],
-    ADDRESS         AS [預期=證件類型+說明後綴],
-    updated_date    AS [預期=來源端最新UpdatedDate]
-FROM BSADB.dbo.OFAC_GLSpec
-WHERE GROUPID = 10 AND remark = '990001';
-
-TC-SAN-02：重新上架 (UPDATE - DInd = 'Y')
--- 【Before 準備與檢查】
--- 1. 手動將目標表該筆資料壓成下架狀態 (DInd = 'Y')
-UPDATE BSADB.dbo.OFAC_GLSpec
-SET DInd = 'Y', DelDate = GETDATE()
-WHERE GROUPID = 10 AND remark = '990001';
-
--- 2. 確認目標表當前為 DInd = 'Y'
-SELECT remark, spec_name, DInd, updated_date 
-FROM BSADB.dbo.OFAC_GLSpec 
-WHERE GROUPID = 10 AND remark = '990001';
-
--- 【Action: 執行同步作業】
--- EXEC dbo.Your_Sync_StoredProcedure;
-
--- 【After 結果驗證】
-SELECT 
-    remark,
-    spec_name,
-    DInd            AS [預期='N' (還原上架)],
-    DelUserID       AS [預期=NULL],
-    DelDate         AS [預期=NULL],
-    updated_date    AS [預期=更新為來源最新日期]
-FROM BSADB.dbo.OFAC_GLSpec
-WHERE GROUPID = 10 AND remark = '990001';
-
-TC-SAN-03：日期更新 (UPDATE - Date)
--- 【Before 準備與檢查】
--- 1. 目標表存在有效資料 (DInd = 'N')，但 updated_date 設為較舊日期
-UPDATE BSADB.dbo.OFAC_GLSpec
-SET DInd = 'N', updated_date = '20000101'
-WHERE GROUPID = 10 AND remark = '990001';
-
--- 2. 檢查來源端最新日期大於目標表
-SELECT A.EntityId, MAX(C.UpdatedDate) AS Source_UpdatedDate, '20000101' AS Target_UpdatedDate
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_List_Data_A C ON A.EntityId = C.EntNum
-WHERE A.EntityId = 990001
-GROUP BY A.EntityId;
-
--- 【Action: 執行同步作業】
--- EXEC dbo.Your_Sync_StoredProcedure;
-
--- 【After 結果驗證】
-SELECT 
-    remark,
-    spec_name,
-    updated_date    AS [預期=已被更新為來源最新日期(非20000101)],
-    DInd            AS [預期='N']
-FROM BSADB.dbo.OFAC_GLSpec
-WHERE GROUPID = 10 AND remark = '990001';
-
-TC-SAN-04：反向驗證 (不符合條件不寫入)
--- 【Before: 挑選/模擬各項不符條件的測試 EntityId】
--- 990002: Inactive 人員
--- 990003: 非制裁清單 (例如 PEP)
--- 990004: 證件非 19 類 (例如 Local Tax ID)
--- 990005: 來源證件已刪除 (Deleted = 1)
-DELETE FROM BSADB.dbo.OFAC_GLSpec 
-WHERE GROUPID = 10 AND remark IN ('990002', '990003', '990004', '990005');
-
--- 【Action: 執行同步作業】
--- EXEC dbo.Your_Sync_StoredProcedure;
-
--- 【After 結果驗證】
--- 預期筆數必須為 0 (完全查不到任何一筆)
-SELECT 
-    remark AS [不應存在的EntityId], 
-    spec_name, 
-    GROUPID 
-FROM BSADB.dbo.OFAC_GLSpec
-WHERE GROUPID = 10 
-  AND remark IN ('990002', '990003', '990004', '990005');
-
+CREATE PROCEDURE [dbo].[WORKFLOW_AutomatedUSERS]   
+AS  
+BEGIN  
+ DECLARE @MemberName NVARCHAR(100),  
+   @BankNo VARCHAR(10)  
+   
+ DECLARE @UtcNow DATETIME = GETUTCDATE();  
+ DECLARE @BankLocalTime DATETIME = dbo.ConvertToBankLocalTime(@UtcNow);  
+ DECLARE @SystemuserID VARCHAR(100) = 'System Admin'  
+     
+ SELECT @BankNo = REPLACE(DB_NAME(),'BSADB','')  
+   
+ IF OBJECT_ID ('WORKFLOW_MGMT_USERS_temp', 'U') IS NULL  
+  SELECT TOP 1 * INTO WORKFLOW_MGMT_USERS_temp FROM dbo.WORKFLOW_MGMT_USERS   
+ TRUNCATE TABLE WORKFLOW_MGMT_USERS_temp  
+   
+ IF OBJECT_ID ('WORKFLOW_AutomatedDeletedUsers_temp', 'U') IS NULL  
+  CREATE TABLE WORKFLOW_AutomatedDeletedUsers_temp ( QueueId INT, UserId NVARCHAR(60))  
+ TRUNCATE TABLE WORKFLOW_AutomatedDeletedUsers_temp  
+   
+ /*Insert into temp table - active users times the QueueID of current module id*/  
+ INSERT INTO dbo.WORKFLOW_MGMT_USERS_temp  
+   ( QUEUEID ,USERID ,ROLE ,ALERTMAIN , ALERTPERSONAL)  
+ SELECT DISTINCT B.QUEUEID, A.CN, A.ROLE, 'Y', 'Y'  
+ FROM GCMAINDB.dbo.AutomatedEmployees A   
+  JOIN dbo.WORKFLOW_MGMT_QUEUE B ON B.QUEUENAME = A.WORKGROUP AND B.IsAutomated = 'TRUE' AND A.MODULE = B.SRC  
+ WHERE A.BANKNO = @BankNo AND ISNULL(A.BRANCH, '') <> '' AND B.DEL_FLAG = 'N' AND  
+  EXISTS (SELECT 1 FROM dbo.WORKFLOW_MGMT_ROLE D WHERE A.ROLE = D.ID AND D.FLAG = 'N')  
+   
+ DECLARE @TableWorkflowMgmtUsersHistory TABLE (  
+  QUEUEID int NOT NULL,  
+  USERID nvarchar(60) NOT NULL,  
+  ROLE int NOT NULL,  
+  BUFFER nvarchar(5) NULL,  
+  HOLIDAYFROM nvarchar(10) NULL,  
+  HOLIDAYTO nvarchar(10) NULL,  
+  ALERTMAIN nvarchar(1) NULL,  
+  ALERTPERSONAL nvarchar(1) NULL,  
+  ALERTMAIN_FROM datetime NULL,  
+  ALERTMAIN_TO datetime NULL,  
+  ALERTPERSONAL_FROM datetime NULL,  
+  ALERTPERSONAL_TO datetime NULL,  
+  CREATEDBY nvarchar(40) NULL,  
+  CREATEDDT datetime NULL,  
+  CREATEDDT_UTC datetime NULL,  
+  ACTION_CODE varchar(2) NULL   
+ )  
+   
+/*Check whether it is the full user list provide*/  
+DECLARE @IsFullUserList AS CHAR(1) = ''  
+  
+SELECT @IsFullUserList = CTRLVAL FROM dbo.PO_DIMDATA WITH (NOLOCK) WHERE CtrlKey = 'IsFullUserList'   
+  
+IF @IsFullUserList = 'N' /*PARTIAL LIST*/  
+BEGIN  
+ ;WITH cte_WORKFLOW_MGMT_USERS AS (  
+  SELECT A.QUEUEID, A.USERID, A.ROLE, A.BUFFER, A.HOLIDAYFROM, A.HOLIDAYTO, A.ALERTMAIN, A.ALERTPERSONAL,   
+   A.ALERTMAIN_FROM, A.ALERTMAIN_TO, A.ALERTPERSONAL_FROM, A.ALERTPERSONAL_TO, A.IsAutomated  
+  FROM dbo.WORKFLOW_MGMT_USERS A   
+  WHERE EXISTS (SELECT 1 FROM dbo.WORKFLOW_MGMT_QUEUE B WHERE A.QUEUEID = B.QUEUEID AND B.IsAutomated = 'TRUE'  
+    AND EXISTS (SELECT 1 FROM GCMAINDB.dbo.AutomatedEmployees C WHERE B.SRC = C.MODULE)))  
+ MERGE cte_WORKFLOW_MGMT_USERS AS MergeTarget  
+ USING dbo.WORKFLOW_MGMT_USERS_temp AS MergeSource  
+ ON MergeTarget.QUEUEID = MergeSource.QUEUEID AND  
+  MergeTarget.USERID = MergeSource.USERID AND  
+  MergeTarget.ROLE = MergeSource.ROLE  
+ WHEN NOT MATCHED BY TARGET THEN  
+  INSERT ( QUEUEID ,  
+      USERID ,  
+      ROLE ,  
+      ALERTMAIN ,  
+      ALERTPERSONAL ,  
+      IsAutomated  
+    )  
+  VALUES ( MergeSource.QUEUEID ,  
+      MergeSource.USERID ,  
+      MergeSource.ROLE ,  
+      MergeSource.ALERTMAIN ,  
+      MergeSource.ALERTPERSONAL,  
+      'TRUE'  
+    )  
+ WHEN MATCHED AND ISNULL(MergeTarget.IsAutomated, 0) <> 'TRUE' THEN /*update IsAutomated = 1 if the user added screen and exists in ADDataImporter source*/  
+  UPDATE SET MergeTarget.IsAutomated = 'TRUE'  
+ WHEN NOT MATCHED BY SOURCE AND MergeTarget.IsAutomated = 'TRUE' THEN /*delete only user created through ADDataImporter*/  
+  DELETE  
+ OUTPUT   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[QUEUEID] ELSE INSERTED.[QUEUEID] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[USERID] ELSE INSERTED.[USERID] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[ROLE] ELSE INSERTED.[ROLE] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[BUFFER] ELSE INSERTED.[BUFFER] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[HOLIDAYFROM] ELSE INSERTED.[HOLIDAYFROM] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[HOLIDAYTO] ELSE INSERTED.[HOLIDAYTO] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[ALERTMAIN] ELSE INSERTED.[ALERTMAIN] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[ALERTPERSONAL] ELSE INSERTED.[ALERTPERSONAL] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[ALERTMAIN_FROM] ELSE INSERTED.[ALERTMAIN_FROM] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[ALERTMAIN_TO] ELSE INSERTED.[ALERTMAIN_TO] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[ALERTPERSONAL_FROM] ELSE INSERTED.[ALERTPERSONAL_FROM] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[ALERTPERSONAL_TO] ELSE INSERTED.[ALERTPERSONAL_TO] END,  
+  CASE WHEN $ACTION = 'DELETE' THEN '03' ELSE '01' END  
+ INTO @TableWorkflowMgmtUsersHistory ([QUEUEID], [USERID], [ROLE],  
+  [BUFFER], [HOLIDAYFROM], [HOLIDAYTO],  
+  [ALERTMAIN], [ALERTPERSONAL], [ALERTMAIN_FROM], [ALERTMAIN_TO],  
+  [ALERTPERSONAL_FROM], [ALERTPERSONAL_TO], [ACTION_CODE]);   
+END  
+ELSE /*FULL LIST*/  
+BEGIN  
+ ;WITH cte_WORKFLOW_MGMT_USERS AS (  
+  SELECT A.QUEUEID, A.USERID, A.ROLE, A.BUFFER, A.HOLIDAYFROM, A.HOLIDAYTO, A.ALERTMAIN, A.ALERTPERSONAL,   
+   A.ALERTMAIN_FROM, A.ALERTMAIN_TO, A.ALERTPERSONAL_FROM, A.ALERTPERSONAL_TO, A.IsAutomated  
+  FROM dbo.WORKFLOW_MGMT_USERS A   
+ )  
+ MERGE cte_WORKFLOW_MGMT_USERS AS MergeTarget  
+ USING dbo.WORKFLOW_MGMT_USERS_temp AS MergeSource  
+ ON MergeTarget.QUEUEID = MergeSource.QUEUEID AND  
+  MergeTarget.USERID = MergeSource.USERID AND  
+  MergeTarget.ROLE = MergeSource.ROLE  
+ WHEN NOT MATCHED BY TARGET THEN  
+  INSERT ( QUEUEID ,  
+      USERID ,  
+      ROLE ,  
+      ALERTMAIN ,  
+      ALERTPERSONAL ,  
+      IsAutomated  
+    )  
+  VALUES ( MergeSource.QUEUEID ,  
+      MergeSource.USERID ,  
+      MergeSource.ROLE ,  
+      MergeSource.ALERTMAIN ,  
+      MergeSource.ALERTPERSONAL,  
+      'TRUE'  
+    )  
+ WHEN MATCHED AND ISNULL(MergeTarget.IsAutomated, 0) <> 'TRUE' THEN /*update IsAutomated = 1 if the user added screen and exists in ADDataImporter source*/  
+  UPDATE SET MergeTarget.IsAutomated = 'TRUE'  
+ WHEN NOT MATCHED BY SOURCE AND MergeTarget.IsAutomated = 'TRUE' THEN /*delete only user created through ADDataImporter*/  
+  DELETE  
+ OUTPUT  
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[QUEUEID] ELSE INSERTED.[QUEUEID] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[USERID] ELSE INSERTED.[USERID] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[ROLE] ELSE INSERTED.[ROLE] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[BUFFER] ELSE INSERTED.[BUFFER] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[HOLIDAYFROM] ELSE INSERTED.[HOLIDAYFROM] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[HOLIDAYTO] ELSE INSERTED.[HOLIDAYTO] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[ALERTMAIN] ELSE INSERTED.[ALERTMAIN] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[ALERTPERSONAL] ELSE INSERTED.[ALERTPERSONAL] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[ALERTMAIN_FROM] ELSE INSERTED.[ALERTMAIN_FROM] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[ALERTMAIN_TO] ELSE INSERTED.[ALERTMAIN_TO] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[ALERTPERSONAL_FROM] ELSE INSERTED.[ALERTPERSONAL_FROM] END,   
+  CASE WHEN $ACTION = 'DELETE' THEN DELETED.[ALERTPERSONAL_TO] ELSE INSERTED.[ALERTPERSONAL_TO] END,  
+  CASE WHEN $ACTION = 'DELETE' THEN '03' ELSE '01' END  
+ INTO @TableWorkflowMgmtUsersHistory ([QUEUEID], [USERID], [ROLE],  
+  [BUFFER], [HOLIDAYFROM], [HOLIDAYTO],  
+  [ALERTMAIN], [ALERTPERSONAL], [ALERTMAIN_FROM], [ALERTMAIN_TO],  
+  [ALERTPERSONAL_FROM], [ALERTPERSONAL_TO], [ACTION_CODE]);  
+END  
+  
+BEGIN  
+ /*insert deleted users into WORKFLOW_MGMT_USERS_HISTORY*/  
+ INSERT INTO dbo.WORKFLOW_MGMT_USERS_HISTORY ([QUEUEID], [USERID], [ROLE],  
+  [BUFFER], [HOLIDAYFROM], [HOLIDAYTO],  
+  [ALERTMAIN], [ALERTPERSONAL], [ALERTMAIN_FROM], [ALERTMAIN_TO],  
+  [ALERTPERSONAL_FROM], [ALERTPERSONAL_TO])  
+ SELECT [QUEUEID], [USERID], [ROLE],  
+  [BUFFER], [HOLIDAYFROM], [HOLIDAYTO],  
+  [ALERTMAIN], [ALERTPERSONAL], [ALERTMAIN_FROM], [ALERTMAIN_TO],  
+  [ALERTPERSONAL_FROM], [ALERTPERSONAL_TO]   
+ FROM @TableWorkflowMgmtUsersHistory  
+ --WHERE ACTION_CODE = '03'  
+   
+ INSERT INTO dbo.WORKFLOW_AutomatedDeletedUsers_temp (QueueId, UserId)  
+ SELECT QUEUEID, USERID  
+ FROM @TableWorkflowMgmtUsersHistory  
+ WHERE ACTION_CODE = '03'  
+   
+ /*Clear Queue Access for deleted user*/  
+ DELETE A FROM dbo.WORKFLOW_MGMT_QUEUEACCESS A   
+ WHERE EXISTS(SELECT 1 FROM dbo.WORKFLOW_AutomatedDeletedUsers_temp B WHERE A.USERID = B.UserId AND A.QUEUEID = B.QueueId)   
+   
+ /*Grant permission for new BankAdmin for all workflow Queue*/  
+ INSERT INTO dbo.WORKFLOW_MGMT_QUEUEACCESS ( QUEUEID, USERID )  
+ SELECT B.QUEUEID, A.cn FROM GCMAINDB.dbo.CTCBBankAdmins A, dbo.WORKFLOW_MGMT_QUEUE B   
+ WHERE A.IsNew = 1 AND NOT EXISTS(SELECT 1 FROM dbo.WORKFLOW_MGMT_QUEUEACCESS C WHERE C.QUEUEID = B.QUEUEID AND C.USERID = A.cn)  
+    
+ /*****************RESET CASE****************************/  
+   
+ ------------------Start SWIFT -----------------  
+ INSERT INTO dbo.SWIFT_MT_LOG ( MT_KEY, [ACTION], [ROLE], [STATUS], HANDLEDBY, QUEUEID, DESCR, LSTUPD_DATE, LSTUPD_USERID,   
+        LSTUPD_USERROLE, LSTUPD_DATE_UTC )  
+ SELECT A.MT_KEY, 11, 1, 1, NULL, A.QueueID, null, @BankLocalTime, @SystemuserID,   
+   NULL, @UtcNow  
+ from dbo.SWIFT_MTHEADER_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId WHERE A.[Status] <> '3'  
+   
+ INSERT INTO dbo.SWIFT_RemarkLog ( MT_KEY, Role, HandledBy, Action, Remark, CreatedBy, Created_Date, UpdatedBy,  
+  Updated_Date, Created_Date_UTC,Updated_Date_UTC )  
+ SELECT MT_KEY, 1, NULL, 11, Remark, NULL , Created_Date, @SystemuserID,   
+  @BankLocalTime, Created_Date_UTC, @UtcNow   
+ FROM dbo.SWIFT_MTHEADER_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId WHERE A.[Status] <> '3'  
+    
+ UPDATE A   
+ SET A.HandledBy = NULL, A.[Status] = '1', A.[ROLE] = 1, A.[ACTION] = 11,  
+  A.ReleaseBy = NULL,A.ReleaseDate = NULL, A.ReleaseBy_2 = NULL, A.ReleaseDate_2 = NULL, A.ReleaseBy_3 = NULL,  
+  A.ReleaseDate_3 = NULL, A.ReleaseBy_4 = NULL, A.ReleaseDate_4 = NULL, A.RejectBy = NULL, A.RejectDate = NULL, A.RejectBy_2 = NULL,  
+  A.RejectDate_2 = NULL, A.RejectBy_3 = NULL, A.RejectDate_3 = NULL, A.RejectBy_4 = NULL, A.RejectDate_4 = NULL,  
+  A.Last_Upd_Date = @BankLocalTime, A.Last_Upd_Date_UTC = @UtcNow, A.Last_Upd_UserId = @SystemuserID  
+ OUTPUT INSERTED.MT_KEY, INSERTED.CLIENT_MSG_TYPE_CODE,INSERTED.BNK_NBR, INSERTED.ApplicationID, INSERTED.ServiceID,INSERTED .BankCode, INSERTED.CountryCode, INSERTED.LocationCode,  
+  INSERTED.LogicalTerminalCode, INSERTED.BranchCode,INSERTED.SessionNumber, INSERTED.SequenceNumber,INSERTED.IO_Identifier, INSERTED.MessageType,INSERTED.ReceiverAddress, INSERTED.MessagePriority,  
+  INSERTED.DeliveryMonitoring,INSERTED.ObsolescencePeriod, INSERTED.InputTime, INSERTED.MIR,INSERTED.FORMAT, INSERTED.DIRECTION, INSERTED.OutputDate, INSERTED.OutputTime, INSERTED.Created_Date, INSERTED.Created_UserId,   
+  INSERTED.Last_Upd_Date,INSERTED.Last_Upd_UserId, INSERTED.HandledBy, INSERTED.Status, INSERTED.Action, INSERTED.Role, INSERTED.QueueID, INSERTED.EmailID,INSERTED.LastEmailDate, INSERTED.Detected, INSERTED.HoldBy,INSERTED.AssignBy, INSERTED.AssignDate, 
+INSERTED.ReleaseBy,  
+  INSERTED.ReleaseDate, INSERTED.ReleaseBy_2,INSERTED.ReleaseDate_2, INSERTED.ReleaseBy_3,INSERTED.ReleaseDate_3, INSERTED.ReleaseBy_4,INSERTED.ReleaseDate_4, INSERTED.RejectBy, INSERTED.RejectDate, INSERTED.RejectBy_2,   
+  INSERTED.RejectDate_2,INSERTED.RejectBy_3, INSERTED.RejectDate_3, INSERTED.RejectBy_4, INSERTED.RejectDate_4, INSERTED.Msg_sender_id, INSERTED.Msg_receiver_id, INSERTED.EmailID_ThirdParty,  
+  INSERTED.LastEmailDate_ThirdParty,INSERTED.Receiver_BankCode,INSERTED.Receiver_CountryCode, INSERTED.Receiver_LocationCode, INSERTED.Receiver_BranchCode, @BankLocalTime,  
+  @SystemuserID, INSERTED.Block4_UserReference,INSERTED.Block4_Amt, INSERTED.Block4_Beneficiary,INSERTED.Remark, INSERTED.LstUpdate_Remark,INSERTED.LstUpdate_Date, INSERTED.SourceID,  
+  INSERTED.ClientReferenceNo, INSERTED.BranchNo,INSERTED.Channel, INSERTED.DNSLFlag, INSERTED.TYPE,INSERTED.Created_Date_UTC, INSERTED.Last_Upd_Date_UTC, INSERTED.LastEmailDate_UTC, INSERTED.AssignDate_UTC,  
+  INSERTED.ReleaseDate_UTC, INSERTED.ReleaseDate_2_UTC,INSERTED.ReleaseDate_3_UTC, INSERTED.ReleaseDate_4_UTC, INSERTED.RejectDate_UTC,INSERTED.RejectDate_2_UTC, INSERTED.RejectDate_3_UTC,  
+  INSERTED.RejectDate_4_UTC,INSERTED.LastEmailDate_ThirdParty_UTC,@UtcNow, INSERTED.LstUpdate_Date_UTC   
+ INTO dbo.SWIFT_MTHeader_Main_Log ( MT_KEY, CLIENT_MSG_TYPE_CODE,BNK_NBR, ApplicationID, ServiceID,BankCode, CountryCode, LocationCode,  
+  LogicalTerminalCode, BranchCode,SessionNumber, SequenceNumber,IO_Identifier, MessageType,ReceiverAddress, MessagePriority,  
+  DeliveryMonitoring,ObsolescencePeriod, InputTime, MIR,FORMAT, DIRECTION, OutputDate, OutputTime, Created_Date, Created_UserId,   
+  Last_Upd_Date,Last_Upd_UserId, HandledBy, Status, Action, Role, QueueID, EmailID,LastEmailDate, Detected, HoldBy,AssignBy, AssignDate, ReleaseBy,  
+  ReleaseDate, ReleaseBy_2,ReleaseDate_2, ReleaseBy_3,ReleaseDate_3, ReleaseBy_4,ReleaseDate_4, RejectBy, RejectDate, RejectBy_2,   
+  RejectDate_2,RejectBy_3, RejectDate_3, RejectBy_4, RejectDate_4, Msg_sender_id, Msg_receiver_id, EmailID_ThirdParty,  
+  LastEmailDate_ThirdParty,Receiver_BankCode,Receiver_CountryCode, Receiver_LocationCode, Receiver_BranchCode, ActionDate,  
+  Action_UserID, Block4_UserReference,Block4_Amt, Block4_Beneficiary,Remark, LstUpdate_Remark,LstUpdate_Date, SourceID,  
+  ClientReferenceNo, BranchNo,Channel, DNSLFlag, TYPE,Created_Date_UTC, Last_Upd_Date_UTC, LastEmailDate_UTC, AssignDate_UTC,  
+  ReleaseDate_UTC, ReleaseDate_2_UTC,ReleaseDate_3_UTC, ReleaseDate_4_UTC, RejectDate_UTC,RejectDate_2_UTC, RejectDate_3_UTC,  
+  RejectDate_4_UTC,LastEmailDate_ThirdParty_UTC,ActionDate_UTC, LstUpdate_Date_UTC )  
+ FROM dbo.SWIFT_MTHEADER_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+   
+ UPDATE A   
+ SET A.QueueID = NULL, A.HandledBy = NULL, A.[Status] = '1', A.[ROLE] = 1, A.[ACTION] = 11,  
+  A.ReleaseBy = NULL,A.ReleaseDate = NULL, A.ReleaseBy_2 = NULL, A.ReleaseDate_2 = NULL, A.ReleaseBy_3 = NULL,  
+  A.ReleaseDate_3 = NULL, A.ReleaseBy_4 = NULL, A.ReleaseDate_4 = NULL, A.RejectBy = NULL, A.RejectDate = NULL, A.RejectBy_2 = NULL,  
+  A.RejectDate_2 = NULL, A.RejectBy_3 = NULL, A.RejectDate_3 = NULL, A.RejectBy_4 = NULL, A.RejectDate_4 = NULL,  
+  A.Last_Upd_Date = @BankLocalTime, A.Last_Upd_Date_UTC = @UtcNow, A.Last_Upd_UserId = @SystemuserID  
+ OUTPUT INSERTED.MT_KEY, INSERTED.CLIENT_MSG_TYPE_CODE,INSERTED.BNK_NBR, INSERTED.ApplicationID, INSERTED.ServiceID,INSERTED .BankCode, INSERTED.CountryCode, INSERTED.LocationCode,  
+  INSERTED.LogicalTerminalCode, INSERTED.BranchCode,INSERTED.SessionNumber, INSERTED.SequenceNumber,INSERTED.IO_Identifier, INSERTED.MessageType,INSERTED.ReceiverAddress, INSERTED.MessagePriority,  
+  INSERTED.DeliveryMonitoring,INSERTED.ObsolescencePeriod, INSERTED.InputTime, INSERTED.MIR,INSERTED.FORMAT, INSERTED.DIRECTION, INSERTED.OutputDate, INSERTED.OutputTime, INSERTED.Created_Date, INSERTED.Created_UserId,   
+  INSERTED.Last_Upd_Date,INSERTED.Last_Upd_UserId, INSERTED.HandledBy, INSERTED.Status, INSERTED.Action, INSERTED.Role, INSERTED.QueueID, INSERTED.EmailID,INSERTED.LastEmailDate, INSERTED.Detected, INSERTED.HoldBy,INSERTED.AssignBy, INSERTED.AssignDate, I
+NSERTED.ReleaseBy,  
+  INSERTED.ReleaseDate, INSERTED.ReleaseBy_2,INSERTED.ReleaseDate_2, INSERTED.ReleaseBy_3,INSERTED.ReleaseDate_3, INSERTED.ReleaseBy_4,INSERTED.ReleaseDate_4, INSERTED.RejectBy, INSERTED.RejectDate, INSERTED.RejectBy_2,   
+  INSERTED.RejectDate_2,INSERTED.RejectBy_3, INSERTED.RejectDate_3, INSERTED.RejectBy_4, INSERTED.RejectDate_4, INSERTED.Msg_sender_id, INSERTED.Msg_receiver_id, INSERTED.EmailID_ThirdParty,  
+  INSERTED.LastEmailDate_ThirdParty,INSERTED.Receiver_BankCode,INSERTED.Receiver_CountryCode, INSERTED.Receiver_LocationCode, INSERTED.Receiver_BranchCode, @BankLocalTime,  
+  @SystemuserID, INSERTED.Block4_UserReference,INSERTED.Block4_Amt, INSERTED.Block4_Beneficiary,INSERTED.Remark, INSERTED.LstUpdate_Remark,INSERTED.LstUpdate_Date, INSERTED.SourceID,  
+  INSERTED.ClientReferenceNo, INSERTED.BranchNo,INSERTED.Channel, INSERTED.DNSLFlag, INSERTED.TYPE,INSERTED.Created_Date_UTC, INSERTED.Last_Upd_Date_UTC, INSERTED.LastEmailDate_UTC, INSERTED.AssignDate_UTC,  
+  INSERTED.ReleaseDate_UTC, INSERTED.ReleaseDate_2_UTC,INSERTED.ReleaseDate_3_UTC, INSERTED.ReleaseDate_4_UTC, INSERTED.RejectDate_UTC,INSERTED.RejectDate_2_UTC, INSERTED.RejectDate_3_UTC,  
+  INSERTED.RejectDate_4_UTC,INSERTED.LastEmailDate_ThirdParty_UTC,@UtcNow, INSERTED.LstUpdate_Date_UTC   
+ INTO dbo.SWIFT_MTHeader_Main_Log ( MT_KEY, CLIENT_MSG_TYPE_CODE,BNK_NBR, ApplicationID, ServiceID,BankCode, CountryCode, LocationCode,  
+  LogicalTerminalCode, BranchCode,SessionNumber, SequenceNumber,IO_Identifier, MessageType,ReceiverAddress, MessagePriority,  
+  DeliveryMonitoring,ObsolescencePeriod, InputTime, MIR,FORMAT, DIRECTION, OutputDate, OutputTime, Created_Date, Created_UserId,   
+  Last_Upd_Date,Last_Upd_UserId, HandledBy, Status, Action, Role, QueueID, EmailID,LastEmailDate, Detected, HoldBy,AssignBy, AssignDate, ReleaseBy,  
+  ReleaseDate, ReleaseBy_2,ReleaseDate_2, ReleaseBy_3,ReleaseDate_3, ReleaseBy_4,ReleaseDate_4, RejectBy, RejectDate, RejectBy_2,   
+  RejectDate_2,RejectBy_3, RejectDate_3, RejectBy_4, RejectDate_4, Msg_sender_id, Msg_receiver_id, EmailID_ThirdParty,  
+  LastEmailDate_ThirdParty,Receiver_BankCode,Receiver_CountryCode, Receiver_LocationCode, Receiver_BranchCode, ActionDate,  
+  Action_UserID, Block4_UserReference,Block4_Amt, Block4_Beneficiary,Remark, LstUpdate_Remark,LstUpdate_Date, SourceID,  
+  ClientReferenceNo, BranchNo,Channel, DNSLFlag, TYPE,Created_Date_UTC, Last_Upd_Date_UTC, LastEmailDate_UTC, AssignDate_UTC,  
+  ReleaseDate_UTC, ReleaseDate_2_UTC,ReleaseDate_3_UTC, ReleaseDate_4_UTC, RejectDate_UTC,RejectDate_2_UTC, RejectDate_3_UTC,  
+  RejectDate_4_UTC,LastEmailDate_ThirdParty_UTC,ActionDate_UTC, LstUpdate_Date_UTC )  
+ FROM dbo.SWIFT_MTHEADER_MAIN A JOIN dbo.WORKFLOW_MGMT_QUEUE B  
+  ON A.QueueID = B.QueueID   
+ WHERE A.[Status] <> '3' AND B.DEL_FLAG = 'Y' AND B.SRC = 'SWIFT'  
+ ------------------End SWIFT -----------------  
+   
+ -----------------Start FLRS-----------------  
+ INSERT INTO dbo.FLRS_LOG ( FLRS_KEY, ACTION, ROLE, STATUS, HANDLEDBY, QUEUEID, DESCR, LSTUPD_DATE, LSTUPD_USERID, LSTUPD_USERROLE,  
+                             LSTUPD_DATE_UTC )  
+ SELECT A.FLRS_KEY, 11, 1, 1, NULL, A.QueueID, NULL, @BankLocalTime, @SystemUserID,  
+   NULL, @UtcNow  
+ FROM dbo.FLRS_HEADER_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+   
+ INSERT INTO dbo.FLRS_RemarkLog ( FLRS_KEY, Role, HandledBy, Action, Remark, CreatedBy, Created_Date, UpdatedBy, Updated_Date,   
+  Created_Date_UTC, Updated_Date_UTC )  
+ SELECT A.FLRS_KEY, 1, NULL, 11, A.Remark, A.Created_UserId, A.Created_Date, @SystemUserId, @BankLocalTime,   
+  A.Created_Date_UTC, @UtcNow  
+ FROM dbo.FLRS_HEADER_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+   
+ UPDATE A   
+ SET A.HandledBy = NULL, A.[Status] = '1', A.[ROLE] = 1, A.[ACTION] = 11,  
+  A.ReleaseBy = NULL,A.ReleaseDate = NULL, A.ReleaseBy_2 = NULL, A.ReleaseDate_2 = NULL, A.ReleaseBy_3 = NULL,  
+  A.ReleaseDate_3 = NULL, A.ReleaseBy_4 = NULL, A.ReleaseDate_4 = NULL, A.RejectBy = NULL, A.RejectDate = NULL, A.RejectBy_2 = NULL,  
+  A.RejectDate_2 = NULL, A.RejectBy_3 = NULL, A.RejectDate_3 = NULL, A.RejectBy_4 = NULL, A.RejectDate_4 = NULL,  
+  A.Last_Upd_Date = @BankLocalTime, A.Last_Upd_Date_UTC = @UtcNow, A.Last_Upd_UserId = @SystemuserID  
+ OUTPUT INSERTED.FLRS_KEY,INSERTED.BatchID,INSERTED.CLIENT_MSG_TYPE_CODE,INSERTED.BNK_NBR,INSERTED.UserReference,INSERTED.EmpNo,INSERTED.Remittance,INSERTED.FWorker_FName,INSERTED.  
+  FWorker_LName,INSERTED.FWorker_FullName,INSERTED.Ben_FName,INSERTED.Ben_LName,INSERTED.Ben_FullName,INSERTED.Ben_Bank,INSERTED.Ben_Addr,INSERTED.FORMAT,INSERTED.DIRECTION,INSERTED.Created_Date,INSERTED.  
+  Created_UserId,INSERTED.Last_Upd_Date,INSERTED.Last_Upd_UserId,INSERTED.HandledBy,INSERTED.Status,INSERTED.Action,INSERTED.Role,INSERTED.QueueID,INSERTED.EmailID,INSERTED.LastEmailDate,INSERTED.Detected,INSERTED.  
+  AssignBy,INSERTED.AssignDate,INSERTED.ReleaseBy,INSERTED.ReleaseDate,INSERTED.ReleaseBy_2,INSERTED.ReleaseDate_2,INSERTED.ReleaseBy_3,INSERTED.ReleaseDate_3,INSERTED.ReleaseBy_4,INSERTED.ReleaseDate_4,INSERTED.  
+  RejectBy,INSERTED.RejectDate,INSERTED.RejectBy_2,INSERTED.RejectDate_2,INSERTED.RejectBy_3,INSERTED.RejectDate_3,INSERTED.RejectBy_4,INSERTED.RejectDate_4,INSERTED.Msg_sender_id,INSERTED.Msg_receiver_id,INSERTED.  
+  EmailID_ThirdParty,INSERTED.LastEmailDate_ThirdParty,@BankLocalTime,@SystemuserID,INSERTED.Remark,INSERTED.LstUpdate_Remark,INSERTED.LstUpdate_Date,INSERTED.FileID,INSERTED.  
+  DNSLFlag,INSERTED.EmailID_BatchFile,INSERTED.LastEmailDate_BatchFile,INSERTED.TYPE,INSERTED.Created_Date_UTC,INSERTED.Last_Upd_Date_UTC,INSERTED.LastEmailDate_UTC,INSERTED.AssignDate_UTC,INSERTED.  
+  ReleaseDate_UTC,INSERTED.ReleaseDate_2_UTC,INSERTED.ReleaseDate_3_UTC,INSERTED.ReleaseDate_4_UTC,INSERTED.RejectDate_UTC,INSERTED.RejectDate_2_UTC,INSERTED.RejectDate_3_UTC,INSERTED.  
+  RejectDate_4_UTC,INSERTED.LastEmailDate_ThirdParty_UTC,@UtcNow,INSERTED.LstUpdate_Date_UTC,INSERTED.LastEmailDate_BatchFile_UTC,INSERTED.HighestRC  
+ INTO dbo.FLRS_Header_Main_Log ( FLRS_KEY, BatchID,CLIENT_MSG_TYPE_CODE, BNK_NBR, UserReference, EmpNo, Remittance, FWorker_FName,   
+  FWorker_LName,FWorker_FullName, Ben_FName, Ben_LName, Ben_FullName, Ben_Bank, Ben_Addr, FORMAT, DIRECTION, Created_Date,  
+  Created_UserId, Last_Upd_Date, Last_Upd_UserId, HandledBy, Status, Action, Role, QueueID, EmailID, LastEmailDate, Detected,   
+  AssignBy, AssignDate, ReleaseBy, ReleaseDate, ReleaseBy_2, ReleaseDate_2, ReleaseBy_3, ReleaseDate_3, ReleaseBy_4, ReleaseDate_4,   
+  RejectBy, RejectDate, RejectBy_2, RejectDate_2, RejectBy_3, RejectDate_3, RejectBy_4, RejectDate_4, Msg_sender_id, Msg_receiver_id,   
+  EmailID_ThirdParty, LastEmailDate_ThirdParty, ActionDate, Action_UserID, Remark, LstUpdate_Remark, LstUpdate_Date, FileID,   
+  DNSLFlag, EmailID_BatchFile, LastEmailDate_BatchFile, TYPE, Created_Date_UTC, Last_Upd_Date_UTC, LastEmailDate_UTC, AssignDate_UTC,  
+  ReleaseDate_UTC, ReleaseDate_2_UTC, ReleaseDate_3_UTC, ReleaseDate_4_UTC, RejectDate_UTC, RejectDate_2_UTC, RejectDate_3_UTC,   
+  RejectDate_4_UTC, LastEmailDate_ThirdParty_UTC, ActionDate_UTC, LstUpdate_Date_UTC, LastEmailDate_BatchFile_UTC, HighestRC )  
+ FROM dbo.FLRS_HEADER_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'   
+   
+ UPDATE A   
+ SET A.QueueID = NULL, A.HandledBy = NULL, A.[Status] = '1', A.[ROLE] = 1, A.[ACTION] = 11,  
+  A.ReleaseBy = NULL,A.ReleaseDate = NULL, A.ReleaseBy_2 = NULL, A.ReleaseDate_2 = NULL, A.ReleaseBy_3 = NULL,  
+  A.ReleaseDate_3 = NULL, A.ReleaseBy_4 = NULL, A.ReleaseDate_4 = NULL, A.RejectBy = NULL, A.RejectDate = NULL, A.RejectBy_2 = NULL,  
+  A.RejectDate_2 = NULL, A.RejectBy_3 = NULL, A.RejectDate_3 = NULL, A.RejectBy_4 = NULL, A.RejectDate_4 = NULL,  
+  A.Last_Upd_Date = @BankLocalTime, A.Last_Upd_Date_UTC = @UtcNow, A.Last_Upd_UserId = @SystemuserID  
+ OUTPUT INSERTED.FLRS_KEY,INSERTED.BatchID,INSERTED.CLIENT_MSG_TYPE_CODE,INSERTED.BNK_NBR,INSERTED.UserReference,INSERTED.EmpNo,INSERTED.Remittance,INSERTED.FWorker_FName,INSERTED.  
+  FWorker_LName,INSERTED.FWorker_FullName,INSERTED.Ben_FName,INSERTED.Ben_LName,INSERTED.Ben_FullName,INSERTED.Ben_Bank,INSERTED.Ben_Addr,INSERTED.FORMAT,INSERTED.DIRECTION,INSERTED.Created_Date,INSERTED.  
+  Created_UserId,INSERTED.Last_Upd_Date,INSERTED.Last_Upd_UserId,INSERTED.HandledBy,INSERTED.Status,INSERTED.Action,INSERTED.Role,INSERTED.QueueID,INSERTED.EmailID,INSERTED.LastEmailDate,INSERTED.Detected,INSERTED.  
+  AssignBy,INSERTED.AssignDate,INSERTED.ReleaseBy,INSERTED.ReleaseDate,INSERTED.ReleaseBy_2,INSERTED.ReleaseDate_2,INSERTED.ReleaseBy_3,INSERTED.ReleaseDate_3,INSERTED.ReleaseBy_4,INSERTED.ReleaseDate_4,INSERTED.  
+  RejectBy,INSERTED.RejectDate,INSERTED.RejectBy_2,INSERTED.RejectDate_2,INSERTED.RejectBy_3,INSERTED.RejectDate_3,INSERTED.RejectBy_4,INSERTED.RejectDate_4,INSERTED.Msg_sender_id,INSERTED.Msg_receiver_id,INSERTED.  
+  EmailID_ThirdParty,INSERTED.LastEmailDate_ThirdParty,@BankLocalTime,@SystemuserID,INSERTED.Remark,INSERTED.LstUpdate_Remark,INSERTED.LstUpdate_Date,INSERTED.FileID,INSERTED.  
+  DNSLFlag,INSERTED.EmailID_BatchFile,INSERTED.LastEmailDate_BatchFile,INSERTED.TYPE,INSERTED.Created_Date_UTC,INSERTED.Last_Upd_Date_UTC,INSERTED.LastEmailDate_UTC,INSERTED.AssignDate_UTC,INSERTED.  
+  ReleaseDate_UTC,INSERTED.ReleaseDate_2_UTC,INSERTED.ReleaseDate_3_UTC,INSERTED.ReleaseDate_4_UTC,INSERTED.RejectDate_UTC,INSERTED.RejectDate_2_UTC,INSERTED.RejectDate_3_UTC,INSERTED.  
+  RejectDate_4_UTC,INSERTED.LastEmailDate_ThirdParty_UTC,@UtcNow,INSERTED.LstUpdate_Date_UTC,INSERTED.LastEmailDate_BatchFile_UTC,INSERTED.HighestRC  
+ INTO dbo.FLRS_Header_Main_Log ( FLRS_KEY, BatchID,CLIENT_MSG_TYPE_CODE, BNK_NBR, UserReference, EmpNo, Remittance, FWorker_FName,   
+  FWorker_LName,FWorker_FullName, Ben_FName, Ben_LName, Ben_FullName, Ben_Bank, Ben_Addr, FORMAT, DIRECTION, Created_Date,  
+  Created_UserId, Last_Upd_Date, Last_Upd_UserId, HandledBy, Status, Action, Role, QueueID, EmailID, LastEmailDate, Detected,   
+  AssignBy, AssignDate, ReleaseBy, ReleaseDate, ReleaseBy_2, ReleaseDate_2, ReleaseBy_3, ReleaseDate_3, ReleaseBy_4, ReleaseDate_4,   
+  RejectBy, RejectDate, RejectBy_2, RejectDate_2, RejectBy_3, RejectDate_3, RejectBy_4, RejectDate_4, Msg_sender_id, Msg_receiver_id,   
+  EmailID_ThirdParty, LastEmailDate_ThirdParty, ActionDate, Action_UserID, Remark, LstUpdate_Remark, LstUpdate_Date, FileID,   
+  DNSLFlag, EmailID_BatchFile, LastEmailDate_BatchFile, TYPE, Created_Date_UTC, Last_Upd_Date_UTC, LastEmailDate_UTC, AssignDate_UTC,  
+  ReleaseDate_UTC, ReleaseDate_2_UTC, ReleaseDate_3_UTC, ReleaseDate_4_UTC, RejectDate_UTC, RejectDate_2_UTC, RejectDate_3_UTC,   
+  RejectDate_4_UTC, LastEmailDate_ThirdParty_UTC, ActionDate_UTC, LstUpdate_Date_UTC, LastEmailDate_BatchFile_UTC, HighestRC )  
+ FROM dbo.FLRS_HEADER_MAIN A JOIN dbo.WORKFLOW_MGMT_QUEUE B   
+  ON A.QueueID = B.QueueID   
+ WHERE A.[Status] <> '3' AND B.DEL_FLAG = 'Y' AND B.SRC = 'FLRS'  
+ ------------------End FLRS-----------------  
+   
+ ------------------Start Outsource-----------------  
+ INSERT INTO dbo.OUTSOURCE_LOG ( OUTSOURCE_KEY, ACTION, ROLE, STATUS, HANDLEDBY, QUEUEID, DESCR, LSTUPD_DATE,  
+                                  LSTUPD_USERID, LSTUPD_USERROLE, LSTUPD_DATE_UTC )  
+ SELECT A.OUTSOURCE_KEY, 11, 1, 1, NULL, A.QueueID, NULL, @BankLocalTime,   
+  @SystemUserId, NULL, @UtcNow   
+ FROM dbo.OUTSOURCE_HEADER_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+  
+ INSERT INTO dbo.OUTSOURCE_RemarkLog ( OUTSOURCE_KEY, Role, HandledBy, Action, Remark, CreatedBy, Created_Date,  
+                                        UpdatedBy, Updated_Date, Created_Date_UTC, Updated_Date_UTC )  
+ SELECT A.OUTSOURCE_KEY, 1, NULL, 11, A.Remark, A.Created_UserId, A.Created_Date,  
+  @SystemUserId, @BankLocalTime, A.Created_Date_UTC, @UtcNow  
+ FROM dbo.OUTSOURCE_HEADER_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+   
+ UPDATE A   
+ SET A.HandledBy = NULL, A.[Status] = '1', A.[ROLE] = 1, A.[ACTION] = 11,  
+  A.ReleaseBy = NULL,A.ReleaseDate = NULL, A.ReleaseBy_2 = NULL, A.ReleaseDate_2 = NULL, A.ReleaseBy_3 = NULL,  
+  A.ReleaseDate_3 = NULL, A.ReleaseBy_4 = NULL, A.ReleaseDate_4 = NULL, A.RejectBy = NULL, A.RejectDate = NULL, A.RejectBy_2 = NULL,  
+  A.RejectDate_2 = NULL, A.RejectBy_3 = NULL, A.RejectDate_3 = NULL, A.RejectBy_4 = NULL, A.RejectDate_4 = NULL,  
+  A.Last_Upd_Date = @BankLocalTime, A.Last_Upd_Date_UTC = @UtcNow, A.Last_Upd_UserId = @SystemuserID  
+ OUTPUT INSERTED.OUTSOURCE_KEY,INSERTED.BatchID,INSERTED.CLIENT_MSG_TYPE_CODE,INSERTED.BNK_NBR,INSERTED.UserReference,  
+  INSERTED.CURRENCY,INSERTED.INSTRUCT_AMT,INSERTED.ORDERING_CUSTNAME,INSERTED.ORDERING_CUST_ADDR1,  
+  INSERTED.ORDERING_CUST_ADDR2,INSERTED.ORDERING_CUST_ADDR3,INSERTED.BEN_NAME,INSERTED.BEN_ADDR1,  
+  INSERTED.BEN_ADDR2,INSERTED.BEN_ADDR3,INSERTED.AC_WITH_BANKBIC,INSERTED.AC_WITH_BANKNAME,  
+  INSERTED.AC_WITH_BANKADDR1,INSERTED.AC_WITH_BANKADDR2,INSERTED.AC_WITH_BANKADDR3,  
+  INSERTED.INTERMEDIARY_BANKBIC,INSERTED.INTERMEDIARY_BANKNAME,INSERTED.INTERMEDIARY_BANKADDR1,  
+  INSERTED.INTERMEDIARY_BANKADDR2,INSERTED.INTERMEDIARY_BANKADDR3,INSERTED.DETAILS_OF_PAY1,  
+  INSERTED.DETAILS_OF_PAY2,INSERTED.DETAILS_OF_PAY3,INSERTED.DETAILS_OF_PAY4,INSERTED.BANK_TO_BANK_INFO1,  
+  INSERTED.BANK_TO_BANK_INFO2,INSERTED.BANK_TO_BANK_INFO3,INSERTED.BANK_TO_BANK_INFO4,  
+  INSERTED.BANK_TO_BANK_INFO5,INSERTED.BANK_TO_BANK_INFO6,INSERTED.FORMAT,INSERTED.DIRECTION,  
+  INSERTED.Created_Date,INSERTED.Created_UserId,INSERTED.Last_Upd_Date,INSERTED.Last_Upd_UserId,  
+  INSERTED.HandledBy,INSERTED.Status,INSERTED.Action,INSERTED.Role,INSERTED.QueueID,INSERTED.EmailID,INSERTED.LastEmailDate,  
+  INSERTED.Detected,INSERTED.AssignBy,INSERTED.AssignDate,INSERTED.ReleaseBy,INSERTED.ReleaseDate,INSERTED.ReleaseBy_2,  
+  INSERTED.ReleaseDate_2,INSERTED.ReleaseBy_3,INSERTED.ReleaseDate_3,INSERTED.ReleaseBy_4,INSERTED.ReleaseDate_4,  
+  INSERTED.RejectBy,INSERTED.RejectDate,INSERTED.RejectBy_2,INSERTED.RejectDate_2,INSERTED.RejectBy_3,  
+  INSERTED.RejectDate_3,INSERTED.RejectBy_4,INSERTED.RejectDate_4,INSERTED.Msg_sender_id,INSERTED.Msg_receiver_id,  
+  INSERTED.EmailID_ThirdParty,INSERTED.LastEmailDate_ThirdParty,@BankLocalTime,  
+  @SystemUserId,INSERTED.Remark,INSERTED.LstUpdate_Remark,INSERTED.LstUpdate_Date,INSERTED.FileID,  
+  INSERTED.DNSLFlag,INSERTED.EmailID_BatchFile,INSERTED.LastEmailDate_BatchFile,INSERTED.TYPE,  
+  INSERTED.Created_Date_UTC,INSERTED.Last_Upd_Date_UTC,INSERTED.LastEmailDate_UTC,INSERTED.AssignDate_UTC,  
+  INSERTED.ReleaseDate_UTC,INSERTED.ReleaseDate_2_UTC,INSERTED.ReleaseDate_3_UTC,  
+  INSERTED.ReleaseDate_4_UTC,INSERTED.RejectDate_UTC,INSERTED.RejectDate_2_UTC,INSERTED.RejectDate_3_UTC,  
+  INSERTED.RejectDate_4_UTC,INSERTED.LastEmailDate_ThirdParty_UTC,@UtcNow,  
+  INSERTED.LstUpdate_Date_UTC,INSERTED.LastEmailDate_BatchFile_UTC  
+ INTO dbo.OUTSOURCE_Header_Main_Log (OUTSOURCE_KEY, BatchID, CLIENT_MSG_TYPE_CODE, BNK_NBR, UserReference,  
+         CURRENCY, INSTRUCT_AMT, ORDERING_CUSTNAME, ORDERING_CUST_ADDR1,  
+         ORDERING_CUST_ADDR2, ORDERING_CUST_ADDR3, BEN_NAME, BEN_ADDR1,  
+         BEN_ADDR2, BEN_ADDR3, AC_WITH_BANKBIC, AC_WITH_BANKNAME,  
+         AC_WITH_BANKADDR1, AC_WITH_BANKADDR2, AC_WITH_BANKADDR3,  
+         INTERMEDIARY_BANKBIC, INTERMEDIARY_BANKNAME, INTERMEDIARY_BANKADDR1,  
+         INTERMEDIARY_BANKADDR2, INTERMEDIARY_BANKADDR3, DETAILS_OF_PAY1,  
+         DETAILS_OF_PAY2, DETAILS_OF_PAY3, DETAILS_OF_PAY4, BANK_TO_BANK_INFO1,  
+         BANK_TO_BANK_INFO2, BANK_TO_BANK_INFO3, BANK_TO_BANK_INFO4,  
+         BANK_TO_BANK_INFO5, BANK_TO_BANK_INFO6, FORMAT, DIRECTION,  
+         Created_Date, Created_UserId, Last_Upd_Date, Last_Upd_UserId,  
+         HandledBy, Status, Action, Role, QueueID, EmailID, LastEmailDate,  
+         Detected, AssignBy, AssignDate, ReleaseBy, ReleaseDate, ReleaseBy_2,  
+         ReleaseDate_2, ReleaseBy_3, ReleaseDate_3, ReleaseBy_4, ReleaseDate_4,  
+         RejectBy, RejectDate, RejectBy_2, RejectDate_2, RejectBy_3,  
+         RejectDate_3, RejectBy_4, RejectDate_4, Msg_sender_id, Msg_receiver_id,  
+         EmailID_ThirdParty, LastEmailDate_ThirdParty, ActionDate,  
+         Action_UserID, Remark, LstUpdate_Remark, LstUpdate_Date, FileID,  
+    DNSLFlag, EmailID_BatchFile, LastEmailDate_BatchFile, TYPE,  
+         Created_Date_UTC, Last_Upd_Date_UTC, LastEmailDate_UTC, AssignDate_UTC,  
+         ReleaseDate_UTC, ReleaseDate_2_UTC, ReleaseDate_3_UTC,  
+         ReleaseDate_4_UTC, RejectDate_UTC, RejectDate_2_UTC, RejectDate_3_UTC,  
+         RejectDate_4_UTC, LastEmailDate_ThirdParty_UTC, ActionDate_UTC,  
+         LstUpdate_Date_UTC, LastEmailDate_BatchFile_UTC)  
+ FROM dbo.OUTSOURCE_HEADER_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'   
+   
+ UPDATE A   
+ SET A.QueueID = NULL, A.HandledBy = NULL, A.[Status] = '1', A.[ROLE] = 1, A.[ACTION] = 11,  
+  A.ReleaseBy = NULL,A.ReleaseDate = NULL, A.ReleaseBy_2 = NULL, A.ReleaseDate_2 = NULL, A.ReleaseBy_3 = NULL,  
+  A.ReleaseDate_3 = NULL, A.ReleaseBy_4 = NULL, A.ReleaseDate_4 = NULL, A.RejectBy = NULL, A.RejectDate = NULL, A.RejectBy_2 = NULL,  
+  A.RejectDate_2 = NULL, A.RejectBy_3 = NULL, A.RejectDate_3 = NULL, A.RejectBy_4 = NULL, A.RejectDate_4 = NULL,  
+  A.Last_Upd_Date = @BankLocalTime, A.Last_Upd_Date_UTC = @UtcNow, A.Last_Upd_UserId = @SystemuserID  
+ OUTPUT INSERTED.OUTSOURCE_KEY,INSERTED.BatchID,INSERTED.CLIENT_MSG_TYPE_CODE,INSERTED.BNK_NBR,INSERTED.UserReference,  
+  INSERTED.CURRENCY,INSERTED.INSTRUCT_AMT,INSERTED.ORDERING_CUSTNAME,INSERTED.ORDERING_CUST_ADDR1,  
+  INSERTED.ORDERING_CUST_ADDR2,INSERTED.ORDERING_CUST_ADDR3,INSERTED.BEN_NAME,INSERTED.BEN_ADDR1,  
+  INSERTED.BEN_ADDR2,INSERTED.BEN_ADDR3,INSERTED.AC_WITH_BANKBIC,INSERTED.AC_WITH_BANKNAME,  
+  INSERTED.AC_WITH_BANKADDR1,INSERTED.AC_WITH_BANKADDR2,INSERTED.AC_WITH_BANKADDR3,  
+  INSERTED.INTERMEDIARY_BANKBIC,INSERTED.INTERMEDIARY_BANKNAME,INSERTED.INTERMEDIARY_BANKADDR1,  
+  INSERTED.INTERMEDIARY_BANKADDR2,INSERTED.INTERMEDIARY_BANKADDR3,INSERTED.DETAILS_OF_PAY1,  
+  INSERTED.DETAILS_OF_PAY2,INSERTED.DETAILS_OF_PAY3,INSERTED.DETAILS_OF_PAY4,INSERTED.BANK_TO_BANK_INFO1,  
+  INSERTED.BANK_TO_BANK_INFO2,INSERTED.BANK_TO_BANK_INFO3,INSERTED.BANK_TO_BANK_INFO4,  
+  INSERTED.BANK_TO_BANK_INFO5,INSERTED.BANK_TO_BANK_INFO6,INSERTED.FORMAT,INSERTED.DIRECTION,  
+  INSERTED.Created_Date,INSERTED.Created_UserId,INSERTED.Last_Upd_Date,INSERTED.Last_Upd_UserId,  
+  INSERTED.HandledBy,INSERTED.Status,INSERTED.Action,INSERTED.Role,INSERTED.QueueID,INSERTED.EmailID,INSERTED.LastEmailDate,  
+  INSERTED.Detected,INSERTED.AssignBy,INSERTED.AssignDate,INSERTED.ReleaseBy,INSERTED.ReleaseDate,INSERTED.ReleaseBy_2,  
+  INSERTED.ReleaseDate_2,INSERTED.ReleaseBy_3,INSERTED.ReleaseDate_3,INSERTED.ReleaseBy_4,INSERTED.ReleaseDate_4,  
+  INSERTED.RejectBy,INSERTED.RejectDate,INSERTED.RejectBy_2,INSERTED.RejectDate_2,INSERTED.RejectBy_3,  
+  INSERTED.RejectDate_3,INSERTED.RejectBy_4,INSERTED.RejectDate_4,INSERTED.Msg_sender_id,INSERTED.Msg_receiver_id,  
+  INSERTED.EmailID_ThirdParty,INSERTED.LastEmailDate_ThirdParty,@BankLocalTime,  
+  @SystemUserId,INSERTED.Remark,INSERTED.LstUpdate_Remark,INSERTED.LstUpdate_Date,INSERTED.FileID,  
+  INSERTED.DNSLFlag,INSERTED.EmailID_BatchFile,INSERTED.LastEmailDate_BatchFile,INSERTED.TYPE,  
+  INSERTED.Created_Date_UTC,INSERTED.Last_Upd_Date_UTC,INSERTED.LastEmailDate_UTC,INSERTED.AssignDate_UTC,  
+  INSERTED.ReleaseDate_UTC,INSERTED.ReleaseDate_2_UTC,INSERTED.ReleaseDate_3_UTC,  
+  INSERTED.ReleaseDate_4_UTC,INSERTED.RejectDate_UTC,INSERTED.RejectDate_2_UTC,INSERTED.RejectDate_3_UTC,  
+  INSERTED.RejectDate_4_UTC,INSERTED.LastEmailDate_ThirdParty_UTC,@UtcNow,  
+  INSERTED.LstUpdate_Date_UTC,INSERTED.LastEmailDate_BatchFile_UTC  
+ INTO dbo.OUTSOURCE_Header_Main_Log (OUTSOURCE_KEY, BatchID, CLIENT_MSG_TYPE_CODE, BNK_NBR, UserReference,  
+         CURRENCY, INSTRUCT_AMT, ORDERING_CUSTNAME, ORDERING_CUST_ADDR1,  
+         ORDERING_CUST_ADDR2, ORDERING_CUST_ADDR3, BEN_NAME, BEN_ADDR1,  
+         BEN_ADDR2, BEN_ADDR3, AC_WITH_BANKBIC, AC_WITH_BANKNAME,  
+         AC_WITH_BANKADDR1, AC_WITH_BANKADDR2, AC_WITH_BANKADDR3,  
+         INTERMEDIARY_BANKBIC, INTERMEDIARY_BANKNAME, INTERMEDIARY_BANKADDR1,  
+         INTERMEDIARY_BANKADDR2, INTERMEDIARY_BANKADDR3, DETAILS_OF_PAY1,  
+         DETAILS_OF_PAY2, DETAILS_OF_PAY3, DETAILS_OF_PAY4, BANK_TO_BANK_INFO1,  
+         BANK_TO_BANK_INFO2, BANK_TO_BANK_INFO3, BANK_TO_BANK_INFO4,  
+         BANK_TO_BANK_INFO5, BANK_TO_BANK_INFO6, FORMAT, DIRECTION,  
+         Created_Date, Created_UserId, Last_Upd_Date, Last_Upd_UserId,  
+         HandledBy, Status, Action, Role, QueueID, EmailID, LastEmailDate,  
+         Detected, AssignBy, AssignDate, ReleaseBy, ReleaseDate, ReleaseBy_2,  
+         ReleaseDate_2, ReleaseBy_3, ReleaseDate_3, ReleaseBy_4, ReleaseDate_4,  
+         RejectBy, RejectDate, RejectBy_2, RejectDate_2, RejectBy_3,  
+         RejectDate_3, RejectBy_4, RejectDate_4, Msg_sender_id, Msg_receiver_id,  
+         EmailID_ThirdParty, LastEmailDate_ThirdParty, ActionDate,  
+         Action_UserID, Remark, LstUpdate_Remark, LstUpdate_Date, FileID,  
+         DNSLFlag, EmailID_BatchFile, LastEmailDate_BatchFile, TYPE,  
+         Created_Date_UTC, Last_Upd_Date_UTC, LastEmailDate_UTC, AssignDate_UTC,  
+         ReleaseDate_UTC, ReleaseDate_2_UTC, ReleaseDate_3_UTC,  
+         ReleaseDate_4_UTC, RejectDate_UTC, RejectDate_2_UTC, RejectDate_3_UTC,  
+         RejectDate_4_UTC, LastEmailDate_ThirdParty_UTC, ActionDate_UTC,  
+         LstUpdate_Date_UTC, LastEmailDate_BatchFile_UTC)  
+ FROM dbo.OUTSOURCE_HEADER_MAIN A JOIN dbo.WORKFLOW_MGMT_QUEUE B   
+  ON A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3' AND B.DEL_FLAG = 'Y' AND B.SRC = 'OUTSOURCE'  
+ ------------------End Outsource-----------------  
+   
+ ------------------Start FedWire-----------------  
+ INSERT INTO dbo.FedWire_LOG ( FedWire_KEY, ACTION, ROLE, STATUS, HANDLEDBY, QUEUEID, DESCR, LSTUPD_DATE, LSTUPD_USERID,   
+      LSTUPD_USERROLE, LSTUPD_DATE_UTC )  
+ SELECT A.Id, 11, 1, 1, NULL, A.QueueID, NULL, @BankLocalTime, @SystemUserId,  
+  NULL, @UtcNow  
+ FROM dbo.FEDWIRE_HEADER_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+   
+ INSERT INTO dbo.FedWire_RemarkLog ( FedWire_KEY, Role, HandledBy, Action, Remark, CreatedBy, Created_Date,  
+                                      UpdatedBy, Updated_Date, Created_Date_UTC, Updated_Date_UTC )  
+ SELECT A.Id, 1, NULL, 11, A.Remark, NULL, A.CreatedDate,   
+  @SystemUserId, @BankLocalTime, A.CreatedDate_UTC, @UtcNow  
+ FROM dbo.FEDWIRE_HEADER_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+   
+ UPDATE A   
+ SET A.HandledBy = NULL, A.[Status] = '1', A.[ROLE] = 1, A.[ACTION] = 11,  
+  A.ReleaseBy = NULL,A.ReleaseDate = NULL, A.ReleaseBy_2 = NULL, A.ReleaseDate_2 = NULL, A.ReleaseBy_3 = NULL,  
+  A.ReleaseDate_3 = NULL, A.ReleaseBy_4 = NULL, A.ReleaseDate_4 = NULL, A.RejectBy = NULL, A.RejectDate = NULL, A.RejectBy_2 = NULL,  
+  A.RejectDate_2 = NULL, A.RejectBy_3 = NULL, A.RejectDate_3 = NULL, A.RejectBy_4 = NULL, A.RejectDate_4 = NULL,  
+  A.Last_Upd_Date = @BankLocalTime, A.Last_Upd_Date_UTC = @UtcNow, A.Last_Upd_UserId = @SystemuserID  
+ OUTPUT INSERTED.Id,INSERTED.RawMessage,INSERTED.InterfaceData,INSERTED.Tag1500_SenderSuppliedInformation,INSERTED.Tag1500_SenderSuppliedInformation_FormatVersion,  
+ INSERTED.Tag1500_SenderSuppliedInformation_UserRequestCorrelation,INSERTED.Tag1500_SenderSuppliedInformation_TestProductionCode,INSERTED.Tag1500_SenderSuppliedInformation_MessageDuplicationCode,  
+ INSERTED.Tag1510_TypeSubtype,INSERTED.Tag1510_TypeSubtype_TypeCode,INSERTED.Tag1510_TypeSubtype_SubtypeCode,INSERTED.Tag1520_InputMessageAccountabilityData,  
+ INSERTED.Tag1520_InputMessageAccountabilityData_InputCycleDate,INSERTED.Tag1520_InputMessageAccountabilityData_InputSource,INSERTED.Tag1520_InputMessageAccountabilityData_InputSequenceNumber,  
+ INSERTED.Tag2000_Amount,INSERTED.Tag3100_SenderDI,INSERTED.Tag3100_SenderDI_SenderABANumber,INSERTED.Tag3100_SenderDI_SenderShortName,INSERTED.Tag3400_ReceiverDI,  
+ INSERTED.Tag3400_ReceiverDI_ReceiverABANumber,INSERTED.Tag3400_ReceiverDI_ReceiverShortName,INSERTED.Tag3600_BusinessFunction,INSERTED.Tag3600_BusinessFunction_BusinessFunctionCode,  
+ INSERTED.Tag3600_BusinessFunction_TransactionTypeCode,INSERTED.Tag1100_MessageDisposition,INSERTED.Tag1100_MessageDisposition_FormatVersion,INSERTED.Tag1100_MessageDisposition_TestProductionCode,  
+ INSERTED.Tag1100_MessageDisposition_MessageDuplicationCode,INSERTED.Tag1100_MessageDisposition_MessageStatusIndicator,INSERTED.Tag1110_ReceiptTimeStamp,  
+ INSERTED.Tag1110_ReceiptTimeStamp_ReceiptDate,INSERTED.Tag1110_ReceiptTimeStamp_ReceiptTime,INSERTED.Tag1110_ReceiptTimeStamp_ReceiptApplicationID,  
+ INSERTED.Tag1120_OutputMessageAccountabilityData,INSERTED.Tag1120_OutputMessageAccountabilityData_OutputCycleDate,INSERTED.Tag1120_OutputMessageAccountabilityData_OutputDestinationID,  
+ INSERTED.Tag1120_OutputMessageAccountabilityData_OutputSequenceNumber,INSERTED.Tag1120_OutputMessageAccountabilityData_OutputDate,INSERTED.Tag1120_OutputMessageAccountabilityData_OutputTime,  
+ INSERTED.Tag1120_OutputMessageAccountabilityData_OutputFRBApplicationID,INSERTED.Tag1130_Error,INSERTED.Tag1130_Error_ErrorCategory,INSERTED.Tag1130_Error_ErrorCode,  
+ INSERTED.Tag1130_Error_ErrorDescription,INSERTED.Direction,INSERTED.CreatedDate,INSERTED.CreatedDate_UTC,INSERTED.Last_Upd_Date,INSERTED.Last_Upd_Date_UTC,INSERTED.FORMAT,INSERTED.HandledBy,  
+ INSERTED.Status,INSERTED.Action,INSERTED.Role,INSERTED.QueueID,INSERTED.EmailID,INSERTED.LastEmailDate,INSERTED.Detected,INSERTED.HoldBy,INSERTED.AssignBy,INSERTED.AssignDate,INSERTED.ReleaseBy,INSERTED.ReleaseDate,INSERTED.ReleaseBy_2,  
+ INSERTED.ReleaseDate_2,INSERTED.ReleaseBy_3,INSERTED.ReleaseDate_3,INSERTED.ReleaseBy_4,INSERTED.ReleaseDate_4,INSERTED.RejectBy,INSERTED.RejectDate,INSERTED.RejectBy_2,INSERTED.RejectDate_2,INSERTED.RejectBy_3,  
+ INSERTED.RejectDate_3,INSERTED.RejectBy_4,INSERTED.RejectDate_4,INSERTED.Originator_Name,INSERTED.Beneficiary_Name,INSERTED.EmailID_ThirdParty,INSERTED.LastEmailDate_ThirdParty,INSERTED.Remark,  
+ INSERTED.LstUpdate_Remark,INSERTED.LstUpdate_Date,INSERTED.SourceID,INSERTED.ClientReferenceNo,INSERTED.BranchNo,INSERTED.Channel,INSERTED.DNSLFlag,INSERTED.TYPE,INSERTED.LastEmailDate_UTC,INSERTED.AssignDate_UTC,  
+ INSERTED.ReleaseDate_UTC,INSERTED.ReleaseDate_2_UTC,INSERTED.ReleaseDate_3_UTC,INSERTED.ReleaseDate_4_UTC,INSERTED.RejectDate_UTC,INSERTED.RejectDate_2_UTC,INSERTED.RejectDate_3_UTC,  
+ INSERTED.RejectDate_4_UTC,INSERTED.LastEmailDate_ThirdParty_UTC,INSERTED.LstUpdate_Date_UTC,INSERTED.Last_Upd_UserId,INSERTED.REFNO,INSERTED.FunctionManagementHeader,@BankLocalTime,  
+ @UtcNow,@SystemUserId  
+ INTO dbo.FedWire_Header_Main_Log (Id, RawMessage, InterfaceData, Tag1500_SenderSuppliedInformation,Tag1500_SenderSuppliedInformation_FormatVersion,  
+         Tag1500_SenderSuppliedInformation_UserRequestCorrelation,Tag1500_SenderSuppliedInformation_TestProductionCode, Tag1500_SenderSuppliedInformation_MessageDuplicationCode,  
+         Tag1510_TypeSubtype, Tag1510_TypeSubtype_TypeCode, Tag1510_TypeSubtype_SubtypeCode, Tag1520_InputMessageAccountabilityData,  
+         Tag1520_InputMessageAccountabilityData_InputCycleDate, Tag1520_InputMessageAccountabilityData_InputSource, Tag1520_InputMessageAccountabilityData_InputSequenceNumber,  
+         Tag2000_Amount, Tag3100_SenderDI, Tag3100_SenderDI_SenderABANumber, Tag3100_SenderDI_SenderShortName, Tag3400_ReceiverDI,  
+         Tag3400_ReceiverDI_ReceiverABANumber, Tag3400_ReceiverDI_ReceiverShortName, Tag3600_BusinessFunction, Tag3600_BusinessFunction_BusinessFunctionCode,  
+         Tag3600_BusinessFunction_TransactionTypeCode, Tag1100_MessageDisposition, Tag1100_MessageDisposition_FormatVersion, Tag1100_MessageDisposition_TestProductionCode,  
+         Tag1100_MessageDisposition_MessageDuplicationCode, Tag1100_MessageDisposition_MessageStatusIndicator, Tag1110_ReceiptTimeStamp,   
+         Tag1110_ReceiptTimeStamp_ReceiptDate, Tag1110_ReceiptTimeStamp_ReceiptTime, Tag1110_ReceiptTimeStamp_ReceiptApplicationID,  
+         Tag1120_OutputMessageAccountabilityData, Tag1120_OutputMessageAccountabilityData_OutputCycleDate, Tag1120_OutputMessageAccountabilityData_OutputDestinationID,  
+         Tag1120_OutputMessageAccountabilityData_OutputSequenceNumber, Tag1120_OutputMessageAccountabilityData_OutputDate, Tag1120_OutputMessageAccountabilityData_OutputTime,  
+         Tag1120_OutputMessageAccountabilityData_OutputFRBApplicationID, Tag1130_Error, Tag1130_Error_ErrorCategory, Tag1130_Error_ErrorCode,  
+         Tag1130_Error_ErrorDescription, Direction, CreatedDate, CreatedDate_UTC, Last_Upd_Date, Last_Upd_Date_UTC, FORMAT, HandledBy,  
+         Status, Action, Role, QueueID, EmailID, LastEmailDate, Detected,HoldBy, AssignBy, AssignDate, ReleaseBy, ReleaseDate, ReleaseBy_2,  
+         ReleaseDate_2, ReleaseBy_3, ReleaseDate_3, ReleaseBy_4, ReleaseDate_4, RejectBy, RejectDate, RejectBy_2, RejectDate_2, RejectBy_3,  
+         RejectDate_3, RejectBy_4, RejectDate_4, Originator_Name, Beneficiary_Name, EmailID_ThirdParty, LastEmailDate_ThirdParty, Remark,  
+         LstUpdate_Remark, LstUpdate_Date, SourceID, ClientReferenceNo, BranchNo, Channel, DNSLFlag, TYPE, LastEmailDate_UTC, AssignDate_UTC,  
+         ReleaseDate_UTC, ReleaseDate_2_UTC, ReleaseDate_3_UTC, ReleaseDate_4_UTC, RejectDate_UTC, RejectDate_2_UTC, RejectDate_3_UTC,  
+         RejectDate_4_UTC, LastEmailDate_ThirdParty_UTC, LstUpdate_Date_UTC, Last_Upd_UserId, REFNO, FunctionManagementHeader, ActionDate,  
+         ActionDate_UTC, Action_UserID)  
+ FROM dbo.FEDWIRE_HEADER_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'   
+   
+ UPDATE A   
+ SET A.QueueID = NULL, A.HandledBy = NULL, A.[Status] = '1', A.[ROLE] = 1, A.[ACTION] = 11,  
+  A.ReleaseBy = NULL,A.ReleaseDate = NULL, A.ReleaseBy_2 = NULL, A.ReleaseDate_2 = NULL, A.ReleaseBy_3 = NULL,  
+  A.ReleaseDate_3 = NULL, A.ReleaseBy_4 = NULL, A.ReleaseDate_4 = NULL, A.RejectBy = NULL, A.RejectDate = NULL, A.RejectBy_2 = NULL,  
+  A.RejectDate_2 = NULL, A.RejectBy_3 = NULL, A.RejectDate_3 = NULL, A.RejectBy_4 = NULL, A.RejectDate_4 = NULL,  
+  A.Last_Upd_Date = @BankLocalTime, A.Last_Upd_Date_UTC = @UtcNow, A.Last_Upd_UserId = @SystemuserID  
+ OUTPUT INSERTED.Id,INSERTED.RawMessage,INSERTED.InterfaceData,INSERTED.Tag1500_SenderSuppliedInformation,INSERTED.Tag1500_SenderSuppliedInformation_FormatVersion,  
+ INSERTED.Tag1500_SenderSuppliedInformation_UserRequestCorrelation,INSERTED.Tag1500_SenderSuppliedInformation_TestProductionCode,INSERTED.Tag1500_SenderSuppliedInformation_MessageDuplicationCode,  
+ INSERTED.Tag1510_TypeSubtype,INSERTED.Tag1510_TypeSubtype_TypeCode,INSERTED.Tag1510_TypeSubtype_SubtypeCode,INSERTED.Tag1520_InputMessageAccountabilityData,  
+ INSERTED.Tag1520_InputMessageAccountabilityData_InputCycleDate,INSERTED.Tag1520_InputMessageAccountabilityData_InputSource,INSERTED.Tag1520_InputMessageAccountabilityData_InputSequenceNumber,  
+ INSERTED.Tag2000_Amount,INSERTED.Tag3100_SenderDI,INSERTED.Tag3100_SenderDI_SenderABANumber,INSERTED.Tag3100_SenderDI_SenderShortName,INSERTED.Tag3400_ReceiverDI,  
+ INSERTED.Tag3400_ReceiverDI_ReceiverABANumber,INSERTED.Tag3400_ReceiverDI_ReceiverShortName,INSERTED.Tag3600_BusinessFunction,INSERTED.Tag3600_BusinessFunction_BusinessFunctionCode,  
+ INSERTED.Tag3600_BusinessFunction_TransactionTypeCode,INSERTED.Tag1100_MessageDisposition,INSERTED.Tag1100_MessageDisposition_FormatVersion,INSERTED.Tag1100_MessageDisposition_TestProductionCode,  
+ INSERTED.Tag1100_MessageDisposition_MessageDuplicationCode,INSERTED.Tag1100_MessageDisposition_MessageStatusIndicator,INSERTED.Tag1110_ReceiptTimeStamp,  
+ INSERTED.Tag1110_ReceiptTimeStamp_ReceiptDate,INSERTED.Tag1110_ReceiptTimeStamp_ReceiptTime,INSERTED.Tag1110_ReceiptTimeStamp_ReceiptApplicationID,  
+ INSERTED.Tag1120_OutputMessageAccountabilityData,INSERTED.Tag1120_OutputMessageAccountabilityData_OutputCycleDate,INSERTED.Tag1120_OutputMessageAccountabilityData_OutputDestinationID,  
+ INSERTED.Tag1120_OutputMessageAccountabilityData_OutputSequenceNumber,INSERTED.Tag1120_OutputMessageAccountabilityData_OutputDate,INSERTED.Tag1120_OutputMessageAccountabilityData_OutputTime,  
+ INSERTED.Tag1120_OutputMessageAccountabilityData_OutputFRBApplicationID,INSERTED.Tag1130_Error,INSERTED.Tag1130_Error_ErrorCategory,INSERTED.Tag1130_Error_ErrorCode,  
+ INSERTED.Tag1130_Error_ErrorDescription,INSERTED.Direction,INSERTED.CreatedDate,INSERTED.CreatedDate_UTC,INSERTED.Last_Upd_Date,INSERTED.Last_Upd_Date_UTC,INSERTED.FORMAT,INSERTED.HandledBy,  
+ INSERTED.Status,INSERTED.Action,INSERTED.Role,INSERTED.QueueID,INSERTED.EmailID,INSERTED.LastEmailDate,INSERTED.Detected,INSERTED.HoldBy,INSERTED.AssignBy,INSERTED.AssignDate,INSERTED.ReleaseBy,INSERTED.ReleaseDate,INSERTED.ReleaseBy_2,  
+ INSERTED.ReleaseDate_2,INSERTED.ReleaseBy_3,INSERTED.ReleaseDate_3,INSERTED.ReleaseBy_4,INSERTED.ReleaseDate_4,INSERTED.RejectBy,INSERTED.RejectDate,INSERTED.RejectBy_2,INSERTED.RejectDate_2,INSERTED.RejectBy_3,  
+ INSERTED.RejectDate_3,INSERTED.RejectBy_4,INSERTED.RejectDate_4,INSERTED.Originator_Name,INSERTED.Beneficiary_Name,INSERTED.EmailID_ThirdParty,INSERTED.LastEmailDate_ThirdParty,INSERTED.Remark,  
+ INSERTED.LstUpdate_Remark,INSERTED.LstUpdate_Date,INSERTED.SourceID,INSERTED.ClientReferenceNo,INSERTED.BranchNo,INSERTED.Channel,INSERTED.DNSLFlag,INSERTED.TYPE,INSERTED.LastEmailDate_UTC,INSERTED.AssignDate_UTC,  
+ INSERTED.ReleaseDate_UTC,INSERTED.ReleaseDate_2_UTC,INSERTED.ReleaseDate_3_UTC,INSERTED.ReleaseDate_4_UTC,INSERTED.RejectDate_UTC,INSERTED.RejectDate_2_UTC,INSERTED.RejectDate_3_UTC,  
+ INSERTED.RejectDate_4_UTC,INSERTED.LastEmailDate_ThirdParty_UTC,INSERTED.LstUpdate_Date_UTC,INSERTED.Last_Upd_UserId,INSERTED.REFNO,INSERTED.FunctionManagementHeader,@BankLocalTime,  
+ @UtcNow,@SystemUserId  
+ INTO dbo.FedWire_Header_Main_Log (Id, RawMessage, InterfaceData, Tag1500_SenderSuppliedInformation,Tag1500_SenderSuppliedInformation_FormatVersion,  
+         Tag1500_SenderSuppliedInformation_UserRequestCorrelation,Tag1500_SenderSuppliedInformation_TestProductionCode, Tag1500_SenderSuppliedInformation_MessageDuplicationCode,  
+         Tag1510_TypeSubtype, Tag1510_TypeSubtype_TypeCode, Tag1510_TypeSubtype_SubtypeCode, Tag1520_InputMessageAccountabilityData,  
+         Tag1520_InputMessageAccountabilityData_InputCycleDate, Tag1520_InputMessageAccountabilityData_InputSource, Tag1520_InputMessageAccountabilityData_InputSequenceNumber,  
+         Tag2000_Amount, Tag3100_SenderDI, Tag3100_SenderDI_SenderABANumber, Tag3100_SenderDI_SenderShortName, Tag3400_ReceiverDI,  
+         Tag3400_ReceiverDI_ReceiverABANumber, Tag3400_ReceiverDI_ReceiverShortName, Tag3600_BusinessFunction, Tag3600_BusinessFunction_BusinessFunctionCode,  
+         Tag3600_BusinessFunction_TransactionTypeCode, Tag1100_MessageDisposition, Tag1100_MessageDisposition_FormatVersion, Tag1100_MessageDisposition_TestProductionCode,  
+         Tag1100_MessageDisposition_MessageDuplicationCode, Tag1100_MessageDisposition_MessageStatusIndicator, Tag1110_ReceiptTimeStamp,   
+         Tag1110_ReceiptTimeStamp_ReceiptDate, Tag1110_ReceiptTimeStamp_ReceiptTime, Tag1110_ReceiptTimeStamp_ReceiptApplicationID,  
+         Tag1120_OutputMessageAccountabilityData, Tag1120_OutputMessageAccountabilityData_OutputCycleDate, Tag1120_OutputMessageAccountabilityData_OutputDestinationID,  
+         Tag1120_OutputMessageAccountabilityData_OutputSequenceNumber, Tag1120_OutputMessageAccountabilityData_OutputDate, Tag1120_OutputMessageAccountabilityData_OutputTime,  
+         Tag1120_OutputMessageAccountabilityData_OutputFRBApplicationID, Tag1130_Error, Tag1130_Error_ErrorCategory, Tag1130_Error_ErrorCode,  
+         Tag1130_Error_ErrorDescription, Direction, CreatedDate, CreatedDate_UTC, Last_Upd_Date, Last_Upd_Date_UTC, FORMAT, HandledBy,  
+         Status, Action, Role, QueueID, EmailID, LastEmailDate, Detected,HoldBy, AssignBy, AssignDate, ReleaseBy, ReleaseDate, ReleaseBy_2,  
+         ReleaseDate_2, ReleaseBy_3, ReleaseDate_3, ReleaseBy_4, ReleaseDate_4, RejectBy, RejectDate, RejectBy_2, RejectDate_2, RejectBy_3,  
+         RejectDate_3, RejectBy_4, RejectDate_4, Originator_Name, Beneficiary_Name, EmailID_ThirdParty, LastEmailDate_ThirdParty, Remark,  
+         LstUpdate_Remark, LstUpdate_Date, SourceID, ClientReferenceNo, BranchNo, Channel, DNSLFlag, TYPE, LastEmailDate_UTC, AssignDate_UTC,  
+         ReleaseDate_UTC, ReleaseDate_2_UTC, ReleaseDate_3_UTC, ReleaseDate_4_UTC, RejectDate_UTC, RejectDate_2_UTC, RejectDate_3_UTC,  
+         RejectDate_4_UTC, LastEmailDate_ThirdParty_UTC, LstUpdate_Date_UTC, Last_Upd_UserId, REFNO, FunctionManagementHeader, ActionDate,  
+         ActionDate_UTC, Action_UserID)  
+ FROM dbo.FEDWIRE_HEADER_MAIN A JOIN dbo.WORKFLOW_MGMT_QUEUE B   
+  ON A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3' AND B.DEL_FLAG = 'Y' AND B.SRC = 'FEDWIRE'   
+ ------------------END FedWire-----------------  
+   
+ ------------------Start NameCheck-----------------  
+ INSERT INTO dbo.NMCHK_Review_Diagram ( UID, NAME_KEY, ACTION, ROLE, STATUS, HANDLEDBY, QUEUEID, DESCR, LSTUPD_DATE,  
+                                         LSTUPD_USERID, LSTUPD_USERROLE, LSTUPD_DATE_UTC )  
+ SELECT A.uid, A.name_key, 11, 1, 1, NULL, A.QueueID, NULL, @BankLocalTime,  
+  @SystemUserId, NULL, @UtcNow  
+ FROM dbo.NMCHK_REVIEW_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+   
+ INSERT INTO dbo.NMCHK_RemarkLog ( UID, Name_Key, Role, HandledBy, Action, Remark, CreatedBy, Created_Date, UpdatedBy,  
+                                    Updated_Date, Created_Date_UTC, Updated_Date_UTC, ExtendedReviewDate )  
+ SELECT  A.uid, A.name_key, 1, NULL, 11, A.Remark, A.Created_UserId, A.Created_Date, @SystemUserId,  
+  @BankLocalTime, A.Created_Date_UTC, @UtcNow, A.ExtendedReviewDate  
+ FROM dbo.NMCHK_REVIEW_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+   
+ UPDATE A   
+ SET A.HandledBy = NULL, A.[Status] = '1', A.[ROLE] = 1, A.[ACTION] = 11,  
+  A.ReleaseBy = NULL,A.ReleaseDate = NULL, A.ReleaseBy_2 = NULL, A.ReleaseDate_2 = NULL, A.ReleaseBy_3 = NULL,  
+  A.ReleaseDate_3 = NULL, A.ReleaseBy_4 = NULL, A.ReleaseDate_4 = NULL, A.RejectBy = NULL, A.RejectDate = NULL, A.RejectBy_2 = NULL,  
+  A.RejectDate_2 = NULL, A.RejectBy_3 = NULL, A.RejectDate_3 = NULL, A.RejectBy_4 = NULL, A.RejectDate_4 = NULL,  
+  A.Last_Upd_Date = @BankLocalTime, A.Last_Upd_Date_UTC = @UtcNow, A.Last_Upd_UserId = @SystemuserID  
+ OUTPUT INSERTED.uid,INSERTED.name_key,INSERTED.BRANCH_NBR,INSERTED.Created_Date,INSERTED.Created_UserId,INSERTED.Last_Upd_Date,  
+ INSERTED.Last_Upd_UserId,INSERTED.HandledBy,INSERTED.Status,INSERTED.Action,INSERTED.Role,INSERTED.QueueID,INSERTED.EmailID,  
+ INSERTED.LastEmailDate,INSERTED.Detected,INSERTED.HoldBy,INSERTED.AssignBy,INSERTED.AssignDate,INSERTED.ReleaseBy,  
+ INSERTED.ReleaseDate,INSERTED.ReleaseBy_2,INSERTED.ReleaseDate_2,INSERTED.ReleaseBy_3,INSERTED.ReleaseDate_3,  
+ INSERTED.ReleaseBy_4,INSERTED.ReleaseDate_4,INSERTED.RejectBy,INSERTED.RejectDate,INSERTED.RejectBy_2,  
+ INSERTED.RejectDate_2,INSERTED.RejectBy_3,INSERTED.RejectDate_3,INSERTED.RejectBy_4,INSERTED.RejectDate_4,  
+ INSERTED.Msg_sender_id,INSERTED.Msg_receiver_id,INSERTED.EmailID_ThirdParty,  
+ INSERTED.LastEmailDate_ThirdParty,@BankLocalTime,@SystemUserId,INSERTED.Remark,  
+ INSERTED.LstUpdate_Remark,INSERTED.LstUpdate_Date,INSERTED.TYPE,INSERTED.Created_Date_UTC,  
+ INSERTED.Last_Upd_Date_UTC,INSERTED.LastEmailDate_UTC,INSERTED.AssignDate_UTC,INSERTED.ReleaseDate_UTC,  
+ INSERTED.ReleaseDate_2_UTC,INSERTED.ReleaseDate_3_UTC,INSERTED.ReleaseDate_4_UTC,  
+ INSERTED.RejectDate_UTC,INSERTED.RejectDate_2_UTC,INSERTED.RejectDate_3_UTC,INSERTED.RejectDate_4_UTC,  
+ @UtcNow,INSERTED.LastEmailDate_ThirdParty_UTC,INSERTED.LstUpdate_Date_UTC,  
+ INSERTED.LstUpdate_Role, Inserted.ExtendedReviewDate  
+ INTO dbo.NMCHK_Review_Main_Log (uid, name_key, BRANCH_NBR, Created_Date, Created_UserId, Last_Upd_Date,  
+         Last_Upd_UserId, HandledBy, Status, Action, Role, QueueID, EmailID,  
+         LastEmailDate, Detected, HoldBy, AssignBy, AssignDate, ReleaseBy,  
+         ReleaseDate, ReleaseBy_2, ReleaseDate_2, ReleaseBy_3, ReleaseDate_3,  
+         ReleaseBy_4, ReleaseDate_4, RejectBy, RejectDate, RejectBy_2,  
+         RejectDate_2, RejectBy_3, RejectDate_3, RejectBy_4, RejectDate_4,  
+         Msg_sender_id, Msg_receiver_id, EmailID_ThirdParty,  
+         LastEmailDate_ThirdParty, ActionDate, Action_UserID, Remark,  
+         LstUpdate_Remark, LstUpdate_Date, TYPE, Created_Date_UTC,  
+         Last_Upd_Date_UTC, LastEmailDate_UTC, AssignDate_UTC, ReleaseDate_UTC,  
+         ReleaseDate_2_UTC, ReleaseDate_3_UTC, ReleaseDate_4_UTC,  
+         RejectDate_UTC, RejectDate_2_UTC, RejectDate_3_UTC, RejectDate_4_UTC,  
+         ActionDate_UTC, LastEmailDate_ThirdParty_UTC, LstUpdate_Date_UTC,  
+         LstUpdate_Role, ExtendedReviewDate)  
+ FROM dbo.NMCHK_REVIEW_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'   
+   
+ UPDATE A   
+ SET A.QueueID = NULL, A.HandledBy = NULL, A.[Status] = '1', A.[ROLE] = 1, A.[ACTION] = 11,  
+  A.ReleaseBy = NULL,A.ReleaseDate = NULL, A.ReleaseBy_2 = NULL, A.ReleaseDate_2 = NULL, A.ReleaseBy_3 = NULL,  
+  A.ReleaseDate_3 = NULL, A.ReleaseBy_4 = NULL, A.ReleaseDate_4 = NULL, A.RejectBy = NULL, A.RejectDate = NULL, A.RejectBy_2 = NULL,  
+  A.RejectDate_2 = NULL, A.RejectBy_3 = NULL, A.RejectDate_3 = NULL, A.RejectBy_4 = NULL, A.RejectDate_4 = NULL,  
+  A.Last_Upd_Date = @BankLocalTime, A.Last_Upd_Date_UTC = @UtcNow, A.Last_Upd_UserId = @SystemuserID  
+ OUTPUT INSERTED.uid,INSERTED.name_key,INSERTED.BRANCH_NBR,INSERTED.Created_Date,INSERTED.Created_UserId,INSERTED.Last_Upd_Date,  
+ INSERTED.Last_Upd_UserId,INSERTED.HandledBy,INSERTED.Status,INSERTED.Action,INSERTED.Role,INSERTED.QueueID,INSERTED.EmailID,  
+ INSERTED.LastEmailDate,INSERTED.Detected,INSERTED.HoldBy,INSERTED.AssignBy,INSERTED.AssignDate,INSERTED.ReleaseBy,  
+ INSERTED.ReleaseDate,INSERTED.ReleaseBy_2,INSERTED.ReleaseDate_2,INSERTED.ReleaseBy_3,INSERTED.ReleaseDate_3,  
+ INSERTED.ReleaseBy_4,INSERTED.ReleaseDate_4,INSERTED.RejectBy,INSERTED.RejectDate,INSERTED.RejectBy_2,  
+ INSERTED.RejectDate_2,INSERTED.RejectBy_3,INSERTED.RejectDate_3,INSERTED.RejectBy_4,INSERTED.RejectDate_4,  
+ INSERTED.Msg_sender_id,INSERTED.Msg_receiver_id,INSERTED.EmailID_ThirdParty,  
+ INSERTED.LastEmailDate_ThirdParty,@BankLocalTime,@SystemUserId,INSERTED.Remark,  
+ INSERTED.LstUpdate_Remark,INSERTED.LstUpdate_Date,INSERTED.TYPE,INSERTED.Created_Date_UTC,  
+ INSERTED.Last_Upd_Date_UTC,INSERTED.LastEmailDate_UTC,INSERTED.AssignDate_UTC,INSERTED.ReleaseDate_UTC,  
+ INSERTED.ReleaseDate_2_UTC,INSERTED.ReleaseDate_3_UTC,INSERTED.ReleaseDate_4_UTC,  
+ INSERTED.RejectDate_UTC,INSERTED.RejectDate_2_UTC,INSERTED.RejectDate_3_UTC,INSERTED.RejectDate_4_UTC,  
+ @UtcNow,INSERTED.LastEmailDate_ThirdParty_UTC,INSERTED.LstUpdate_Date_UTC,  
+ INSERTED.LstUpdate_Role, Inserted.ExtendedReviewDate  
+ INTO dbo.NMCHK_Review_Main_Log (uid, name_key, BRANCH_NBR, Created_Date, Created_UserId, Last_Upd_Date,  
+         Last_Upd_UserId, HandledBy, Status, Action, Role, QueueID, EmailID,  
+         LastEmailDate, Detected, HoldBy, AssignBy, AssignDate, ReleaseBy,  
+         ReleaseDate, ReleaseBy_2, ReleaseDate_2, ReleaseBy_3, ReleaseDate_3,  
+         ReleaseBy_4, ReleaseDate_4, RejectBy, RejectDate, RejectBy_2,  
+         RejectDate_2, RejectBy_3, RejectDate_3, RejectBy_4, RejectDate_4,  
+         Msg_sender_id, Msg_receiver_id, EmailID_ThirdParty,  
+         LastEmailDate_ThirdParty, ActionDate, Action_UserID, Remark,  
+         LstUpdate_Remark, LstUpdate_Date, TYPE, Created_Date_UTC,  
+         Last_Upd_Date_UTC, LastEmailDate_UTC, AssignDate_UTC, ReleaseDate_UTC,  
+         ReleaseDate_2_UTC, ReleaseDate_3_UTC, ReleaseDate_4_UTC,  
+         RejectDate_UTC, RejectDate_2_UTC, RejectDate_3_UTC, RejectDate_4_UTC,  
+         ActionDate_UTC, LastEmailDate_ThirdParty_UTC, LstUpdate_Date_UTC,  
+         LstUpdate_Role, ExtendedReviewDate)  
+ FROM dbo.NMCHK_REVIEW_MAIN A JOIN dbo.WORKFLOW_MGMT_QUEUE B   
+  ON A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3' AND B.DEL_FLAG = 'Y' AND B.SRC = 'NAME'   
+ ------------------End NameCheck-----------------  
+   
+ ------------------Start DBCheck-----------------  
+ INSERT INTO dbo.DBCHK_Review_Diagram ( UID, CIF_KEY, ACTION, ROLE, STATUS, HANDLEDBY, QUEUEID, DESCR, LSTUPD_DATE,  
+                                         LSTUPD_USERID, LSTUPD_USERROLE, LSTUPD_DATE_UTC )  
+ SELECT A.uid, A.CIF_KEY, 11, 1, 1, NULL, A.QueueID, NULL, @BankLocalTime,  
+  @SystemUserId, NULL, @UtcNow  
+ FROM dbo.DBCHK_REVIEW_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+   
+ INSERT INTO dbo.DBCHK_RemarkLog ( UID, CIF_KEY, Role, HandledBy, Action, Remark, CreatedBy, Created_Date, UpdatedBy,  
+                                    Updated_Date, Created_Date_UTC, Updated_Date_UTC, ExtendedReviewDate )  
+ SELECT A.uid, A.CIF_KEY, 1, NULL, 11, A.Remark, A.Created_UserId, A.Created_Date, @SystemUserId,  
+  @BankLocalTime, A.Created_Date_UTC, @UtcNow, A.ExtendedReviewDate  
+ FROM dbo.DBCHK_REVIEW_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+   
+ UPDATE A   
+ SET A.HandledBy = NULL, A.[Status] = '1', A.[ROLE] = 1, A.[ACTION] = 11,  
+  A.ReleaseBy = NULL,A.ReleaseDate = NULL, A.ReleaseBy_2 = NULL, A.ReleaseDate_2 = NULL, A.ReleaseBy_3 = NULL,  
+  A.ReleaseDate_3 = NULL, A.ReleaseBy_4 = NULL, A.ReleaseDate_4 = NULL, A.RejectBy = NULL, A.RejectDate = NULL, A.RejectBy_2 = NULL,  
+  A.RejectDate_2 = NULL, A.RejectBy_3 = NULL, A.RejectDate_3 = NULL, A.RejectBy_4 = NULL, A.RejectDate_4 = NULL,  
+  A.Last_Upd_Date = @BankLocalTime, A.Last_Upd_Date_UTC = @UtcNow, A.Last_Upd_UserId = @SystemuserID  
+ OUTPUT INSERTED.uid,INSERTED.CIF_KEY,INSERTED.BRANCH_NBR,INSERTED.Created_Date,INSERTED.Created_UserId,INSERTED.Last_Upd_Date,  
+ INSERTED.Last_Upd_UserId,INSERTED.HandledBy,INSERTED.Status,INSERTED.Action,INSERTED.Role,INSERTED.QueueID,INSERTED.EmailID,  
+ INSERTED.LastEmailDate,INSERTED.Detected,INSERTED.HoldBy,INSERTED.AssignBy,INSERTED.AssignDate,INSERTED.ReleaseBy,  
+ INSERTED.ReleaseDate,INSERTED.ReleaseBy_2,INSERTED.ReleaseDate_2,INSERTED.ReleaseBy_3,INSERTED.ReleaseDate_3,  
+ INSERTED.ReleaseBy_4,INSERTED.ReleaseDate_4,INSERTED.RejectBy,INSERTED.RejectDate,INSERTED.RejectBy_2,  
+ INSERTED.RejectDate_2,INSERTED.RejectBy_3,INSERTED.RejectDate_3,INSERTED.RejectBy_4,INSERTED.RejectDate_4,  
+ INSERTED.Msg_sender_id,INSERTED.Msg_receiver_id,INSERTED.EmailID_ThirdParty,  
+ INSERTED.LastEmailDate_ThirdParty,INSERTED.Remark,INSERTED.LstUpdate_Remark,INSERTED.LstUpdate_Date,  
+ INSERTED.TYPE,INSERTED.Created_Date_UTC,INSERTED.Last_Upd_Date_UTC,INSERTED.LastEmailDate_UTC,  
+ INSERTED.AssignDate_UTC,INSERTED.ReleaseDate_UTC,INSERTED.ReleaseDate_2_UTC,INSERTED.ReleaseDate_3_UTC,  
+ INSERTED.ReleaseDate_4_UTC,INSERTED.RejectDate_UTC,INSERTED.RejectDate_2_UTC,INSERTED.RejectDate_3_UTC,  
+ INSERTED.RejectDate_4_UTC,INSERTED.LastEmailDate_ThirdParty_UTC,INSERTED.LstUpdate_Date_UTC,  
+ INSERTED.REFNO,@BankLocalTime,@SystemUserId,@UtcNow,INSERTED.CUST_NME,INSERTED.IsNew,  
+ INSERTED.LstUpdate_Role,INSERTED.ExtendedReviewDate  
+ INTO dbo.DBCHK_Review_Main_Log (uid, CIF_KEY, BRANCH_NBR, Created_Date, Created_UserId, Last_Upd_Date,  
+         Last_Upd_UserId, HandledBy, Status, Action, Role, QueueID, EmailID,  
+         LastEmailDate, Detected, HoldBy, AssignBy, AssignDate, ReleaseBy,  
+         ReleaseDate, ReleaseBy_2, ReleaseDate_2, ReleaseBy_3, ReleaseDate_3,  
+         ReleaseBy_4, ReleaseDate_4, RejectBy, RejectDate, RejectBy_2,  
+         RejectDate_2, RejectBy_3, RejectDate_3, RejectBy_4, RejectDate_4,  
+         Msg_sender_id, Msg_receiver_id, EmailID_ThirdParty,  
+         LastEmailDate_ThirdParty, Remark, LstUpdate_Remark, LstUpdate_Date,  
+         TYPE, Created_Date_UTC, Last_Upd_Date_UTC, LastEmailDate_UTC,  
+         AssignDate_UTC, ReleaseDate_UTC, ReleaseDate_2_UTC, ReleaseDate_3_UTC,  
+         ReleaseDate_4_UTC, RejectDate_UTC, RejectDate_2_UTC, RejectDate_3_UTC,  
+         RejectDate_4_UTC, LastEmailDate_ThirdParty_UTC, LstUpdate_Date_UTC,  
+         REFNO, ActionDate, Action_UserID, ActionDate_UTC, CUST_NME, IsNew,  
+         LstUpdate_Role, ExtendedReviewDate)  
+ FROM dbo.DBCHK_REVIEW_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'   
+   
+ UPDATE A   
+ SET A.QueueID = NULL, A.HandledBy = NULL, A.[Status] = '1', A.[ROLE] = 1, A.[ACTION] = 11,  
+  A.ReleaseBy = NULL,A.ReleaseDate = NULL, A.ReleaseBy_2 = NULL, A.ReleaseDate_2 = NULL, A.ReleaseBy_3 = NULL,  
+  A.ReleaseDate_3 = NULL, A.ReleaseBy_4 = NULL, A.ReleaseDate_4 = NULL, A.RejectBy = NULL, A.RejectDate = NULL, A.RejectBy_2 = NULL,  
+  A.RejectDate_2 = NULL, A.RejectBy_3 = NULL, A.RejectDate_3 = NULL, A.RejectBy_4 = NULL, A.RejectDate_4 = NULL,  
+  A.Last_Upd_Date = @BankLocalTime, A.Last_Upd_Date_UTC = @UtcNow, A.Last_Upd_UserId = @SystemuserID  
+ OUTPUT INSERTED.uid,INSERTED.CIF_KEY,INSERTED.BRANCH_NBR,INSERTED.Created_Date,INSERTED.Created_UserId,INSERTED.Last_Upd_Date,  
+ INSERTED.Last_Upd_UserId,INSERTED.HandledBy,INSERTED.Status,INSERTED.Action,INSERTED.Role,INSERTED.QueueID,INSERTED.EmailID,  
+ INSERTED.LastEmailDate,INSERTED.Detected,INSERTED.HoldBy,INSERTED.AssignBy,INSERTED.AssignDate,INSERTED.ReleaseBy,  
+ INSERTED.ReleaseDate,INSERTED.ReleaseBy_2,INSERTED.ReleaseDate_2,INSERTED.ReleaseBy_3,INSERTED.ReleaseDate_3,  
+ INSERTED.ReleaseBy_4,INSERTED.ReleaseDate_4,INSERTED.RejectBy,INSERTED.RejectDate,INSERTED.RejectBy_2,  
+ INSERTED.RejectDate_2,INSERTED.RejectBy_3,INSERTED.RejectDate_3,INSERTED.RejectBy_4,INSERTED.RejectDate_4,  
+ INSERTED.Msg_sender_id,INSERTED.Msg_receiver_id,INSERTED.EmailID_ThirdParty,  
+ INSERTED.LastEmailDate_ThirdParty,INSERTED.Remark,INSERTED.LstUpdate_Remark,INSERTED.LstUpdate_Date,  
+ INSERTED.TYPE,INSERTED.Created_Date_UTC,INSERTED.Last_Upd_Date_UTC,INSERTED.LastEmailDate_UTC,  
+ INSERTED.AssignDate_UTC,INSERTED.ReleaseDate_UTC,INSERTED.ReleaseDate_2_UTC,INSERTED.ReleaseDate_3_UTC,  
+ INSERTED.ReleaseDate_4_UTC,INSERTED.RejectDate_UTC,INSERTED.RejectDate_2_UTC,INSERTED.RejectDate_3_UTC,  
+ INSERTED.RejectDate_4_UTC,INSERTED.LastEmailDate_ThirdParty_UTC,INSERTED.LstUpdate_Date_UTC,  
+ INSERTED.REFNO,@BankLocalTime,@SystemUserId,@UtcNow,INSERTED.CUST_NME,INSERTED.IsNew,  
+ INSERTED.LstUpdate_Role,INSERTED.ExtendedReviewDate  
+ INTO dbo.DBCHK_Review_Main_Log (uid, CIF_KEY, BRANCH_NBR, Created_Date, Created_UserId, Last_Upd_Date,  
+         Last_Upd_UserId, HandledBy, Status, Action, Role, QueueID, EmailID,  
+         LastEmailDate, Detected, HoldBy, AssignBy, AssignDate, ReleaseBy,  
+         ReleaseDate, ReleaseBy_2, ReleaseDate_2, ReleaseBy_3, ReleaseDate_3,  
+         ReleaseBy_4, ReleaseDate_4, RejectBy, RejectDate, RejectBy_2,  
+         RejectDate_2, RejectBy_3, RejectDate_3, RejectBy_4, RejectDate_4,  
+         Msg_sender_id, Msg_receiver_id, EmailID_ThirdParty,  
+         LastEmailDate_ThirdParty, Remark, LstUpdate_Remark, LstUpdate_Date,  
+         TYPE, Created_Date_UTC, Last_Upd_Date_UTC, LastEmailDate_UTC,  
+         AssignDate_UTC, ReleaseDate_UTC, ReleaseDate_2_UTC, ReleaseDate_3_UTC,  
+         ReleaseDate_4_UTC, RejectDate_UTC, RejectDate_2_UTC, RejectDate_3_UTC,  
+         RejectDate_4_UTC, LastEmailDate_ThirdParty_UTC, LstUpdate_Date_UTC,  
+         REFNO, ActionDate, Action_UserID, ActionDate_UTC, CUST_NME, IsNew,  
+         LstUpdate_Role, ExtendedReviewDate)  
+ FROM dbo.DBCHK_REVIEW_MAIN A JOIN dbo.WORKFLOW_MGMT_QUEUE B   
+  ON A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3' AND B.DEL_FLAG = 'Y' AND B.SRC = 'DATABASE'  
+ ------------------End DBCheck-----------------  
+   
+ ------------------Start CIP-----------------  
+ INSERT INTO dbo.CIP_LOG ( CIF_KEY, ACCT_KEY, APPL, ACTION, ROLE, STATUS, HANDLEDBY, QUEUEID, DESCR, LSTUPD_DATE,  
+                            LSTUPD_USERID, LSTUPD_USERROLE, LSTUPD_DATE_UTC, DELETEFLAG )  
+ SELECT A.CIF_KEY, NULL, NULL, 11, 1, 1, NULL, A.QUEUEID, NULL, @BankLocalTime,  
+  @SystemUserId, NULL, @UtcNow, 'N'  
+ FROM dbo.CIP_CUST_RISK_MGMT A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+   
+ INSERT INTO dbo.CIP_RemarkLog ( CIF_KEY, Role, HandledBy, Action, Remark, CreatedBy, Created_Date, UpdatedBy,  
+                                  Updated_Date, Created_Date_UTC, Updated_Date_UTC, DELETEFLAG, LastBatchID, ExtendedReviewDate )  
+ SELECT A.CIF_KEY, 1, NULL, 11, A.REMARK, NULL, NULL, @SystemUserId,   
+  @BankLocalTime, NULL, @UtcNow, 'N', A.LastBatchID, A.ExtendedReviewDate  
+ FROM dbo.CIP_CUST_RISK_MGMT A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+   
+ UPDATE A   
+ SET A.HandledBy = NULL, A.[Status] = '1', A.[ROLE] = 1, A.[ACTION] = 11, A.isCalculated = 'N',  
+  A.LSTUPDATEBY = @SystemuserID, A.LSTUPDATE_DATE = @BankLocalTime, A.LSTUPDATE_DATE_UTC = @UtcNow  
+ OUTPUT DELETED.CIF_KEY,DELETED.BIZ_ESTABLISH_YR,DELETED.IS_HIGHRISK,DELETED.IS_MONEY_TRANSMITTER,  
+ DELETED.IS_NEVADA_BRNCH,DELETED.IS_TRANSMIT_OWNNETWORK,DELETED.IS_CASHCHECK,DELETED.IS_REDEEMCASH,  
+ DELETED.TYPE,DELETED.LSTUPDATEBY,DELETED.LSTUPDATE_DATE,DELETED.LSTUPDATE_DATE_UTC,'02',  
+ DELETED.HANDLEDBY,DELETED.STATUS,DELETED.ACTION,DELETED.ROLE,DELETED.QUEUEID,DELETED.EMAILID,DELETED.LASTEMAILDATE,  
+ DELETED.EMAILID_THIRDPARTY,DELETED.LASTEMAILDATE_THIRDPARTY,DELETED.ASSIGNBY,DELETED.ASSIGNDATE,  
+ DELETED.REVIEWBY,DELETED.REVIEWDATE,DELETED.REVIEWBY_2,DELETED.REVIEWDATE_2,DELETED.REVIEWBY_3,  
+ DELETED.REVIEWDATE_3,DELETED.REVIEWBY_4,DELETED.REVIEWDATE_4,DELETED.REMARK,DELETED.LSTUPDATE_REMARK,  
+ DELETED.LASTEMAILDATE_UTC,DELETED.LASTEMAILDATE_THIRDPARTY_UTC,DELETED.ASSIGNDATE_UTC,  
+ DELETED.REVIEWDATE_UTC,DELETED.REVIEWDATE_2_UTC,DELETED.REVIEWDATE_3_UTC,DELETED.REVIEWDATE_4_UTC,  
+ DELETED.CIPSCORE,DELETED.CIPRISKRANKING,DELETED.NEWCUSTFLAG,DELETED.LastBatchID,DELETED.Reason,  
+ DELETED.isCalculated,DELETED.Bank_Dealing_Period,DELETED.NegNews,DELETED.NegNews_Remark,DELETED.IsPEPHit,  
+ DELETED.IsOtherListHit,@SystemUserid,@BankLocalTime,@UtcNow,NULL, --updated from code ????   
+ DELETED.IsSARFiled,DELETED.GroupId,DELETED.HoldMailAcct,DELETED.DepositNetAsset,DELETED.CaseResetFlag,  
+ DELETED.IsResetIconVisible, DELETED.BranchNo, DELETED.CreatedDate, DELETED.CreatedDate_UTC, DELETED.ExtendedReviewDate  
+ INTO dbo.CIP_CUST_RISK_MGMT_LOG (CIF_KEY, BIZ_ESTABLISH_YR, IS_HIGHRISK, IS_MONEY_TRANSMITTER,  
+         IS_NEVADA_BRNCH, IS_TRANSMIT_OWNNETWORK, IS_CASHCHECK, IS_REDEEMCASH,  
+         TYPE, LSTUPDATEBY, LSTUPDATE_DATE, LSTUPDATE_DATE_UTC, ACTIONCD,  
+         HANDLEDBY, STATUS, ACTION, ROLE, QUEUEID, EMAILID, LASTEMAILDATE,  
+         EMAILID_THIRDPARTY, LASTEMAILDATE_THIRDPARTY, ASSIGNBY, ASSIGNDATE,  
+         REVIEWBY, REVIEWDATE, REVIEWBY_2, REVIEWDATE_2, REVIEWBY_3,  
+         REVIEWDATE_3, REVIEWBY_4, REVIEWDATE_4, REMARK, LSTUPDATE_REMARK,  
+         LASTEMAILDATE_UTC, LASTEMAILDATE_THIRDPARTY_UTC, ASSIGNDATE_UTC,  
+         REVIEWDATE_UTC, REVIEWDATE_2_UTC, REVIEWDATE_3_UTC, REVIEWDATE_4_UTC,  
+         CIPSCORE, CIPRISKRANKING, NEWCUSTFLAG, LastBatchID, Reason,  
+         isCalculated, Bank_Dealing_Period, NegNews, NegNews_Remark, IsPEPHit,  
+         IsOtherListHit, ActionBy, ActionDt, ActionDt_UTC, UpdatedFromCd,  
+         IsSARFiled, GroupId, HoldMailAcct, DepositNetAsset, CaseResetFlag,  
+         IsResetIconVisible, BranchNo, CreatedDate, CreatedDate_UTC, ExtendedReviewDate)  
+ FROM dbo.CIP_CUST_RISK_MGMT A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'   
+   
+ UPDATE A   
+ SET A.QueueID = NULL, A.HandledBy = NULL, A.[Status] = '1', A.[ROLE] = 1, A.[ACTION] = 11, A.isCalculated = 'N',  
+  A.LSTUPDATEBY = @SystemuserID, A.LSTUPDATE_DATE = @BankLocalTime, A.LSTUPDATE_DATE_UTC = @UtcNow  
+ OUTPUT DELETED.CIF_KEY,DELETED.BIZ_ESTABLISH_YR,DELETED.IS_HIGHRISK,DELETED.IS_MONEY_TRANSMITTER,  
+ DELETED.IS_NEVADA_BRNCH,DELETED.IS_TRANSMIT_OWNNETWORK,DELETED.IS_CASHCHECK,DELETED.IS_REDEEMCASH,  
+ DELETED.TYPE,DELETED.LSTUPDATEBY,DELETED.LSTUPDATE_DATE,DELETED.LSTUPDATE_DATE_UTC,'02',  
+ DELETED.HANDLEDBY,DELETED.STATUS,DELETED.ACTION,DELETED.ROLE,DELETED.QUEUEID,DELETED.EMAILID,DELETED.LASTEMAILDATE,  
+ DELETED.EMAILID_THIRDPARTY,DELETED.LASTEMAILDATE_THIRDPARTY,DELETED.ASSIGNBY,DELETED.ASSIGNDATE,  
+ DELETED.REVIEWBY,DELETED.REVIEWDATE,DELETED.REVIEWBY_2,DELETED.REVIEWDATE_2,DELETED.REVIEWBY_3,  
+ DELETED.REVIEWDATE_3,DELETED.REVIEWBY_4,DELETED.REVIEWDATE_4,DELETED.REMARK,DELETED.LSTUPDATE_REMARK,  
+ DELETED.LASTEMAILDATE_UTC,DELETED.LASTEMAILDATE_THIRDPARTY_UTC,DELETED.ASSIGNDATE_UTC,  
+ DELETED.REVIEWDATE_UTC,DELETED.REVIEWDATE_2_UTC,DELETED.REVIEWDATE_3_UTC,DELETED.REVIEWDATE_4_UTC,  
+ DELETED.CIPSCORE,DELETED.CIPRISKRANKING,DELETED.NEWCUSTFLAG,DELETED.LastBatchID,DELETED.Reason,  
+ DELETED.isCalculated,DELETED.Bank_Dealing_Period,DELETED.NegNews,DELETED.NegNews_Remark,DELETED.IsPEPHit,  
+ DELETED.IsOtherListHit,@SystemUserid,@BankLocalTime,@UtcNow,NULL, --updated from code ????   
+ DELETED.IsSARFiled,DELETED.GroupId,DELETED.HoldMailAcct,DELETED.DepositNetAsset,DELETED.CaseResetFlag,  
+ DELETED.IsResetIconVisible, DELETED.BranchNo, DELETED.CreatedDate, DELETED.CreatedDate_UTC, DELETED.ExtendedReviewDate  
+ INTO dbo.CIP_CUST_RISK_MGMT_LOG (CIF_KEY, BIZ_ESTABLISH_YR, IS_HIGHRISK, IS_MONEY_TRANSMITTER,  
+         IS_NEVADA_BRNCH, IS_TRANSMIT_OWNNETWORK, IS_CASHCHECK, IS_REDEEMCASH,  
+         TYPE, LSTUPDATEBY, LSTUPDATE_DATE, LSTUPDATE_DATE_UTC, ACTIONCD,  
+         HANDLEDBY, STATUS, ACTION, ROLE, QUEUEID, EMAILID, LASTEMAILDATE,  
+         EMAILID_THIRDPARTY, LASTEMAILDATE_THIRDPARTY, ASSIGNBY, ASSIGNDATE,  
+         REVIEWBY, REVIEWDATE, REVIEWBY_2, REVIEWDATE_2, REVIEWBY_3,  
+         REVIEWDATE_3, REVIEWBY_4, REVIEWDATE_4, REMARK, LSTUPDATE_REMARK,  
+         LASTEMAILDATE_UTC, LASTEMAILDATE_THIRDPARTY_UTC, ASSIGNDATE_UTC,  
+         REVIEWDATE_UTC, REVIEWDATE_2_UTC, REVIEWDATE_3_UTC, REVIEWDATE_4_UTC,  
+         CIPSCORE, CIPRISKRANKING, NEWCUSTFLAG, LastBatchID, Reason,  
+         isCalculated, Bank_Dealing_Period, NegNews, NegNews_Remark, IsPEPHit,  
+         IsOtherListHit, ActionBy, ActionDt, ActionDt_UTC, UpdatedFromCd,  
+         IsSARFiled, GroupId, HoldMailAcct, DepositNetAsset, CaseResetFlag,  
+         IsResetIconVisible, BranchNo, CreatedDate, CreatedDate_UTC, ExtendedReviewDate)  
+ FROM dbo.CIP_CUST_RISK_MGMT A JOIN dbo.WORKFLOW_MGMT_QUEUE B   
+  ON A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3' AND B.DEL_FLAG = 'Y' AND B.SRC = 'CIP'  
+ ------------------End CIP-----------------  
+   
+ ------------------Start HighRisk-----------------  
+ INSERT INTO dbo.HRS_LOG ( CIF_KEY, ACTION, ROLE, STATUS, HANDLEDBY, QUEUEID, DESCR, LSTUPD_DATE, LSTUPD_USERID,   
+     LSTUPD_USERROLE, LSTUPD_DATE_UTC, DELETEFLAG, BatchId )  
+ SELECT A.CIF_KEY, 11, 1, 1, NULL, A.QUEUEID, NULL, @BankLocalTime, @SystemUserId,   
+   NULL, @UtcNow, A.IsDeleted, A.BatchId  
+ FROM dbo.HRS_CUST_RISK_MGMT A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+   
+ INSERT INTO dbo.HRS_RemarkLog ( CIF_KEY, Role, HandledBy, Action, Remark, CreatedBy, Created_Date, UpdatedBy,  
+                                  Updated_Date, Created_Date_UTC, Updated_Date_UTC, DELETEFLAG, BatchId, ExtendedReviewDate )  
+ SELECT A.CIF_KEY, 1, NULL, 11, A.REMARK, A.Created_UserId, A.Created_Date, @SystemUseriD,   
+  @BankLocalTime, A.Created_Date_UTC, @UtcNow, A.IsDeleted, A.BatchId, A.ExtendedReviewDate  
+ FROM dbo.HRS_CUST_RISK_MGMT A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+   
+ UPDATE A   
+ SET A.HandledBy = NULL, A.[Status] = '1', A.[ROLE] = 1, A.[ACTION] = 11, A.isCalculated = 'N',  
+  A.LSTUPDATEBY = @SystemuserID, A.LSTUPDATE_DATE = @BankLocalTime, A.LSTUPDATE_DATE_UTC = @UtcNow  
+ OUTPUT DELETED.BatchId,DELETED.CIF_KEY,DELETED.TYPE,DELETED.LSTUPDATEBY,DELETED.LSTUPDATE_DATE,  
+ DELETED.LSTUPDATE_DATE_UTC,'02',DELETED.HANDLEDBY,DELETED.STATUS,DELETED.ACTION,DELETED.ROLE,DELETED.QUEUEID,  
+ DELETED.EMAILID,DELETED.LASTEMAILDATE,DELETED.EMAILID_THIRDPARTY,DELETED.LASTEMAILDATE_THIRDPARTY,  
+ DELETED.ASSIGNBY,DELETED.ASSIGNDATE,DELETED.REVIEWBY,DELETED.REVIEWDATE,DELETED.REVIEWBY_2,DELETED.REVIEWDATE_2,  
+ DELETED.REVIEWBY_3,DELETED.REVIEWDATE_3,DELETED.REVIEWBY_4,DELETED.REVIEWDATE_4,DELETED.REMARK,  
+ DELETED.LSTUPDATE_REMARK,DELETED.LASTEMAILDATE_UTC,DELETED.LASTEMAILDATE_THIRDPARTY_UTC,  
+ DELETED.ASSIGNDATE_UTC,DELETED.REVIEWDATE_UTC,DELETED.REVIEWDATE_2_UTC,DELETED.REVIEWDATE_3_UTC,  
+ DELETED.REVIEWDATE_4_UTC,DELETED.HRScore,DELETED.HighRiskFlag,DELETED.HRSRiskRanking,DELETED.IsDeleted,  
+ DELETED.Created_UserId,DELETED.Created_Date,DELETED.Created_Date_UTC,DELETED.IsCalculated,@SystemUserID,  
+ @BankLocalTime,@UtcNow,DELETED. ScenarioGroupId,DELETED. TimeKey,DELETED. CaseResetFlag,  
+         DELETED.IsResetIconVisible, deleted.BranchNo, deleted.ExtendedReviewDate  
+ INTO dbo.HRS_CUST_RISK_MGMT_LOG (BatchId, CIF_KEY, TYPE, LSTUPDATEBY, LSTUPDATE_DATE,  
+         LSTUPDATE_DATE_UTC, ACTIONCD, HANDLEDBY, STATUS, ACTION, ROLE, QUEUEID,  
+         EMAILID, LASTEMAILDATE, EMAILID_THIRDPARTY, LASTEMAILDATE_THIRDPARTY,  
+         ASSIGNBY, ASSIGNDATE, REVIEWBY, REVIEWDATE, REVIEWBY_2, REVIEWDATE_2,  
+         REVIEWBY_3, REVIEWDATE_3, REVIEWBY_4, REVIEWDATE_4, REMARK,  
+         LSTUPDATE_REMARK, LASTEMAILDATE_UTC, LASTEMAILDATE_THIRDPARTY_UTC,  
+         ASSIGNDATE_UTC, REVIEWDATE_UTC, REVIEWDATE_2_UTC, REVIEWDATE_3_UTC,  
+         REVIEWDATE_4_UTC, HRScore, HighRiskFlag, HRSRiskRanking, IsDeleted,  
+         Created_UserId, Created_Date, Created_Date_UTC, IsCalculated, ActionBy,  
+         ActionDt, ActionDt_UTC, ScenarioGroupId, TimeKey, CaseResetFlag,  
+         IsResetIconVisible, BranchNo, ExtendedReviewDate)  
+ FROM dbo.HRS_CUST_RISK_MGMT A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+   
+ UPDATE A   
+ SET A.QueueID = NULL, A.HandledBy = NULL, A.[Status] = '1', A.[ROLE] = 1, A.[ACTION] = 11, A.isCalculated = 'N',  
+  A.LSTUPDATEBY = @SystemuserID, A.LSTUPDATE_DATE = @BankLocalTime, A.LSTUPDATE_DATE_UTC = @UtcNow  
+ OUTPUT DELETED.BatchId,DELETED.CIF_KEY,DELETED.TYPE,DELETED.LSTUPDATEBY,DELETED.LSTUPDATE_DATE,  
+ DELETED.LSTUPDATE_DATE_UTC,'02',DELETED.HANDLEDBY,DELETED.STATUS,DELETED.ACTION,DELETED.ROLE,DELETED.QUEUEID,  
+ DELETED.EMAILID,DELETED.LASTEMAILDATE,DELETED.EMAILID_THIRDPARTY,DELETED.LASTEMAILDATE_THIRDPARTY,  
+ DELETED.ASSIGNBY,DELETED.ASSIGNDATE,DELETED.REVIEWBY,DELETED.REVIEWDATE,DELETED.REVIEWBY_2,DELETED.REVIEWDATE_2,  
+ DELETED.REVIEWBY_3,DELETED.REVIEWDATE_3,DELETED.REVIEWBY_4,DELETED.REVIEWDATE_4,DELETED.REMARK,  
+ DELETED.LSTUPDATE_REMARK,DELETED.LASTEMAILDATE_UTC,DELETED.LASTEMAILDATE_THIRDPARTY_UTC,  
+ DELETED.ASSIGNDATE_UTC,DELETED.REVIEWDATE_UTC,DELETED.REVIEWDATE_2_UTC,DELETED.REVIEWDATE_3_UTC,  
+ DELETED.REVIEWDATE_4_UTC,DELETED.HRScore,DELETED.HighRiskFlag,DELETED.HRSRiskRanking,DELETED.IsDeleted,  
+ DELETED.Created_UserId,DELETED.Created_Date,DELETED.Created_Date_UTC,DELETED.IsCalculated,@SystemUserID,  
+ @BankLocalTime,@UtcNow,DELETED. ScenarioGroupId,DELETED. TimeKey,DELETED. CaseResetFlag,  
+         DELETED.IsResetIconVisible, deleted.BranchNo, deleted.ExtendedReviewDate  
+ INTO dbo.HRS_CUST_RISK_MGMT_LOG (BatchId, CIF_KEY, TYPE, LSTUPDATEBY, LSTUPDATE_DATE,  
+         LSTUPDATE_DATE_UTC, ACTIONCD, HANDLEDBY, STATUS, ACTION, ROLE, QUEUEID,  
+         EMAILID, LASTEMAILDATE, EMAILID_THIRDPARTY, LASTEMAILDATE_THIRDPARTY,  
+         ASSIGNBY, ASSIGNDATE, REVIEWBY, REVIEWDATE, REVIEWBY_2, REVIEWDATE_2,  
+         REVIEWBY_3, REVIEWDATE_3, REVIEWBY_4, REVIEWDATE_4, REMARK,  
+         LSTUPDATE_REMARK, LASTEMAILDATE_UTC, LASTEMAILDATE_THIRDPARTY_UTC,  
+         ASSIGNDATE_UTC, REVIEWDATE_UTC, REVIEWDATE_2_UTC, REVIEWDATE_3_UTC,  
+         REVIEWDATE_4_UTC, HRScore, HighRiskFlag, HRSRiskRanking, IsDeleted,  
+         Created_UserId, Created_Date, Created_Date_UTC, IsCalculated, ActionBy,  
+         ActionDt, ActionDt_UTC, ScenarioGroupId, TimeKey, CaseResetFlag,  
+         IsResetIconVisible, BranchNo, ExtendedReviewDate)  
+ FROM dbo.HRS_CUST_RISK_MGMT A JOIN dbo.WORKFLOW_MGMT_QUEUE B   
+  ON A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3' AND B.DEL_FLAG = 'Y' AND B.SRC = 'HRS'  
+ ------------------End HighRisk-----------------  
+   
+ ------------------Start SAR-----------------  
+ INSERT INTO dbo.SAR_LOG ( BATID, GROUPID, ACTION, ROLE, STATUS, HANDLEDBY, QUEUEID, DESCR, LSTUPD_DATE, LSTUPD_USERID,  
+                            LSTUPD_USERROLE, LSTUPD_DATE_UTC )  
+ SELECT A.BATID, A.GROUPID, 11, 1, 1, NULL, A.QueueID, NULL, @BankLocalTime, @SystemUseriD,  
+  NULL, @UtcNow  
+ FROM dbo.SAR_HEADER_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+   
+ INSERT INTO dbo.SAR_RemarkLog ( BATID, GROUPID, Role, HandledBy, Action, Remark, CreatedBy, Created_Date, UpdatedBy,  
+                                  Updated_Date, Created_Date_UTC, Updated_Date_UTC, ExtendedReviewDate)  
+ SELECT A.BATID, A.GROUPID, 1, NULL, 11, A.Remark, NULL, A.CreatedDate, @SystemUseriD,   
+  @BankLocalTime, A.CreatedDate_UTC, @UtcNow, A.ExtendedReviewDate  
+ FROM dbo.SAR_HEADER_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'   
+   
+ UPDATE A   
+ SET A.HandledBy = NULL, A.[Role] = 1, A.[ACTION] = 11,  
+  A.[Status] = CASE WHEN A.Status_SAR in ('5','6') THEN '2' WHEN A.Status_SAR IN ('1','2') THEN '1' END,  
+  A.Status_SAR = CASE WHEN A.Status_SAR in ('5','6') THEN '5' WHEN A.Status_SAR IN ('1','2') THEN '1' END,  
+  A.ReleaseBy = NULL,A.ReleaseDate = NULL, A.ReleaseBy_2 = NULL, A.ReleaseDate_2 = NULL, A.ReleaseBy_3 = NULL,  
+  A.ReleaseDate_3 = NULL, A.ReleaseBy_4 = NULL, A.ReleaseDate_4 = NULL, A.RejectBy = NULL, A.RejectDate = NULL, A.RejectBy_2 = NULL,  
+  A.RejectDate_2 = NULL, A.RejectBy_3 = NULL, A.RejectDate_3 = NULL, A.RejectBy_4 = NULL, A.RejectDate_4 = NULL,  
+  A.Last_Upd_Date = @BankLocalTime, A.Last_Upd_Date_UTC = @UtcNow, A.Last_Upd_UserId = @SystemuserID,  
+  A.TransferDate = NULL, A.PreviousAction = NULL   
+ OUTPUT DELETED.BATID,DELETED.GROUPID,DELETED.CreatedDate,DELETED.CreatedDate_UTC,DELETED.Last_Upd_Date,  
+ DELETED.Last_Upd_Date_UTC,DELETED.HandledBy,DELETED.Status,DELETED.Action,DELETED.Role,DELETED.QueueID,DELETED.EmailID,  
+ DELETED.LastEmailDate,DELETED.IsDeleted,DELETED.AssignBy,DELETED.AssignDate,DELETED.ReleaseBy,DELETED.ReleaseDate,  
+ DELETED.ReleaseBy_2,DELETED.ReleaseDate_2,DELETED.ReleaseBy_3,DELETED.ReleaseDate_3,DELETED.ReleaseBy_4,  
+ DELETED.ReleaseDate_4,DELETED.RejectBy,DELETED.RejectDate,DELETED.RejectBy_2,DELETED.RejectDate_2,  
+ DELETED.RejectBy_3,DELETED.RejectDate_3,DELETED.RejectBy_4,DELETED.RejectDate_4,DELETED.EmailID_ThirdParty,  
+ DELETED.LastEmailDate_ThirdParty,DELETED.Remark,DELETED.LstUpdate_Remark,DELETED.LstUpdate_Date,  
+ DELETED.BranchNo,DELETED.LastEmailDate_UTC,DELETED.AssignDate_UTC,DELETED.ReleaseDate_UTC,  
+ DELETED.ReleaseDate_2_UTC,DELETED.ReleaseDate_3_UTC,DELETED.ReleaseDate_4_UTC,  
+ DELETED.RejectDate_UTC,DELETED.RejectDate_2_UTC,DELETED.RejectDate_3_UTC,DELETED.RejectDate_4_UTC,  
+ DELETED.LastEmailDate_ThirdParty_UTC,DELETED.LstUpdate_Date_UTC,DELETED.Last_Upd_UserId,  
+ @BankLocalTIme,@UtcNow,@SystemUserID,DELETED.Status_SAR,DELETED.AllCustomerName,  
+ DELETED.PriorityScore,DELETED.ISSID,DELETED.ExtendedReviewDate, Deleted.TransferDate, Deleted.PreviousAction  
+ INTO dbo.SAR_Header_Main_Log (BATID, GROUPID, CreatedDate, CreatedDate_UTC, Last_Upd_Date,  
+         Last_Upd_Date_UTC, HandledBy, Status, Action, Role, QueueID, EmailID,  
+         LastEmailDate, IsDeleted, AssignBy, AssignDate, ReleaseBy, ReleaseDate,  
+         ReleaseBy_2, ReleaseDate_2, ReleaseBy_3, ReleaseDate_3, ReleaseBy_4,  
+         ReleaseDate_4, RejectBy, RejectDate, RejectBy_2, RejectDate_2,  
+         RejectBy_3, RejectDate_3, RejectBy_4, RejectDate_4, EmailID_ThirdParty,  
+         LastEmailDate_ThirdParty, Remark, LstUpdate_Remark, LstUpdate_Date,  
+         BranchNo, LastEmailDate_UTC, AssignDate_UTC, ReleaseDate_UTC,  
+         ReleaseDate_2_UTC, ReleaseDate_3_UTC, ReleaseDate_4_UTC,  
+         RejectDate_UTC, RejectDate_2_UTC, RejectDate_3_UTC, RejectDate_4_UTC,  
+         LastEmailDate_ThirdParty_UTC, LstUpdate_Date_UTC, Last_Upd_UserId,  
+         ActionDate, ActionDate_UTC, Action_UserID, Status_SAR, AllCustomerName,  
+         PriorityScore, ISSID, ExtendedReviewDate, TransferDate, PreviousAction)  
+ FROM dbo.SAR_HEADER_MAIN A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B   
+  ON A.HandledBy = B.UserId AND A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3'  
+   
+ UPDATE A   
+ SET A.QueueID = NULL, A.HandledBy = NULL, A.[Role] = 1, A.[ACTION] = 11,  
+  A.[Status] = CASE WHEN A.Status_SAR in ('5','6') THEN '2' WHEN A.Status_SAR IN ('1','2') THEN '1' END,  
+  A.Status_SAR = CASE WHEN A.Status_SAR in ('5','6') THEN '5' WHEN A.Status_SAR IN ('1','2') THEN '1' END,  
+  A.ReleaseBy = NULL,A.ReleaseDate = NULL, A.ReleaseBy_2 = NULL, A.ReleaseDate_2 = NULL, A.ReleaseBy_3 = NULL,  
+  A.ReleaseDate_3 = NULL, A.ReleaseBy_4 = NULL, A.ReleaseDate_4 = NULL, A.RejectBy = NULL, A.RejectDate = NULL, A.RejectBy_2 = NULL,  
+  A.RejectDate_2 = NULL, A.RejectBy_3 = NULL, A.RejectDate_3 = NULL, A.RejectBy_4 = NULL, A.RejectDate_4 = NULL,  
+  A.Last_Upd_Date = @BankLocalTime, A.Last_Upd_Date_UTC = @UtcNow, A.Last_Upd_UserId = @SystemuserID,  
+  A.TransferDate = NULL, A.PreviousAction = NULL   
+ OUTPUT DELETED.BATID,DELETED.GROUPID,DELETED.CreatedDate,DELETED.CreatedDate_UTC,DELETED.Last_Upd_Date,  
+ DELETED.Last_Upd_Date_UTC,DELETED.HandledBy,DELETED.Status,DELETED.Action,DELETED.Role,DELETED.QueueID,DELETED.EmailID,  
+ DELETED.LastEmailDate,DELETED.IsDeleted,DELETED.AssignBy,DELETED.AssignDate,DELETED.ReleaseBy,DELETED.ReleaseDate,  
+ DELETED.ReleaseBy_2,DELETED.ReleaseDate_2,DELETED.ReleaseBy_3,DELETED.ReleaseDate_3,DELETED.ReleaseBy_4,  
+ DELETED.ReleaseDate_4,DELETED.RejectBy,DELETED.RejectDate,DELETED.RejectBy_2,DELETED.RejectDate_2,  
+ DELETED.RejectBy_3,DELETED.RejectDate_3,DELETED.RejectBy_4,DELETED.RejectDate_4,DELETED.EmailID_ThirdParty,  
+ DELETED.LastEmailDate_ThirdParty,DELETED.Remark,DELETED.LstUpdate_Remark,DELETED.LstUpdate_Date,  
+ DELETED.BranchNo,DELETED.LastEmailDate_UTC,DELETED.AssignDate_UTC,DELETED.ReleaseDate_UTC,  
+ DELETED.ReleaseDate_2_UTC,DELETED.ReleaseDate_3_UTC,DELETED.ReleaseDate_4_UTC,  
+ DELETED.RejectDate_UTC,DELETED.RejectDate_2_UTC,DELETED.RejectDate_3_UTC,DELETED.RejectDate_4_UTC,  
+ DELETED.LastEmailDate_ThirdParty_UTC,DELETED.LstUpdate_Date_UTC,DELETED.Last_Upd_UserId,  
+ @BankLocalTIme,@UtcNow,@SystemUserID,DELETED.Status_SAR,DELETED.AllCustomerName,  
+ DELETED.PriorityScore,DELETED.ISSID,DELETED.ExtendedReviewDate, Deleted.TransferDate, Deleted.PreviousAction  
+ INTO dbo.SAR_Header_Main_Log (BATID, GROUPID, CreatedDate, CreatedDate_UTC, Last_Upd_Date,  
+         Last_Upd_Date_UTC, HandledBy, Status, Action, Role, QueueID, EmailID,  
+         LastEmailDate, IsDeleted, AssignBy, AssignDate, ReleaseBy, ReleaseDate,  
+         ReleaseBy_2, ReleaseDate_2, ReleaseBy_3, ReleaseDate_3, ReleaseBy_4,  
+         ReleaseDate_4, RejectBy, RejectDate, RejectBy_2, RejectDate_2,  
+         RejectBy_3, RejectDate_3, RejectBy_4, RejectDate_4, EmailID_ThirdParty,  
+         LastEmailDate_ThirdParty, Remark, LstUpdate_Remark, LstUpdate_Date,  
+         BranchNo, LastEmailDate_UTC, AssignDate_UTC, ReleaseDate_UTC,  
+         ReleaseDate_2_UTC, ReleaseDate_3_UTC, ReleaseDate_4_UTC,  
+         RejectDate_UTC, RejectDate_2_UTC, RejectDate_3_UTC, RejectDate_4_UTC,  
+         LastEmailDate_ThirdParty_UTC, LstUpdate_Date_UTC, Last_Upd_UserId,  
+         ActionDate, ActionDate_UTC, Action_UserID, Status_SAR, AllCustomerName,  
+         PriorityScore, ISSID, ExtendedReviewDate, TransferDate, PreviousAction)  
+ FROM dbo.SAR_HEADER_MAIN A JOIN dbo.WORKFLOW_MGMT_QUEUE B   
+  ON A.QueueID = B.QueueId  
+ WHERE A.[Status] <> '3' AND B.DEL_FLAG = 'Y' AND B.SRC = 'SAR'  
+   
+ ------------------End SAR-----------------  
+ BEGIN /*DOMESTIC WIRE - DWIRE*/  
+  INSERT INTO dbo.DWire_DiagramLog ( TransId, Action, Role, Status, HandledBy, QueueId, UpdatedBy, UpdatedPersonRole, UpdatedDate_UTC )  
+  SELECT A.TransID, 11, 1, 1, NULL, A.QueueId, @SystemuserID, 1, @UtcNow  
+  FROM dbo.DWire_ReviewMain A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B ON A.HandledBy = B.UserId AND A.QueueId = B.QueueId  
+  WHERE A.Status < 3   
+  
+  INSERT INTO dbo.DWire_RemarkLog ( TransId, HandledBy, Status, Action, Role, Remark, UpdatedDate_UTC, UpdatedBy )  
+  SELECT A.TransID, NULL, 1, 11, 1, '', @UtcNow, @SystemuserID  
+  FROM dbo.DWire_ReviewMain A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B ON A.HandledBy = B.UserId AND A.QueueId = B.QueueId  
+  WHERE A.Status < 3   
+  
+  --update for deleted queue   
+  UPDATE A   
+  SET A.HandledBy = NULL,   
+   A.QueueId = NULL,  
+   A.Status = 1,  
+   A.Role = 1,   
+   A.Action = 11,  
+   A.LastUpdatedBy = @SystemuserID,  
+   A.LastUpdatedDate_UTC = @UtcNow  
+  FROM dbo.DWire_ReviewMain A   
+  WHERE EXISTS(SELECT 1 FROM dbo.WORKFLOW_MGMT_QUEUE B WHERE A.QueueID = B.QueueId AND B.DEL_FLAG = 'Y' AND B.SRC = 'DWire')  
+  AND A.[Status] < 3   
+    
+  --update for deleted users   
+  UPDATE A   
+  SET A.HandledBy = NULL,   
+   A.Status = 1,  
+   A.Role = 1,   
+   A.Action = 11,  
+   A.LastUpdatedBy = @SystemuserID,  
+   A.LastUpdatedDate_UTC = @UtcNow  
+  FROM dbo.DWire_ReviewMain A   
+  WHERE EXISTS(SELECT 1 FROM dbo.WORKFLOW_AutomatedDeletedUsers_temp B WHERE A.HandledBy = B.UserId AND A.QueueID = B.QueueId)  
+  AND A.[Status] < 3 AND A.QueueId IS NOT NULL  
+  
+ END   
+   
+ BEGIN /*Trade Finance - TRADEFIN*/  
+  INSERT INTO dbo.TradeFin_DiagramLog ( CaseID, Action, Role, Status, HandledBy, QueueId, UpdatedBy, UpdatedPersonRole, UpdatedDate_UTC )  
+  SELECT A.CaseID, 11, 1, 1, NULL, A.QueueId, @SystemuserID, 1, @UtcNow  
+  FROM dbo.TradeFin_Header_Main A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B ON A.HandledBy = B.UserId AND A.QueueId = B.QueueId  
+  WHERE A.Status < 3   
+  
+  --INSERT INTO dbo.TradeFin_RemarkLog ( CaseID, Role, HandledBy, Action, Remark, CreatedBy, Created_Date_UTC, UpdatedBy, Updated_Date_UTC )  
+  --SELECT A.CaseID, 1, NULL, 11, '', @SystemuserID, @UtcNow, @SystemuserID, @UtcNow  
+  --FROM dbo.TradeFin_Header_Main A JOIN dbo.WORKFLOW_AutomatedDeletedUsers_temp B ON A.HandledBy = B.UserId AND A.QueueId = B.QueueId  
+  --WHERE A.Status < 3   
+    
+  --update for deleted queue   
+  UPDATE A   
+  SET A.HandledBy = NULL,   
+   A.QueueId = NULL,  
+   A.Status = 1,  
+   A.Role = 1,   
+   A.Action = 11,  
+   A.LastUpdatedBy = @SystemuserID,  
+   A.LastUpdatedDate_UTC = @UtcNow  
+  OUTPUT Deleted.CaseID, '02', @SystemuserID, @UtcNow, Deleted.CIF_Key, Deleted.Branch_No, Deleted.TradeType, Deleted.TradeSubType, Deleted.DocumentationType,   
+    Deleted.Status, Deleted.Action, Deleted.Role, Deleted.Priority_Seq, Deleted.QueueID, Deleted.HandledBy, Deleted.CreatedBy, Deleted.CreatedDate_UTC, Deleted.LastUpdatedBy,   
+    Deleted.LastUpdatedDate_UTC, Deleted.AssignBy, Deleted.AssignDate_UTC, Deleted.LastRemark, Deleted.LastRemarkBy, Deleted.ReleaseBy, Deleted.ReleaseDate_UTC, Deleted.ReleaseBy_2,   
+    Deleted.ReleaseDate_2_UTC, Deleted.ReleaseBy_3, Deleted.ReleaseDate_3_UTC, Deleted.ReleaseBy_4, Deleted.ReleaseDate_4_UTC, Deleted.RejectBy, Deleted.RejectDate_UTC,   
+    Deleted.RejectBy_2, Deleted.RejectDate_2_UTC, Deleted.RejectBy_3, Deleted.RejectDate_3_UTC, Deleted.RejectBy_4, Deleted.RejectDate_4_UTC, Deleted.EscalateBy,   
+    Deleted.EscalateDate_UTC, Deleted.EscalateBy_2, Deleted.EscalateDate_2_UTC, Deleted.EscalateBy_3, Deleted.EscalateDate_3_UTC, Deleted.EmailID, Deleted.LastEmailDate_UTC,   
+    Deleted.EmailID_ThirdParty, Deleted.LastEmailDate_ThirdParty_UTC  
+         INTO dbo.TradeFin_Header_Main_Log(CaseID, ActionCode, ActionBy, ActionDate_UTC, CIF_Key, Branch_No, TradeType, TradeSubType, DocumentationType,  
+               Status, Action, Role, Priority_Seq, QueueID, HandledBy, CreatedBy, CreatedDate_UTC, LastUpdatedBy,  
+               LastUpdatedDate_UTC, AssignBy, AssignDate_UTC, LastRemark, LastRemarkBy, ReleaseBy, ReleaseDate_UTC, ReleaseBy_2,  
+               ReleaseDate_2_UTC, ReleaseBy_3, ReleaseDate_3_UTC, ReleaseBy_4, ReleaseDate_4_UTC, RejectBy, RejectDate_UTC,  
+               RejectBy_2, RejectDate_2_UTC, RejectBy_3, RejectDate_3_UTC, RejectBy_4, RejectDate_4_UTC, EscalateBy,  
+               EscalateDate_UTC, EscalateBy_2, EscalateDate_2_UTC, EscalateBy_3, EscalateDate_3_UTC, EmailID, LastEmailDate_UTC,  
+               EmailID_ThirdParty, LastEmailDate_ThirdParty_UTC)  
+  FROM dbo.TradeFin_Header_Main A   
+  WHERE EXISTS(SELECT 1 FROM dbo.WORKFLOW_MGMT_QUEUE B WHERE A.QueueID = B.QueueId AND B.DEL_FLAG = 'Y' AND B.SRC = 'TradeFin')  
+  AND A.[Status] < 3   
+    
+  --update for deleted users   
+  UPDATE A   
+  SET A.HandledBy = NULL,   
+   A.Status = 1,  
+   A.Role = 1,   
+   A.Action = 11,  
+   A.LastUpdatedBy = @SystemuserID,  
+   A.LastUpdatedDate_UTC = @UtcNow  
+  OUTPUT Deleted.CaseID, '02', @SystemuserID, @UtcNow, Deleted.CIF_Key, Deleted.Branch_No, Deleted.TradeType, Deleted.TradeSubType, Deleted.DocumentationType,   
+   Deleted.Status, Deleted.Action, Deleted.Role, Deleted.Priority_Seq, Deleted.QueueID, Deleted.HandledBy, Deleted.CreatedBy, Deleted.CreatedDate_UTC, Deleted.LastUpdatedBy,   
+   Deleted.LastUpdatedDate_UTC, Deleted.AssignBy, Deleted.AssignDate_UTC, Deleted.LastRemark, Deleted.LastRemarkBy, Deleted.ReleaseBy, Deleted.ReleaseDate_UTC, Deleted.ReleaseBy_2,   
+   Deleted.ReleaseDate_2_UTC, Deleted.ReleaseBy_3, Deleted.ReleaseDate_3_UTC, Deleted.ReleaseBy_4, Deleted.ReleaseDate_4_UTC, Deleted.RejectBy, Deleted.RejectDate_UTC,   
+   Deleted.RejectBy_2, Deleted.RejectDate_2_UTC, Deleted.RejectBy_3, Deleted.RejectDate_3_UTC, Deleted.RejectBy_4, Deleted.RejectDate_4_UTC, Deleted.EscalateBy,   
+   Deleted.EscalateDate_UTC, Deleted.EscalateBy_2, Deleted.EscalateDate_2_UTC, Deleted.EscalateBy_3, Deleted.EscalateDate_3_UTC, Deleted.EmailID, Deleted.LastEmailDate_UTC,   
+   Deleted.EmailID_ThirdParty, Deleted.LastEmailDate_ThirdParty_UTC  
+         INTO dbo.TradeFin_Header_Main_Log(CaseID, ActionCode, ActionBy, ActionDate_UTC, CIF_Key, Branch_No, TradeType, TradeSubType, DocumentationType,  
+               Status, Action, Role, Priority_Seq, QueueID, HandledBy, CreatedBy, CreatedDate_UTC, LastUpdatedBy,  
+               LastUpdatedDate_UTC, AssignBy, AssignDate_UTC, LastRemark, LastRemarkBy, ReleaseBy, ReleaseDate_UTC, ReleaseBy_2,  
+               ReleaseDate_2_UTC, ReleaseBy_3, ReleaseDate_3_UTC, ReleaseBy_4, ReleaseDate_4_UTC, RejectBy, RejectDate_UTC,  
+               RejectBy_2, RejectDate_2_UTC, RejectBy_3, RejectDate_3_UTC, RejectBy_4, RejectDate_4_UTC, EscalateBy,  
+               EscalateDate_UTC, EscalateBy_2, EscalateDate_2_UTC, EscalateBy_3, EscalateDate_3_UTC, EmailID, LastEmailDate_UTC,  
+               EmailID_ThirdParty, LastEmailDate_ThirdParty_UTC)  
+  FROM dbo.TradeFin_Header_Main A   
+  WHERE EXISTS(SELECT 1 FROM dbo.WORKFLOW_AutomatedDeletedUsers_temp B WHERE A.HandledBy = B.UserId AND A.QueueID = B.QueueId)  
+  AND A.[Status] < 3 AND A.QueueID IS NOT NULL  
+  
+ END   
+    
+ /*---------------------------------------------------*/  
+END   
+   
+ IF OBJECT_ID ('WORKFLOW_MGMT_USERS_temp', 'U') IS NOT NULL  
+  DROP TABLE WORKFLOW_MGMT_USERS_temp  
+   
+ IF OBJECT_ID ('WORKFLOW_AutomatedDeletedUsers_temp', 'U') IS NOT NULL  
+  DROP TABLE WORKFLOW_AutomatedDeletedUsers_temp  
+END  
+  
+  
