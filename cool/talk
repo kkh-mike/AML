@@ -1,3 +1,25 @@
+SELECT 
+    r.session_id,
+    r.status,
+    r.cpu_time,
+    r.total_elapsed_time AS elapsed_time_ms,
+    r.wait_type,
+    r.wait_time AS wait_time_ms,
+    r.blocking_session_id AS blocked_by, -- 誰卡住了它 (大於 0 表示被擋住)
+    SUBSTRING(t.text, (r.statement_start_offset/2)+1,   
+        (((CASE r.statement_end_offset  
+            WHEN -1 THEN DATALENGTH(t.text)  
+            ELSE r.statement_end_offset  
+        END) - r.statement_start_offset)/2) + 1) AS running_statement,
+    DB_NAME(r.database_id) AS database_name
+FROM sys.dm_exec_requests r
+CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
+WHERE r.session_id <> @@SPID -- 排除自己
+  AND r.status NOT IN ('background', 'sleeping');
+
+
+
+
 權限異動 SP 核心重點
 真正的權限異動只由以下 4 支 SP 負責：
  * WORKFLOW_MGMT_SAVUSERS（後台 UI 存檔）
