@@ -1,19 +1,21 @@
+-- 1. 查詢 DJ_Entity 各條件筆數
+SELECT 
+    COUNT(CASE WHEN FullName LIKE '%ハリール%' THEN 1 END) AS [FullName_ハリール],
+    COUNT(CASE WHEN FullName LIKE '%アフメド%' THEN 1 END) AS [FullName_アフメド],
+    COUNT(CASE WHEN FullName LIKE '%ハッカーニ%' THEN 1 END) AS [FullName_ハッカーニ],
+    COUNT(CASE WHEN FullName LIKE '%Khalil ur Rahman Haqqani%' THEN 1 END) AS [FullName_Like_Khalil_ur_Rahman_Haqqani],
+    COUNT(CASE WHEN FullName = 'Khalil Al-Rahman Haqqani' THEN 1 END) AS [FullName_Equal_Khalil_Al-Rahman_Haqqani],
+    COUNT(CASE WHEN FullName = 'Khalil ur Rahman Haqqani' THEN 1 END) AS [FullName_Equal_Khalil_ur_Rahman_Haqqani],
+    COUNT(CASE WHEN FullName = 'Khaleel Haqqani' THEN 1 END) AS [FullName_Equal_Khaleel_Haqqani]
+FROM BSADB.dbo.DJ_Entity;
 
-SELECT count(*) FROM BSADB.dbo.DJ_Entity WHERE FullName like '%ハリール%'
-SELECT count(*) FROM BSADB.dbo.DJ_Entity WHERE FullName like '%アフメド%'
-SELECT count(*) FROM BSADB.dbo.DJ_Entity WHERE FullName like '%ハッカーニ%'
-SELECT count(*) FROM BSADB.dbo.DJ_Entity WHERE FullName like '%Khalil ur Rahman Haqqani%'
-SELECT count(*) FROM BSADB.dbo.DJ_Entity WHERE FullName = 'Khalil Al-Rahman Haqqani'
-SELECT count(*) FROM BSADB.dbo.DJ_Entity WHERE FullName = 'Khalil ur Rahman Haqqani'
-SELECT count(*) FROM BSADB.dbo.DJ_Entity WHERE FullName = 'Khaleel Haqqani'
-
-
-SELECT count(*) FROM BSADB.dbo.DJ_List_Data_A WHERE SdnName like  '%ハリール%'
-SELECT count(*) FROM BSADB.dbo.DJ_List_Data_A WHERE SdnName like '%アフメド%'
-SELECT count(*) FROM BSADB.dbo.DJ_List_Data_A WHERE SdnName like '%ハッカーニ%'
-SELECT count(*) FROM BSADB.dbo.DJ_List_Data_A WHERE SdnName like '%Khalil ur Rahman Haqqani%'
-SELECT count(*) FROM BSADB.dbo.DJ_List_Data_A WHERE SdnName = 'Khalil ur Rahman Haqqani'
-SELECT count(*) FROM BSADB.dbo.DJ_List_Data_A WHERE SdnName = 'Khaleel Haqqani'
-SELECT count(*) FROM BSADB.dbo.DJ_List_Data_A WHERE SdnName = 'Khalil Al-Rahman Haqqani'
-
-幫我整理
+-- 2. 查詢 DJ_List_Data_A 各條件筆數
+SELECT 
+    COUNT(CASE WHEN SdnName LIKE '%ハリール%' THEN 1 END) AS [SdnName_ハリール],
+    COUNT(CASE WHEN SdnName LIKE '%アフメド%' THEN 1 END) AS [SdnName_アフメド],
+    COUNT(CASE WHEN SdnName LIKE '%ハッカーニ%' THEN 1 END) AS [SdnName_ハッカーニ],
+    COUNT(CASE WHEN SdnName LIKE '%Khalil ur Rahman Haqqani%' THEN 1 END) AS [SdnName_Like_Khalil_ur_Rahman_Haqqani],
+    COUNT(CASE WHEN SdnName = 'Khalil ur Rahman Haqqani' THEN 1 END) AS [SdnName_Equal_Khalil_ur_Rahman_Haqqani],
+    COUNT(CASE WHEN SdnName = 'Khaleel Haqqani' THEN 1 END) AS [SdnName_Equal_Khaleel_Haqqani],
+    COUNT(CASE WHEN SdnName = 'Khalil Al-Rahman Haqqani' THEN 1 END) AS [SdnName_Equal_Khalil_Al-Rahman_Haqqani]
+FROM BSADB.dbo.DJ_List_Data_A;
