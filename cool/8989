@@ -1,1 +1,27 @@
-certutil -hashfile "D:\UATR3\AMLDataMigrator\AML_CHECK_SUM_1.csv" MD5
+Dear coco 
+
+1.	AML 7 個檔案，只有2個與新光提供的AML_CHECK_SUM_1.csv合
+其他5個不符合
+
+[2026-09-07 10:22:02] [ERROR]
+ MD5 MISMATCH -> File: AML_CUST.csv (Expected: 0f28746f68f3df360039190f38159852, Actual: 177ac4782f71e39327be2707ee9651b6)
+[2026-09-07 10:22:02] [ERROR] 
+MD5 MISMATCH -> File: AML_SPEC_OFAC_SPEC.csv (Expected: d4ca4351ad71dbd859a06583df9cf0e8, Actual: a12e4eefae4ea516a851bb978141213f)
+[2026-09-07 10:22:04] [ERROR] 
+MD5 MISMATCH -> File: AML_NameProperty_RP.csv (Expected: 934bf1adaaf3f7b1f9d2a72d8cdd91f1, Actual: 6bde3a30219db911bd8ffb7f9cf82799)
+[2026-09-07 10:33:29] [ERROR] 
+MD5 MISMATCH -> File: AML_LoadTrxn.csv (Expected: 4a95dab84dc633dea58e2259998829b4, Actual: 12099d84d64c0abda06ab7b2d3d4bc03)
+[2026-09-07 10:33:47] [INFO] 
+PASSED -> File: AML_NameProperty_Cust.csv (Count: 6191958, MD5: OK)
+[2026-09-07 10:33:57] [ERROR] 
+MD5 MISMATCH -> File: AML_Acct.csv (Expected: 78815fbbb101134228410164a55ae597, Actual: 61897892b3b37fc7770991443df21e82)
+[2026-09-07 10:33:57] [INFO] 
+PASSED -> File: AML_SPEC_lowrisklistgroups.csv (Count: 25, MD5: OK)
+
+
+協助轉寄新煜詢問
+
+
+
+
+幫我寫好一點 但不要寫太多不必要的
