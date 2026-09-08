@@ -1,15 +1,32 @@
-/*
-帳號資料
-*/
- SELECT * FROM BSADBTW..ACCT_XREF_DIM a
- join CIF_Migrate_Mapping_TEMP v on v.NEW_CIF_KEY = a.CIF_KEY
- WHERE action = 'insert'
-/*
-自建名單
-*/
- SELECT * FROM BSADBTW..ACCT_XREF_DIM a
- join CIF_Migrate_Mapping_TEMP v on v.NEW_CIF_KEY = a.CIF_KEY
- WHERE action = 'insert'
 
-如圖他要的表格資訊
-幫我修改一下
+1. 帳號資料（挑選 2 筆，對應客戶ID 與 帳號）
+ACCT_XREF_DIM 存放帳號資訊（常見帳號欄位為 ACCT_NO 或 ACCOUNT_NO），串接 BSA_SUB_CUST_FACT 或 PB_CUSTOMER_FACT 取得客戶 ID（CustomerNo）：
+SELECT TOP 2
+    bb.CustomerNo AS [客戶ID],
+    a.ACCT_NO     AS [帳號]
+FROM BSADBTW..ACCT_XREF_DIM a
+JOIN CIF_Migrate_Mapping_TEMP v 
+    ON v.NEW_CIF_KEY = a.CIF_KEY
+JOIN BSA_SUB_CUST_FACT bb 
+    ON bb.CIF_KEY = v.NEW_CIF_KEY
+WHERE v.ACTION = 'insert'
+ORDER BY NEWID();
+
+(若 ACCT_XREF_DIM 中的帳號欄位名稱不同，請將 a.ACCT_NO 換成實際欄位名稱，如 a.ACCOUNT_NO 或 a.ACCT_NUM)
+2. 自建名單（內部名單群組不拘，挑選 2 筆，對應自建名單ID 與 名稱）
+自建名單/內部名單在 AML 常用於 Watchlist 或內部名單維護表（常見實體表為 INTERNAL_WATCHLIST、WATCHLIST_DIM 或 WL_ENTRY 等，非 ACCT_XREF_DIM）：
+-- 方式一：若自建名單為專屬的名單設定檔 (如 WL_LIST / INTERNAL_LIST)
+SELECT TOP 2
+    LIST_ID   AS [自建名單ID],
+    LIST_NAME AS [名稱]
+FROM BSADBTW..INTERNAL_WATCHLIST
+ORDER BY NEWID();
+
+-- 方式二：若是指自建名單中的「對象明細/黑名單實體」
+SELECT TOP 2
+    ENTRY_ID   AS [自建名單ID],
+    PARTY_NAME AS [名稱]
+FROM BSADBTW..INTERNAL_WATCHLIST_ENTRY
+ORDER BY NEWID();
+
+使用 NEWID() 可直接隨機抽出 2 筆填入 Excel。若自建名單在環境中的實際表名或欄位命名不同，將上述的表名與欄位換成你們資料庫定義的 Watchlist 表即可。
