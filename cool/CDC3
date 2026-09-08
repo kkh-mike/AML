@@ -1,26 +1,27 @@
-SELECT 
-    R.CIFKey,
-    S.HIGHRISK AS [新光來源_S_HIGHRISK],
-    T.HIGHRISK AS [目前目標表_T_HIGHRISK],
-    -- 模擬 SP 裡的條件比對結果
-    CASE 
-        WHEN (CASE S.HIGHRISK WHEN 'L' THEN 1 WHEN 'M' THEN 2 WHEN 'H' THEN 3 ELSE 0 END) >
-             (CASE T.HIGHRISK WHEN 'L' THEN 1 WHEN 'M' THEN 2 WHEN 'H' THEN 3 ELSE 0 END)
-        THEN 'TRUE (會塞入暫存表更新)'
-        ELSE 'FALSE (被條件擋掉，不更新)'
-    END AS [SP條件判定結果],
-    S.ReviewDt AS [新光審查日],
-    R.ReviewDt AS [現有審查日]
-FROM dbo.EDD_ReviewSchedule R
-JOIN dbo.CIF_Migrate_Mapping_TEMP M ON R.CIFKey = M.NEW_CIF_KEY
-JOIN dbo.Cust_NP_Migrate_buffer S ON S.CIF_KEY = M.SOURCE_CIF_KEY
-JOIN dbo.BSA_SUB_CUST_FACT T ON T.CIF_KEY = M.NEW_CIF_KEY
-WHERE R.Status = 'P'
-  AND R.CIFKey = 'CC0BB573-F5EA-F011-AB20-F8F21EB5E6B1';
+ INSERT  INTO #AffectedNextReview
+                                        ( CIF_KEY ,
+                                          ReviewDt
+                                        )
+                                        SELECT  R.CIFKey ,
+                                                S.ReviewDt
+                                        FROM    dbo.EDD_ReviewSchedule R
+                                                JOIN dbo.CIF_Migrate_Mapping_TEMP M ON R.CIFKey = M.NEW_CIF_KEY
+                                                JOIN dbo.Cust_NP_Migrate_buffer S ON S.CIF_KEY = M.SOURCE_CIF_KEY
+                                                JOIN dbo.BSA_SUB_CUST_FACT T ON T.CIF_KEY = M.NEW_CIF_KEY
+                                        WHERE   R.Status = 'P'
+                                                AND CASE S.HIGHRISK
+                                                      WHEN 'L' THEN 1
+                                                      WHEN 'M' THEN 2
+                                                      WHEN 'H' THEN 3
+                                                      ELSE 0
+                                                    END > CASE T.HIGHRISK
+                                                            WHEN 'L' THEN 1
+                                                            WHEN 'M' THEN 2
+                                                            WHEN 'H' THEN 3
+                                                            ELSE 0
+                                                          END
+                                                AND S.ReviewDt < R.ReviewDt;
 
 
-CIFKey	新光來源_S_HIGHRISK	目前目標表_T_HIGHRISK	SP條件判定結果	新光審查日	現有審查日
-CC0BB573-F5EA-F011-AB20-F8F21EB5E6B1	L	M	FALSE (被條件擋掉，不更新)	2030-09-12 08:02:14.280	2030-06-23 13:23:01.993
-CC0BB573-F5EA-F011-AB20-F8F21EB5E6B1	M	M	FALSE (被條件擋掉，不更新)	2024-11-23 14:17:35.220	2030-06-23 13:23:01.993
-
-為什麼
+你怎麼知道這時候的
+BSA_SUB_CUST_FACT  已經更新了?  
