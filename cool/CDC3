@@ -1,195 +1,33 @@
-這段 Migration 腳本主要包含六大核心區塊：
- * 主表 BSA_SUB_CUST_FACT 更新（風險等級 HighRisk 最高優先、RiskScore 跟隨、SAR / 複雜股權結構 / 警示帳戶聯集合併）。
- * 擴充表 BSA_SUB_CUST_FACT_Extension（無記名股票 IsBearerShares 聯集、PEPBitwiseCode 位元 OR 合併）。
- * 問卷答案 PB_CustomerOptionalAnswers（選單題目 SDST2400001 取 Max 更新/新增）。
- * 審查排程 EDD_ReviewSchedule（新 CIF 建立待審查 P、舊 CIF 依風險提升更換最早日期為 P 並註記舊資料為 L）。
- * 未結案同步 (Pending Cases)：CIP_CUST_RISK_MGMT、CIP_CUST_RISK_MGMT_Extension、CIP_QuestionaireOptionalAnswers（同步異動並標記 isCalculated = 'C'）。
- * HRS 未結案同步：HRS_Customer_Fact、HRS_Customer_Fact_Extension、HRS_CUST_RISK_MGMT、HRS_QuestionaireOptionalAnswers。
-以下是針對各邏輯設計的測試案例（Test Cases）與驗證 SQL 查詢。
-TC01: 主表（BSA_SUB_CUST_FACT）風險值與旗標合併驗證
- * 驗證目的：
-   * HIGHRISK 是否採最高原則（H > M > L）。
-   * RiskScore 是否隨最高風險帶入；若風險同級則取最高分數。
-   * IsSARFiled、IsComplexStructure 是否符合 OR 邏輯（只要任一為 1 即為 1，雙方皆 NULL 則為 NULL，否則 0）。
-   * Warn_Restrict_Account 是否符合 OR 邏輯（任一為 'Y' 即為 'Y'，雙方皆 NULL 則為 NULL，否則 'N'）。
- * 驗證 SQL：
-;WITH ExpectedAgg AS (
-    SELECT
-        M.NEW_CIF_KEY,
-        CASE MAX(CASE S.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END)
-            WHEN 3 THEN 'H' WHEN 2 THEN 'M' WHEN 1 THEN 'L' ELSE NULL
-        END AS Exp_HIGHRISK,
-        MAX(CASE S.HIGHRISK
-                WHEN 'H' THEN S.RiskScore
-                WHEN 'M' THEN S.RiskScore
-                WHEN 'L' THEN S.RiskScore
-                ELSE NULL END) AS Exp_RiskScore,
-        MAX(CAST(S.IsSARFiled AS INT)) AS Buffer_SAR,
-        CASE WHEN MAX(CAST(S.IsComplexStructure AS INT)) = 1 THEN 1
-             WHEN MAX(CAST(S.IsComplexStructure AS INT)) IS NULL THEN NULL
-             ELSE 0 END AS Buffer_Complex,
-        CASE WHEN MAX(CAST(S.Warn_Restrict_Account AS INT)) = 1 THEN 'Y'
-             WHEN MAX(CAST(S.Warn_Restrict_Account AS INT)) IS NULL THEN NULL
-             ELSE 'N' END AS Buffer_Warn
-    FROM dbo.CIF_Migrate_Mapping_TEMP M
-    JOIN dbo.Cust_NP_Migrate_buffer S ON S.CIF_KEY = M.SOURCE_CIF_KEY
-    GROUP BY M.NEW_CIF_KEY
-)
+將兩段查詢整合為單一報表 SQL，可以直接使用條件計數（COUNT(CASE ...)）一次算出「總筆數」、「一致筆數」與「差異筆數」：
 SELECT 
-    T.CIF_KEY,
-    T.HIGHRISK AS Actual_HIGHRISK,
-    E.Exp_HIGHRISK,
-    T.RiskScore AS Actual_RiskScore,
-    T.IsComplexStructure AS Actual_Complex,
-    T.Warn_Restrict_Account AS Actual_Warn
-FROM dbo.BSA_SUB_CUST_FACT T
-JOIN ExpectedAgg E ON T.CIF_KEY = E.NEW_CIF_KEY
-WHERE 
-    -- 驗證 HighRisk 是否被低級別覆蓋
-    (CASE T.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END <
-     CASE E.Exp_HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END)
-    -- 驗證旗標是否漏設 1 或 'Y'
-    OR (E.Buffer_Complex = 1 AND ISNULL(T.IsComplexStructure, 0) <> 1)
-    OR (E.Buffer_Warn = 'Y' AND ISNULL(T.Warn_Restrict_Account, 'N') <> 'Y');
--- 預期結果：0 筆異常
+    COUNT(*) AS TOTAL_COUNT,
+    COUNT(CASE 
+        WHEN ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) = ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0) 
+        THEN 1 
+    END) AS MATCH_COUNT,
+    COUNT(CASE 
+        WHEN ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) <> ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0) 
+        THEN 1 
+    END) AS DIFF_COUNT
+FROM BSA_SUB_CUST_FACT z
+JOIN CIF_Migrate_Mapping_TEMP h 
+    ON h.NEW_CIF_KEY = z.CIF_KEY
+JOIN Cust_NP_Migrate_buffer t 
+    ON t.CIF_KEY = h.SOURCE_CIF_KEY
+LEFT JOIN BSA_SUB_CUST_FACT_BAK_20260720 c 
+    ON c.CIF_KEY = z.CIF_KEY
+WHERE c.CIF_KEY IS NULL;
 
-TC02: 擴充表（BSA_SUB_CUST_FACT_Extension）位元運算與旗標驗證
- * 驗證目的：
-   * IsBearerShares 是否符合任一為 1 即為 1。
-   * PEPBitwiseCode 是否完整將 Source 端 1~256 的 Bit 位元與 Target 原有 Bit 做聯集（OR 運算），且不遺漏未比對到的 Target 既有資料。
- * 驗證 SQL：
-;WITH SourceBitwise AS (
-    SELECT 
-        M.NEW_CIF_KEY,
-        MAX(CAST(S.IsBearerShares AS INT)) AS Buffer_BearerShares,
-        ISNULL(
-            MAX(S.PEPBitwiseCode & 1)
-          | MAX(S.PEPBitwiseCode & 2)
-          | MAX(S.PEPBitwiseCode & 4)
-          | MAX(S.PEPBitwiseCode & 8)
-          | MAX(S.PEPBitwiseCode & 16)
-          | MAX(S.PEPBitwiseCode & 32)
-          | MAX(S.PEPBitwiseCode & 64)
-          | MAX(S.PEPBitwiseCode & 128)
-          | MAX(S.PEPBitwiseCode & 256), 0
-        ) AS Source_PEP
-    FROM dbo.CIF_Migrate_Mapping_TEMP M
-    JOIN dbo.Cust_NP_Migrate_buffer S ON S.CIF_KEY = M.SOURCE_CIF_KEY
-    GROUP BY M.NEW_CIF_KEY
-)
-SELECT 
-    T.CIF_KEY,
-    T.IsBearerShares,
-    T.PEPBitwiseCode AS Actual_PEP,
-    S.Source_PEP
-FROM dbo.BSA_SUB_CUST_FACT_Extension T
-JOIN SourceBitwise S ON T.CIF_KEY = S.NEW_CIF_KEY
-WHERE 
-    -- 驗證 BearerShares 是否漏更新
-    (S.Buffer_BearerShares = 1 AND ISNULL(T.IsBearerShares, 0) <> 1)
-    -- 驗證 Bitwise 是否漏包含來源端 Bit (Actual & Source 必須等於 Source)
-    OR ((T.PEPBitwiseCode & S.Source_PEP) <> S.Source_PEP);
--- 預期結果：0 筆異常
-
-TC03: 靜態問卷答案（PB_CustomerOptionalAnswers）更新驗證
- * 驗證目的：
-   * 對應範本 SDST2400001 的題項答案，是否正確寫入 MAX(CAST(S.SDST2400001 AS INT))。
-   * 新增資料的備註欄位是否帶入 'Data Migration'。
- * 驗證 SQL：
-DECLARE @SDSTemplateId NVARCHAR(100);
-SELECT @SDSTemplateId = ID FROM dbo.CIP_TEMPLATE_DIM WHERE QueryId = 'SDST2400001';
-
-;WITH ExpectedAns AS (
-    SELECT 
-        M.NEW_CIF_KEY AS CIF_KEY,
-        MAX(CAST(S.SDST2400001 AS INT)) AS Exp_AnswerCode
-    FROM dbo.CIF_Migrate_Mapping_TEMP M
-    JOIN dbo.Cust_NP_Migrate_buffer S ON S.CIF_KEY = M.SOURCE_CIF_KEY
-    WHERE ISNULL(S.SDST2400001, '') <> ''
-    GROUP BY M.NEW_CIF_KEY
-)
-SELECT 
-    E.CIF_KEY,
-    E.Exp_AnswerCode,
-    T.AnswerCode AS Actual_AnswerCode,
-    T.Remarks
-FROM ExpectedAns E
-LEFT JOIN dbo.PB_CustomerOptionalAnswers T 
-    ON T.CifKey = E.CIF_KEY 
-   AND T.CIPTemplateId = @SDSTemplateId
-WHERE T.AnswerCode IS NULL 
-   OR CAST(T.AnswerCode AS INT) <> E.Exp_AnswerCode;
--- 預期結果：0 筆異常
-
-TC04: EDD 審查排程（EDD_ReviewSchedule）狀態與日期輪替驗證
- * 驗證目的：
-   * 全新 CIF：初次匯入是否正確新增一筆 Status = 'P'，且審查日為 MIN(ReviewDt)。
-   * 既有 CIF 且風險升級：若來源端 ReviewDt 較早且風險高於目標端，原排程是否被更新為 Status = 'L'，並新增一筆提早日期的 Status = 'P'。
-   * 驗證每個 CIF 不應存在兩筆以上同時為 Status = 'P' 的有效排程。
- * 驗證 SQL：
--- 檢核 1: 檢查是否有 CIF 出現重複的 'P' 狀態
-SELECT CIFKey, COUNT(1) AS Pending_Count
-FROM dbo.EDD_ReviewSchedule
-WHERE Status = 'P'
-GROUP BY CIFKey
-HAVING COUNT(1) > 1;
--- 預期結果：0 筆
-
--- 檢核 2: 驗證被替換的歷史資料是否正確押記 'L' 與 'Data Migration'
-SELECT CIFKey, ReviewDt, Status, ReviewDescription, LastUpdatedBy
-FROM dbo.EDD_ReviewSchedule
-WHERE CIFKey IN (SELECT NEW_CIF_KEY FROM dbo.CIF_Migrate_Mapping_TEMP)
-  AND Status = 'L'
-  AND ReviewDescription <> 'Data Migration';
--- 預期結果：0 筆
-
-TC05: CIP 未結案資料同步與重算標記（CIP Pending Case）
- * 驗證目的：
-   * 存在未結案案件（STATUS <> 3）且在本次遷移中屬性有變更（透過 #AffectedCif 篩選出）的 CIF，其 CIP_CUST_RISK_MGMT 的 isCalculated 是否皆被成功標記為 'C'（強制觸發重算）。
-   * CIP_CUST_RISK_MGMT_Extension 的 IsBearerShares、WarnRestrictAccount、PEPBitwiseCode 是否正確合併。
- * 驗證 SQL：
-SELECT 
-    A.CIF_KEY,
-    A.isCalculated,
-    A.IsComplexStructure,
-    T.IsComplexStructure AS Fact_Complex
-FROM dbo.CIP_CUST_RISK_MGMT A
-JOIN dbo.BSA_SUB_CUST_FACT T ON A.CIF_KEY = T.CIF_KEY
-WHERE A.STATUS <> 3
-  AND A.CIF_KEY IN (
-      SELECT M.NEW_CIF_KEY 
-      FROM dbo.CIF_Migrate_Mapping_TEMP M
-      JOIN dbo.Cust_NP_Migrate_buffer S ON S.CIF_KEY = M.SOURCE_CIF_KEY
-  )
-  -- 若兩邊旗標不一致，且未標註重算狀態 'C' 即為異常
-  AND (A.IsComplexStructure <> T.IsComplexStructure OR A.isCalculated <> 'C');
-
-TC06: HRS 未結案資料同步（HRS Pending Case）
- * 驗證目的：
-   * HRS_CUST_RISK_MGMT 未結案案件的 IsCalculated 是否皆標記為 'C'。
-   * HRS_Customer_Fact_Extension 中的 PEPBitwiseCode 是否有執行位元聯集運算。
-   * 注意腳本中的潛在問題驗證：原始腳本中 HRS_Customer_Fact_Extension.WarnRestrictAccount 使用了 OR b.Warn_Restrict_Account IS NULL THEN NULL，需特別檢核既有為 1 的資料是否被誤轉為 NULL。
- * 驗證 SQL：
-SELECT 
-    H.BatchId,
-    H.CifKey,
-    H.IsBearerShares,
-    H.WarnRestrictAccount,
-    H.PEPBitwiseCode,
-    M.IsCalculated
-FROM dbo.HRS_Customer_Fact_Extension H
-JOIN dbo.HRS_CUST_RISK_MGMT M ON H.BatchId = M.BatchId AND H.CifKey = M.CIF_KEY
-WHERE M.STATUS <> 3
-  AND H.CifKey IN (SELECT NEW_CIF_KEY FROM dbo.CIF_Migrate_Mapping_TEMP)
-  AND (M.IsCalculated <> 'C');
--- 預期結果：0 筆異常
-
-TC07: 執行歷程日誌確認（Migrator_LOG）
- * 驗證目的：
-   * 確認模組執行完畢後有在 dbo.Migrator_LOG 留下對應的完整日誌紀錄與標記。
- * 驗證 SQL：
-SELECT TOP 5 PROC_DATE, MSG_LOG, FLAG 
-FROM dbo.Migrator_LOG 
-WHERE MSG_LOG LIKE '%CUST_NP migrate completed%'
-ORDER BY PROC_DATE DESC;
-
+報告重點敘述建議
+以「核對結果」、「差異分析」、「處置結論」三層結構呈現，主管與審查人員能最快抓到重點：
+情境 2：純新光客戶 SAR 註記比對結果
+ * 比對結果概況
+   * 總檢核筆數：3,225,947 筆
+   * 註記一致筆數：3,225,814 筆（一致率 99.996%）
+   * 邏輯差異筆數：133 筆
+ * 差異原因分析
+   * 該 133 筆差異型態均為：來源暫存表 Cust_NP_Migrate_buffer.IsSARFiled = 0，但目標表寫入後為 1。
+   * 經查該批資料在 BANCS_SK_CUST_INFO.CUST_RE_NO_FLG 均為 1，屬「單一目標帳號對應多筆新光來源帳號」之多對一情境。
+   * 寫入程式採用高風險優先（嚴格判定）邏輯，當關聯候選資料中任一筆存在 SAR 註記時，最終結果擇優/從嚴註記為 1，導致欄位值未直接沿用單一來源 buffer 數值。
+ * 驗證結論
+   * 該 133 筆數值轉變符合系統防制洗錢之從嚴控管規則，非程式轉檔異常或資料遺失，驗證通過。
