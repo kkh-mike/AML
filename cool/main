@@ -1,29 +1,34 @@
+WITH AcctSummary AS (
+    SELECT 
+        c.CustomerNo                                                    AS [新光客戶ID],
+        a.ACCT_KEY                                                      AS [新光帳號],
+        CASE 
+            WHEN v.ACTION = 'insert' THEN '純新光'
+            WHEN v.ACTION = 'update' THEN '共有戶'
+        END                                                             AS [分類],
+        x.EXTN_REF_NO                                                   AS [bancS 對應帳號],
+        ts.CustomerNo                                                   AS [台新客戶id],
+        ROW_NUMBER() OVER (
+            PARTITION BY v.ACTION 
+            ORDER BY c.CustomerNo, a.ACCT_KEY
+        ) AS rn
+    FROM BSADBTW..Acct_Migrate_buffer a
+    JOIN CIF_Migrate_Mapping_TEMP v 
+        ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN Customer_Migrate_buffer c 
+        ON c.CIF_KEY = v.SOURCE_CIF_KEY
+    LEFT JOIN BSA_SUB_CUST_FACT ts 
+        ON ts.CIF_KEY = v.NEW_CIF_KEY
+    LEFT JOIN BSADBTW..XREF x 
+        ON x.EXTN_REF_NO = RIGHT(REPLICATE('0', 25) + a.ACCT_KEY, 25)
+    WHERE v.ACTION IN ('insert', 'update')
+)
 SELECT 
-    c.CustomerNo                                                    AS [新光客戶ID],
-    a.ACCT_KEY                                                      AS [新光帳號],
-    CASE 
-        WHEN v.ACTION = 'insert' THEN '純新光'
-        WHEN v.ACTION = 'update' THEN '共有戶'
-        ELSE v.ACTION
-    END                                                             AS [分類],
-    x.EXTN_REF_NO                                                   AS [BANCS對應帳號],
-    ts.CustomerNo                                                   AS [台新客戶ID]
-FROM BSADBTW..Acct_Migrate_buffer a
--- 1. 關聯 Mapping 暫存表
-JOIN CIF_Migrate_Mapping_TEMP v 
-    ON v.SOURCE_CIF_KEY = a.CIF_KEY
-
--- 2. 取得新光客戶 ID
-JOIN Customer_Migrate_buffer c 
-    ON c.CIF_KEY = v.SOURCE_CIF_KEY
-
--- 3. 取得台新客戶 ID (BANCS 對應客戶 ID)
-LEFT JOIN BSA_SUB_CUST_FACT ts 
-    ON ts.CIF_KEY = v.NEW_CIF_KEY
-
--- 4. 關聯 BANCS XREF 帳號（前綴補 0 到 25 碼）
-LEFT JOIN BSADBTW..XREF x 
-    ON x.EXTN_REF_NO = RIGHT(REPLICATE('0', 25) + a.ACCT_KEY, 25)
-
-WHERE v.ACTION IN ('insert', 'update')
+    [新光客戶ID],
+    [新光帳號],
+    [分類],
+    [bancS 對應帳號],
+    [台新客戶id]
+FROM AcctSummary
+WHERE rn <= 2
 ORDER BY [分類] DESC, [新光客戶ID];
