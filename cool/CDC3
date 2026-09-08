@@ -21,6 +21,7 @@ AggNP AS (
     FROM CIF_Migrate_Mapping_TEMP m
     JOIN Cust_NP_Migrate_buffer s ON s.CIF_KEY = m.SOURCE_CIF_KEY
     WHERE s.ReviewDt IS NOT NULL
+      AND m.ACTION = 'UPDATE' -- 僅鎖定共有戶更新案件
     GROUP BY m.NEW_CIF_KEY
 ),
 TS_Current_Review AS (
@@ -45,7 +46,7 @@ SELECT TOP 100
     p.NP_ReviewDt AS NP_ReviewDt,
     r_now.ReviewDt AS NOW_ReviewDt,
     r_now.CreatedDt,
-    r_now.LastUpdatedDt因為
+    r_now.LastUpdatedDt
 FROM BSA_SUB_CUST_FACT a
 JOIN PURE_TS d ON d.TS_CUST_ID = a.CustomerNo
 JOIN BSA_SUB_CUST_FACT_BAK_20260720 u ON u.CIF_KEY = a.CIF_KEY
@@ -55,8 +56,3 @@ JOIN TS_Bak_Review r_bak ON r_bak.CIFKey = a.CIF_KEY
 WHERE p.NP_RISK_SCORE > CASE u.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END
   AND CAST(p.NP_ReviewDt AS DATE) < CAST(r_bak.ReviewDt AS DATE)
   AND r_now.ReviewDt <> p.NP_ReviewDt;
-
-
-  幫我只留下CIF_Migrate_Mapping_TEMP 他的action = update 的
-  因為只有共有戶的風險等級才會變
-  如果這些不是共有戶就不用管
