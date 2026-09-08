@@ -4,55 +4,82 @@ WITH PURE_TS AS
     FROM BANCS_SK_CUST_INFO a 
     JOIN Customer_Migrate_buffer b ON a.SK_CUST_ID = b.CustomerNo
     WHERE a.CUST_RE_NO_FLG = '1'
+    
     EXCEPT
+    
     SELECT TS_CUST_ID 
     FROM BANCS_SK_CUST_INFO a 
     JOIN Customer_Migrate_buffer b ON a.SK_CUST_ID = b.CustomerNo
     WHERE a.CUST_RE_NO_FLG IN ('2','3')
 ),
 AggNP AS (
+    -- 聚合新光端之最高風險等級與最早審查日 (MIN(ReviewDt))
     SELECT 
         m.NEW_CIF_KEY,
         MAX(CASE s.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END) AS NP_RISK_SCORE,
-        CASE MAX(CASE s.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END)
-            WHEN 3 THEN 'H' WHEN 2 THEN 'M' WHEN 1 THEN 'L' ELSE NULL
-        END AS NP_HIGHRISK_TEXT,
         MIN(s.ReviewDt) AS NP_ReviewDt
     FROM CIF_Migrate_Mapping_TEMP m
     JOIN Cust_NP_Migrate_buffer s ON s.CIF_KEY = m.SOURCE_CIF_KEY
-    WHERE s.ReviewDt IS NOT NULL
-      AND m.ACTION = 'UPDATE' -- 僅鎖定共有戶更新案件
     GROUP BY m.NEW_CIF_KEY
 ),
 TS_Current_Review AS (
-    SELECT CIFKey, ReviewDt, Status, CreatedDt, LastUpdatedDt
+    -- 現行有效排程
+    SELECT CIFKey, ReviewDt
     FROM EDD_ReviewSchedule
     WHERE Status = 'P'
 ),
 TS_Bak_Review AS (
-    SELECT CIFKey, ReviewDt, Status
-    FROM EDD_ReviewSchedule_20260626
+    -- 備份原有效排程
+    SELECT CIFKey, ReviewDt
+    FROM EDD_ReviewSchedule_20260626 -- 依實際備份表名稱替換
     WHERE Status = 'P'
 )
-SELECT TOP 100
-    a.CustomerNo,
-    a.CIF_KEY,
-    -- 舊等級 vs 新等級 vs 新光來源等級
-    u.HIGHRISK AS [台新舊等級_BAK],
-    a.HIGHRISK AS [目前目標表等級_FACT],
-    p.NP_HIGHRISK_TEXT AS [新光來源最高等級_NP],
-    -- 審查日對照
-    r_bak.ReviewDt AS BAK_ReviewDt,
-    p.NP_ReviewDt AS NP_ReviewDt,
-    r_now.ReviewDt AS NOW_ReviewDt,
-    r_now.CreatedDt,
-    r_now.LastUpdatedDt
+SELECT 
+    COUNT(*) AS TOTAL_COUNT,
+    -- 1. 下審日維持台新原日期 (不符合縮短條件，或新光日期未更近)
+    COUNT(CASE 
+        WHEN r_now.ReviewDt = r_bak.ReviewDt 
+        THEN 1 
+    END) AS KEEP_TS_DATE_COUNT,
+    -- 2. 成功縮短下審日 (新光風險較高 且 新光審查日更近，成功取新光日期)
+    COUNT(CASE 
+        WHEN p.NP_RISK_SCORE > CASE u.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END
+         AND p.NP_ReviewDt < r_bak.ReviewDt
+         AND r_now.ReviewDt = p.NP_ReviewDt
+        THEN 1 
+    END) AS SHORTENED_NP_DATE_COUNT,
+    -- 3. 異常筆數 (未依規則縮短，或被無故變更日期)
+    COUNT(CASE 
+        WHEN (
+            -- 條件符合縮短，但現行日期卻未更新為新光較近日期
+            p.NP_RISK_SCORE > CASE u.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END
+            AND p.NP_ReviewDt < r_bak.ReviewDt
+            AND r_now.ReviewDt <> p.NP_ReviewDt
+        ) OR (
+            -- 條件不符合縮短，現行日期卻被異動
+            NOT (
+                p.NP_RISK_SCORE > CASE u.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END
+                AND p.NP_ReviewDt < r_bak.ReviewDt
+            )
+            AND r_now.ReviewDt <> r_bak.ReviewDt
+        )
+        THEN 1 
+    END) AS UNEXPECTED_COUNT
 FROM BSA_SUB_CUST_FACT a
-JOIN PURE_TS d ON d.TS_CUST_ID = a.CustomerNo
-JOIN BSA_SUB_CUST_FACT_BAK_20260720 u ON u.CIF_KEY = a.CIF_KEY
-JOIN AggNP p ON p.NEW_CIF_KEY = a.CIF_KEY
-JOIN TS_Current_Review r_now ON r_now.CIFKey = a.CIF_KEY
-JOIN TS_Bak_Review r_bak ON r_bak.CIFKey = a.CIF_KEY
-WHERE p.NP_RISK_SCORE > CASE u.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END
-  AND CAST(p.NP_ReviewDt AS DATE) < CAST(r_bak.ReviewDt AS DATE)
-  AND r_now.ReviewDt <> p.NP_ReviewDt;
+JOIN PURE_TS d 
+    ON d.TS_CUST_ID = a.CustomerNo
+JOIN BSA_SUB_CUST_FACT_BAK_20260720 u 
+    ON u.CIF_KEY = a.CIF_KEY
+JOIN AggNP p 
+    ON p.NEW_CIF_KEY = a.CIF_KEY
+JOIN TS_Current_Review r_now 
+    ON r_now.CIFKey = a.CIF_KEY
+JOIN TS_Bak_Review r_bak 
+    ON r_bak.CIFKey = a.CIF_KEY;
+
+
+
+
+那這個要改吧ˊ
+
+只針對共有戶來看
