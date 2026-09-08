@@ -1,25 +1,58 @@
+會出現 DIFF_AND_FLAG1_COUNT = 132 而 DIFF_OTHER_UNEXPECTED_COUNT = 1，通常有兩個最常見的原因：
+ * 型態不一致（最常見）：
+   在情境 3 的 SQL 中可以看到 CUST_RE_NO_FLG 可能是字串型態（VARCHAR / CHAR），例如 '1'。如果它是字串，當有些值帶有空白（如 '1 '）或是與數字比對時發生了型態隱含轉換例外，就可能對不上。
+ * 該筆資料的 CUST_RE_NO_FLG 為 NULL 或其他值（例如 2, 3 或 0）：
+   該筆 SK_CUST_ID 在 BANCS_SK_CUST_INFO 裡沒有對應到（b.SK_CUST_ID IS NULL），或是該欄位不是 '1'。
+第一步：直接把這「唯一的 1 筆」抓出來看
+跑以下這段 SQL，看看這筆資料所有的欄位內容到底長怎樣：
+SELECT 
+    z.CIF_KEY AS NEW_CIF_KEY,
+    h.SOURCE_CIF_KEY,
+    y.CustomerNo,
+    t.IsSARFiled AS BUFFER_IsSARFiled,
+    z.IsSARFiled AS FACT_IsSARFiled,
+    b.SK_CUST_ID,
+    b.CUST_RE_NO_FLG,
+    -- 檢查是否為字串型態帶空白，或根本是 NULL
+    DATALENGTH(b.CUST_RE_NO_FLG) AS FLG_DATALENGTH
+FROM BSA_SUB_CUST_FACT z
+JOIN CIF_Migrate_Mapping_TEMP h 
+    ON h.NEW_CIF_KEY = z.CIF_KEY
+JOIN Cust_NP_Migrate_buffer t 
+    ON t.CIF_KEY = h.SOURCE_CIF_KEY
+JOIN Customer_Migrate_buffer y 
+    ON y.CIF_KEY = h.SOURCE_CIF_KEY
+LEFT JOIN BANCS_SK_CUST_INFO b 
+    ON b.SK_CUST_ID = y.CustomerNo
+LEFT JOIN BSA_SUB_CUST_FACT_BAK_20260720 c 
+    ON c.CIF_KEY = z.CIF_KEY
+WHERE c.CIF_KEY IS NULL
+  AND ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) <> ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0)
+  -- 篩選出被歸到 UNEXPECTED 的那 1 筆
+  AND (b.CUST_RE_NO_FLG <> '1' OR b.CUST_RE_NO_FLG IS NULL);
+
+第二步：如果它是字串型態，調整報表 SQL 判定
+如果確認 CUST_RE_NO_FLG 是字串且可能有前後空白或型態問題，將判定條件改為 TRIM(b.CUST_RE_NO_FLG) = '1'，避免型態轉換或空白漏抓：
 SELECT 
     COUNT(*) AS TOTAL_COUNT,
-    -- 註記一致筆數
     COUNT(CASE 
         WHEN ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) = ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0) 
         THEN 1 
     END) AS MATCH_COUNT,
-    -- 總差異筆數 (133 筆)
     COUNT(CASE 
         WHEN ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) <> ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0) 
         THEN 1 
     END) AS DIFF_COUNT,
-    -- 證明差異且符合多帳號標記 (應剛好為 133 筆)
+    -- 改用 TRIM 與字串 '1' 判定
     COUNT(CASE 
         WHEN ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) <> ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0)
-         AND b.CUST_RE_NO_FLG = 1
+         AND TRIM(b.CUST_RE_NO_FLG) = '1'
         THEN 1 
     END) AS DIFF_AND_FLAG1_COUNT,
-    -- 異常差異筆數 (若有其他未預期差異應為 0 筆)
+    -- 異常筆數
     COUNT(CASE 
         WHEN ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) <> ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0)
-         AND ISNULL(b.CUST_RE_NO_FLG, 0) <> 1
+         AND ISNULL(TRIM(b.CUST_RE_NO_FLG), '') <> '1'
         THEN 1 
     END) AS DIFF_OTHER_UNEXPECTED_COUNT
 FROM BSA_SUB_CUST_FACT z
@@ -35,12 +68,4 @@ LEFT JOIN BSA_SUB_CUST_FACT_BAK_20260720 c
     ON c.CIF_KEY = z.CIF_KEY
 WHERE c.CIF_KEY IS NULL;
 
-
-我這樣跑出來
-TOTAL_COUNT	MATCH_COUNT	DIFF_COUNT	DIFF_AND_FLAG1_COUNT	DIFF_OTHER_UNEXPECTED_COUNT
-3225947	3225814	133	132	1
-
-
-但我不知道DIFF_OTHER_UNEXPECTED_COUNT 他是誰 
-
-不應該有1吧
+先跑第一段把那 1 筆抓出來看，就能直接確認是 b.CUST_RE_NO_FLG 的型態/空白問題，還是它在 BANCS_SK_CUST_INFO 裡 根本沒對應到（或是值不是 1）。
