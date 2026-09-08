@@ -1,64 +1,14 @@
-完整看過這支 SP 後，真相大白了！
-這就是為什麼 922798 在 AutomatedEmployees 是 NULL 卻依然活在系統裡，也是你不會被洗掉的真正關鍵。
-真相解析：SP 到底會刪除誰？
-請看程式碼第 68 行與第 121 行的 MERGE 刪除邏輯：
-WHEN NOT MATCHED BY SOURCE AND MergeTarget.IsAutomated = 'TRUE' THEN 
-    /*delete only user created through ADDataImporter*/  
-    DELETE
-
-程式碼裡的註解寫得一清二楚：只刪除 IsAutomated = 'TRUE' 的人！
- * 自動同步進來的人：SP 會把欄位 IsAutomated 標記為 'TRUE'。如果來源表找不到，SP 就認定此人離職或調組，執行 DELETE。
- * 人工在畫面建立／手動塞入的人（例如 922798）：IsAutomated 是 NULL 或 'FALSE'。
- * 因為不符合 MergeTarget.IsAutomated = 'TRUE'，排程執行時會直接跳過、絕對不會刪除！
-正確做法：直接手動 INSERT，設定 IsAutomated = 'FALSE'
-只要手動加進去，並把 IsAutomated 設為 'FALSE'（或留 NULL），排程跑一萬次都不會動到你。
-1. 複製 922798 的所有權限給自己（最快最全面）
-既然 922798 跟你同組且擁有所有權限，直接將他名下的所有 Queue 與角色複製一份給你：
-INSERT INTO dbo.WORKFLOW_MGMT_USERS (
-    QUEUEID, 
-    USERID, 
-    ROLE, 
-    ALERTMAIN, 
-    ALERTPERSONAL, 
-    IsAutomated
-)
-SELECT 
-    QUEUEID, 
-    '1141923', 
-    ROLE, 
-    ALERTMAIN, 
-    ALERTPERSONAL, 
-    'FALSE' -- 關鍵：設為 FALSE，排程 MERGE 時絕對不會刪除你
-FROM dbo.WORKFLOW_MGMT_USERS
-WHERE USERID = '922798'
-  AND NOT EXISTS (
-      SELECT 1 FROM dbo.WORKFLOW_MGMT_USERS 
-      WHERE USERID = '1141923' 
-        AND QUEUEID = dbo.WORKFLOW_MGMT_USERS.QUEUEID 
-        AND ROLE = dbo.WORKFLOW_MGMT_USERS.ROLE
-  );
-
-2. 若只想加入特定組別與特定角色（例如 0900 CIP 的 Checker）
--- 查出該組的 QUEUEID
-DECLARE @TargetQueueID INT;
-SELECT @TargetQueueID = QUEUEID 
-FROM dbo.WORKFLOW_MGMT_QUEUE 
-WHERE QUEUENAME = '0900 CIP' AND DEL_FLAG = 'N';
-
--- 寫入自己為 Checker (ROLE = 2)
-INSERT INTO dbo.WORKFLOW_MGMT_USERS (
-    QUEUEID, USERID, ROLE, ALERTMAIN, ALERTPERSONAL, IsAutomated
-)
-VALUES (
-    @TargetQueueID, '1141923', 2, 'Y', 'Y', 'FALSE'
-);
-
-步驟驗證（安心確認）
- * 執行上方 INSERT 語法。
- * 手動執行一次排程：
-   EXEC dbo.WORKFLOW_AutomatedUSERS;
-
- * 再次查詢確認自己是否還在：
-   SELECT * FROM dbo.WORKFLOW_MGMT_USERS WHERE USERID = '1141923';
-
-只要 IsAutomated 不是 'TRUE'，資料就會一直保留在資料庫中。
+建議將驗證邏輯與數據對齊，用驗證項目／比對結果的結構呈現最乾淨專業：
+情境 1：純台新客戶（SAR 註記寫入檢核）
+ * 檢核規則：比對寫入前後資料，IsSARFiled 欄位需完整保留；若數值不一致則採「從嚴認定（取 1）」。
+ * 驗證結果：
+   * 純台新總筆數：9,817,331 筆
+   * 寫入前後一致：9,813,719 筆
+   * 寫入前後差異：3,612 筆
+ * 差異說明：經確認，該 3,612 筆差異資料之新值皆為 1，符合「從嚴認定」邏輯。
+如果是在 Word 或簡報上，也可以直接做成小表格：
+| 檢核項目 | 筆數 | 說明 / 驗證狀態 |
+|---|---|---|
+| 純台新客戶總數 | 9,817,331 | 基準母體筆數 |
+| 寫入前後一致 (Same) | 9,813,719 | 欄位值完整保留 |
+| 寫入前後不一致 (Diff) | 3,612 | 新值皆已從嚴更新為 1 |
