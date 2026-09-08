@@ -1,23 +1,3 @@
-將兩段查詢整合為單一報表 SQL，可以直接使用條件計數（COUNT(CASE ...)）一次算出「總筆數」、「一致筆數」與「差異筆數」：
-SELECT 
-    COUNT(*) AS TOTAL_COUNT,
-    COUNT(CASE 
-        WHEN ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) = ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0) 
-        THEN 1 
-    END) AS MATCH_COUNT,
-    COUNT(CASE 
-        WHEN ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) <> ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0) 
-        THEN 1 
-    END) AS DIFF_COUNT
-FROM BSA_SUB_CUST_FACT z
-JOIN CIF_Migrate_Mapping_TEMP h 
-    ON h.NEW_CIF_KEY = z.CIF_KEY
-JOIN Cust_NP_Migrate_buffer t 
-    ON t.CIF_KEY = h.SOURCE_CIF_KEY
-LEFT JOIN BSA_SUB_CUST_FACT_BAK_20260720 c 
-    ON c.CIF_KEY = z.CIF_KEY
-WHERE c.CIF_KEY IS NULL;
-
 報告重點敘述建議
 以「核對結果」、「差異分析」、「處置結論」三層結構呈現，主管與審查人員能最快抓到重點：
 情境 2：純新光客戶 SAR 註記比對結果
@@ -31,3 +11,6 @@ WHERE c.CIF_KEY IS NULL;
    * 寫入程式採用高風險優先（嚴格判定）邏輯，當關聯候選資料中任一筆存在 SAR 註記時，最終結果擇優/從嚴註記為 1，導致欄位值未直接沿用單一來源 buffer 數值。
  * 驗證結論
    * 該 133 筆數值轉變符合系統防制洗錢之從嚴控管規則，非程式轉檔異常或資料遺失，驗證通過。
+
+
+可以寫重點?
