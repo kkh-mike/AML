@@ -1,11 +1,19 @@
 WITH AcctData AS (
     SELECT 
-        c.CustomerNo AS [客戶ID],
-        a.AccountNo  AS [帳號],
+        -- 新光端
+        c.CustomerNo      AS [新光客戶ID],
+        a.AccountNo       AS [新光帳號],
+        
+        -- 台新端
+        ts_c.CustomerNo   AS [台新客戶ID],
+        ts_a.ACCT_KEY     AS [台新帳號],
+
+        -- 屬性分類
         CASE 
             WHEN v.ACTION = 'insert' THEN '純新光'
             WHEN v.ACTION = 'update' THEN '共有戶'
-        END          AS [帳戶屬性],
+        END               AS [帳戶屬性],
+
         ROW_NUMBER() OVER (
             PARTITION BY v.ACTION 
             ORDER BY c.CustomerNo, a.AccountNo
@@ -15,22 +23,20 @@ WITH AcctData AS (
         ON v.SOURCE_CIF_KEY = a.CIF_KEY
     JOIN Customer_Migrate_buffer c 
         ON c.CIF_KEY = a.CIF_KEY
+    -- 串接台新客戶 ID
+    LEFT JOIN BSA_SUB_CUST_FACT ts_c 
+        ON ts_c.CIF_KEY = v.NEW_CIF_KEY
+    -- 串接台新帳號 (若單一客戶多帳號，建議依需要補齊帳號對應邏輯)
+    LEFT JOIN BSADBTW..ACCT_XREF_DIM ts_a 
+        ON ts_a.CIF_KEY = v.NEW_CIF_KEY
     WHERE v.ACTION IN ('insert', 'update')
 )
 SELECT 
-    [客戶ID],
-    [帳號],
+    [新光客戶ID],
+    [台新客戶ID],
+    [新光帳號],
+    [台新帳號],
     [帳戶屬性]
 FROM AcctData
 WHERE rn <= 2
-ORDER BY [帳戶屬性] DESC, [客戶ID];
-
-
-因為客戶id 是新光的
-多加一個客戶id 台新ˇ的
-
-用CIF_Migrate_Mapping_TEMP 的NEW_CIF_KEY  去串 BSA_SUB_CUST_FACT 的CIF_KEY
-
-帳號也是
-多加一個 台新的帳號
-用CIF_Migrate_Mapping_TEMP 的NEW_CIF_KEY  去串 BSADBTW..ACCT_XREF_DIM  的CIF_KEY
+ORDER BY [帳戶屬性] DESC, [新光客戶ID];
