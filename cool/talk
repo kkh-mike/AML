@@ -1,30 +1,178 @@
-測試案例精簡整理
- * TC01 筆數一致性驗證
-   * 說明： 驗證新光資料匯出與台新系統匯入總筆數一致性。
-   * 結果： 新光匯出 6,180,901 筆，台新匯入 6,180,901 筆，筆數相符（Pass）。
- * TC02 純新光匯入驗證
-   * 說明： 驗證 BANCS 純新光資料分流寫入主表及 Exception 表筆數。
-   * 結果： 來源 1,738,335 筆，寫入台新 1,732,568 筆、寫入 Exception 5,767 筆，加總筆數相符（Pass）。
- * TC03 純新光客戶風險等級
-   * 說明： 驗證新光客戶風險等級轉換至台新系統之邏輯正確性。
-   * 結果： 轉換規則相符；其中帳號 T1430999280 與來源不一致，經確認係符合「共有戶風險等級取高者」之系統合併規則（Pass）。
- * TC04 轉換台新客戶 ID
-   * 說明： 驗證 Mapping Table 於 CUST_RE_NO_FLG IN (2, 3) 時，AML 系統是否正確寫入 TS_CUST_ID。
-   * 結果： BANCS 純新光 1,732,568 筆，寫入台新並成功對應台新帳號者共 1,732,568 筆，全數一致（Pass）。
-Word 表格填寫對照
-依圖中上方含「包含之相關系統代號」之欄位規格整理如下，可直接複製填入檔案：
-| 項目 | 交易功能 | 案例說明 | 預期結果 | 包含之相關系統代號 | 驗證結果 |
-|---|---|---|---|---|---|
-| TC01 | CIF 轉換驗證 | 筆數一致性驗證 | 新光匯出與台新匯入總筆數一致 | BANCS / AML | 成功 (Pass)
-新光 6,180,901 筆
-台新 6,180,901 筆 |
-| TC02 | CIF 轉換驗證 | 純新光匯入分流驗證 | BANCS 來源筆數等於台新正常寫入與 Exception 筆數總和 | BANCS / AML | 成功 (Pass)
-來源 1,738,335 筆
-正常 1,732,568 筆
-異常 5,767 筆 |
-| TC03 | CIF 轉換驗證 | 純新光客戶風險等級轉換 | 風險等級依來源寫入；共有戶依業務規則取最高風險等級 | BANCS / AML | 成功 (Pass)
-規則相符（含 T1430999280 共有戶取高） |
-| TC04 | CIF 轉換驗證 | 轉換台新客戶 ID (TS_CUST_ID) | 當 CUST_RE_NO_FLG 為 2 或 3 時，AML 需完整對應並寫入 TS_CUST_ID | BANCS / AML | 成功 (Pass)
-來源 1,732,568 筆
-對應寫入 1,732,568 筆 |
-(若填寫圖中下方的「測試結果」簡表，直接省略「包含之相關系統代號」欄即可)
+-- NameProperty(CIF)
+-- 
+--加強關注客戶 企業
+SELECT bb.CustomerNo, a.IsSARFiled FROM Cust_NP_Migrate_buffer a
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE a.IsSARFiled = '1'  AND cc.CUST_TYPE_CDE = 'N'
+
+
+--告誡戶 企業
+SELECT bb.CustomerNo, a.SDST2400001   FROM Cust_NP_Migrate_buffer a
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE a.SDST2400001 = '1'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'insert'
+
+
+-- 衍生管制帳戶 企業
+SELECT bb.CustomerNo, a.Warn_Restrict_Account   FROM Cust_NP_Migrate_buffer a
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE a.Warn_Restrict_Account = '1'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'insert'
+
+-----------------負面新聞 企業
+
+SELECT 
+    a.CustomerNo,
+    c.PEPBitwiseCode,
+    CASE WHEN c.PEPBitwiseCode & 1   = 1   THEN 'Y' ELSE 'N' END AS BlackList,
+    CASE WHEN c.PEPBitwiseCode & 2   = 2   THEN 'Y' ELSE 'N' END AS PEP,
+    CASE WHEN c.PEPBitwiseCode & 4   = 4   THEN 'Y' ELSE 'N' END AS NN,
+    CASE WHEN c.PEPBitwiseCode & 8   = 8   THEN 'Y' ELSE 'N' END AS ForeignPEP,
+    CASE WHEN c.PEPBitwiseCode & 16  = 16  THEN 'Y' ELSE 'N' END AS LocalPEP,
+    CASE WHEN c.PEPBitwiseCode & 32  = 32  THEN 'Y' ELSE 'N' END AS ForeignOrgPEP,
+    CASE WHEN c.PEPBitwiseCode & 64  = 64  THEN 'Y' ELSE 'N' END AS EfPEP,
+    CASE WHEN c.PEPBitwiseCode & 128 = 128 THEN 'Y' ELSE 'N' END AS CustRPIsPEP
+FROM Customer_Migrate_buffer a
+JOIN Cust_NP_Migrate_buffer c    ON c.CIF_KEY = a.CIF_KEY
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE  c.PEPBitwiseCode = '4'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'insert'
+
+
+
+
+-----------------無記名股票 企業
+SELECT 
+    a.CustomerNo,
+    c.PEPBitwiseCode,
+    CASE WHEN c.PEPBitwiseCode & 1   = 1   THEN 'Y' ELSE 'N' END AS BlackList,
+    CASE WHEN c.PEPBitwiseCode & 2   = 2   THEN 'Y' ELSE 'N' END AS PEP,
+    CASE WHEN c.PEPBitwiseCode & 4   = 4   THEN 'Y' ELSE 'N' END AS NN,
+    CASE WHEN c.PEPBitwiseCode & 8   = 8   THEN 'Y' ELSE 'N' END AS ForeignPEP,
+    CASE WHEN c.PEPBitwiseCode & 16  = 16  THEN 'Y' ELSE 'N' END AS LocalPEP,
+    CASE WHEN c.PEPBitwiseCode & 32  = 32  THEN 'Y' ELSE 'N' END AS ForeignOrgPEP,
+    CASE WHEN c.PEPBitwiseCode & 64  = 64  THEN 'Y' ELSE 'N' END AS EfPEP,
+    CASE WHEN c.PEPBitwiseCode & 128 = 128 THEN 'Y' ELSE 'N' END AS CustRPIsPEP
+FROM Customer_Migrate_buffer a
+JOIN Cust_NP_Migrate_buffer c    ON c.CIF_KEY = a.CIF_KEY
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE  c.PEPBitwiseCode = '1'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'insert'
+
+-----------------黑名單 企業
+SELECT bb.CustomerNo, a.IsBearerShares   FROM Cust_NP_Migrate_buffer a
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE a.IsBearerShares = '1'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'insert'
+
+-----------------複雜結構 企業
+
+SELECT bb.CustomerNo, a.IsComplexStructure   FROM Cust_NP_Migrate_buffer a
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE a.IsComplexStructure = '1'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'insert'
+
+
+----------警示戶 企業
+SELECT bb.CustomerNo, a.Warn_Restrict_Account   FROM Cust_NP_Migrate_buffer a
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE a.Warn_Restrict_Account = '1'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'insert'
+
+
+---------- PEP 個人
+
+SELECT 
+    a.CustomerNo,
+    c.PEPBitwiseCode,
+    CASE WHEN c.PEPBitwiseCode & 1   = 1   THEN 'Y' ELSE 'N' END AS BlackList,
+    CASE WHEN c.PEPBitwiseCode & 2   = 2   THEN 'Y' ELSE 'N' END AS PEP,
+    CASE WHEN c.PEPBitwiseCode & 4   = 4   THEN 'Y' ELSE 'N' END AS NN,
+    CASE WHEN c.PEPBitwiseCode & 8   = 8   THEN 'Y' ELSE 'N' END AS ForeignPEP,
+    CASE WHEN c.PEPBitwiseCode & 16  = 16  THEN 'Y' ELSE 'N' END AS LocalPEP,
+    CASE WHEN c.PEPBitwiseCode & 32  = 32  THEN 'Y' ELSE 'N' END AS ForeignOrgPEP,
+    CASE WHEN c.PEPBitwiseCode & 64  = 64  THEN 'Y' ELSE 'N' END AS EfPEP,
+    CASE WHEN c.PEPBitwiseCode & 128 = 128 THEN 'Y' ELSE 'N' END AS CustRPIsPEP
+FROM Customer_Migrate_buffer a
+JOIN Cust_NP_Migrate_buffer c    ON c.CIF_KEY = a.CIF_KEY
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE  c.PEPBitwiseCode = '2'  AND cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'insert'
+
+
+
+-----------加強關注客戶 個人
+SELECT bb.CustomerNo, a.IsSARFiled FROM Cust_NP_Migrate_buffer a
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE a.IsSARFiled = '1'  AND cc.CUST_TYPE_CDE = 'P'
+
+
+
+----------SDST2400001  告誡戶 個人
+SELECT bb.CustomerNo, a.SDST2400001   FROM Cust_NP_Migrate_buffer a
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE a.SDST2400001 = '1'  AND cc.CUST_TYPE_CDE =  'P' AND v.ACTION = 'insert'
+
+
+----------Warn_Restrict_Account  衍生管制帳戶 個人
+SELECT bb.CustomerNo, a.Warn_Restrict_Account   FROM Cust_NP_Migrate_buffer a
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE a.Warn_Restrict_Account = '1'  AND cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'insert'
+
+
+-----------------負面新聞 企業 個人
+SELECT 
+    a.CustomerNo,
+    c.PEPBitwiseCode,
+    CASE WHEN c.PEPBitwiseCode & 1   = 1   THEN 'Y' ELSE 'N' END AS BlackList,
+    CASE WHEN c.PEPBitwiseCode & 2   = 2   THEN 'Y' ELSE 'N' END AS PEP,
+    CASE WHEN c.PEPBitwiseCode & 4   = 4   THEN 'Y' ELSE 'N' END AS NN,
+    CASE WHEN c.PEPBitwiseCode & 8   = 8   THEN 'Y' ELSE 'N' END AS ForeignPEP,
+    CASE WHEN c.PEPBitwiseCode & 16  = 16  THEN 'Y' ELSE 'N' END AS LocalPEP,
+    CASE WHEN c.PEPBitwiseCode & 32  = 32  THEN 'Y' ELSE 'N' END AS ForeignOrgPEP,
+    CASE WHEN c.PEPBitwiseCode & 64  = 64  THEN 'Y' ELSE 'N' END AS EfPEP,
+    CASE WHEN c.PEPBitwiseCode & 128 = 128 THEN 'Y' ELSE 'N' END AS CustRPIsPEP
+FROM Customer_Migrate_buffer a
+JOIN Cust_NP_Migrate_buffer c    ON c.CIF_KEY = a.CIF_KEY
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE  c.PEPBitwiseCode = '4'  AND cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'insert'
+
+-----------------黑名單 個人
+
+SELECT bb.CustomerNo, a.IsBearerShares   FROM Cust_NP_Migrate_buffer a
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE a.IsBearerShares = '1'  AND cc.CUST_TYPE_CDE = 'P'  AND v.ACTION = 'insert'
+
+
+---------- 警示戶 個人
+
+SELECT bb.CustomerNo, a.Warn_Restrict_Account   FROM Cust_NP_Migrate_buffer a
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE a.Warn_Restrict_Account = '1'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'insert'
+
+
+
+
+如圖他要這些資料，我現在是分開寫，有辦法一次寫好?
