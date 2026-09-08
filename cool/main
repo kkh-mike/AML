@@ -1,72 +1,29 @@
-要找出系統中除了 WORKFLOW_AutomatedUSERS 之外，還有哪些 Stored Procedure 會異動（INSERT / UPDATE / DELETE）或檢查 UserAccounts 或 WORKFLOW_MGMT_USERS 的權限資料，建議直接使用下列語法在資料庫中全面掃描：
-1. 全面掃描有修改 UserAccounts 或 WORKFLOW_MGMT_USERS 的 SP
-執行以下 SQL，它會抓出所有在程式碼內對這兩張表做 INSERT、UPDATE、DELETE 或 MERGE 的 SP：
-SELECT DISTINCT 
-    ROUTINE_NAME AS SP_Name,
-    ROUTINE_DEFINITION
-FROM INFORMATION_SCHEMA.ROUTINES
-WHERE ROUTINE_TYPE = 'PROCEDURE'
-  AND (
-       -- 掃描對 UserAccounts 的異動
-       ROUTINE_DEFINITION LIKE '%INSERT%UserAccounts%'
-    OR ROUTINE_DEFINITION LIKE '%UPDATE%UserAccounts%'
-    OR ROUTINE_DEFINITION LIKE '%DELETE%UserAccounts%'
-       -- 掃描對 WORKFLOW_MGMT_USERS 的異動
-    OR ROUTINE_DEFINITION LIKE '%INSERT%WORKFLOW_MGMT_USERS%'
-    OR ROUTINE_DEFINITION LIKE '%UPDATE%WORKFLOW_MGMT_USERS%'
-    OR ROUTINE_DEFINITION LIKE '%DELETE%WORKFLOW_MGMT_USERS%'
-    OR ROUTINE_DEFINITION LIKE '%MERGE%WORKFLOW_MGMT_USERS%'
-  )
-  AND ROUTINE_NAME <> 'WORKFLOW_AutomatedUSERS' -- 排除剛才那支
-ORDER BY ROUTINE_NAME;
+SELECT 
+    c.CustomerNo                                                    AS [新光客戶ID],
+    a.ACCT_KEY                                                      AS [新光帳號],
+    CASE 
+        WHEN v.ACTION = 'insert' THEN '純新光'
+        WHEN v.ACTION = 'update' THEN '共有戶'
+        ELSE v.ACTION
+    END                                                             AS [分類],
+    x.EXTN_REF_NO                                                   AS [BANCS對應帳號],
+    ts.CustomerNo                                                   AS [台新客戶ID]
+FROM BSADBTW..Acct_Migrate_buffer a
+-- 1. 關聯 Mapping 暫存表
+JOIN CIF_Migrate_Mapping_TEMP v 
+    ON v.SOURCE_CIF_KEY = a.CIF_KEY
 
-2. 從你一開始提供的清單中，這幾支是高機率相關的 SP
-比對你一開始列出的預存程序清單，以下幾支在系統架構中屬於權限管理與派案核心，通常會執行或被呼叫：
-① 系統後台畫面管理（UI 新增／修改權限時執行）
- * Workflow_Mgmt_GetActionSettingsByQueueAndRole
-   後台畫面在設定特定 Queue、特定 Role 的功能權限時呼叫。
- * Workflow_Mgmt_GetActionSettingsByQueue
-   工作佇列與操作動作的權限對照。
- * Workflow_Mgmt_GetDefaultActionSettings
-   預設權限載入（新佇列或角色初始化時套用）。
- * ServerAdmin_GetWorkgroupActionSettingsRpt
-   系統管理員匯出「工作群組權限設定報表」使用。
-② 登入與模組切換時（檢查該員「是否有主管或經辦身分」）
- * DWire_GetRoleForUser（極關鍵）
-   當使用者登入或進入案件時，檢查該 UserID 是 Maker 還是 Checker。
- * DBCHK_GetDBCHKRole
-   檢查使用者在名單比對／資料庫檢核模組的角色。
- * TradeFin_GetRole
-   檢查使用者在貿易融資模組的角色。
- * HRS_GetHRSRole
-   檢查高風險客戶模組角色。
- * OFAC_314A_Automatic_Get314ARole
-   檢查 314A 洗錢防制自動化模組角色。
-③ 案件派案／送簽主管時（抓取誰是 Checker）
- * %_GetAssignSupervisor 系列（如 DWire_GetAssignSupervisor、CIP_GetAssignSupervisor、DBCHK_GetAssignSupervisor 等）
-   當經辦按「送審」時，這系列 SP 會去讀 WORKFLOW_MGMT_USERS，抓出所有 ROLE = 2 的主管名單放進下拉選單供指派。
-3. 特別注意：WORKFLOW_MGMT_QUEUEACCESS
-在剛才那支 WORKFLOW_AutomatedUSERS 的程式碼後半段有看到：
-/*Clear Queue Access for deleted user*/  
-DELETE A FROM dbo.WORKFLOW_MGMT_QUEUEACCESS A ...
+-- 2. 取得新光客戶 ID
+JOIN Customer_Migrate_buffer c 
+    ON c.CIF_KEY = v.SOURCE_CIF_KEY
 
-/*Grant permission for new BankAdmin for all workflow Queue*/  
-INSERT INTO dbo.WORKFLOW_MGMT_QUEUEACCESS ( QUEUEID, USERID )  
-SELECT B.QUEUEID, A.cn FROM GCMAINDB.dbo.CTCBBankAdmins A ...
+-- 3. 取得台新客戶 ID (BANCS 對應客戶 ID)
+LEFT JOIN BSA_SUB_CUST_FACT ts 
+    ON ts.CIF_KEY = v.NEW_CIF_KEY
 
-這代表系統裡還有一張 WORKFLOW_MGMT_QUEUEACCESS（佇列進入權限表）。若同仁配了角色但在系統畫面上連該 Queue 都點不進去，可查查這張表是否有對應：
--- 檢查新同仁是否也需要 QUEUEACCESS
-SELECT * FROM dbo.WORKFLOW_MGMT_QUEUEACCESS WHERE USERID = '1080898';
+-- 4. 關聯 BANCS XREF 帳號（前綴補 0 到 25 碼）
+LEFT JOIN BSADBTW..XREF x 
+    ON x.EXTN_REF_NO = RIGHT(REPLICATE('0', 25) + a.ACCT_KEY, 25)
 
--- 若為空，且 922798 裡面有，可比照對拷：
-/*
-INSERT INTO dbo.WORKFLOW_MGMT_QUEUEACCESS (QUEUEID, USERID)
-SELECT QUEUEID, '1080898'
-FROM dbo.WORKFLOW_MGMT_QUEUEACCESS
-WHERE USERID = '922798'
-  AND NOT EXISTS (
-      SELECT 1 FROM dbo.WORKFLOW_MGMT_QUEUEACCESS 
-      WHERE USERID = '1080898' AND QUEUEID = dbo.WORKFLOW_MGMT_QUEUEACCESS.QUEUEID
-  );
-*/
-
+WHERE v.ACTION IN ('insert', 'update')
+ORDER BY [分類] DESC, [新光客戶ID];
