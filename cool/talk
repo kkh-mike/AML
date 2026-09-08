@@ -1,10 +1,29 @@
-SELECT TOP 2
-    bb.CustomerNo AS [客戶ID],
-    a.ACCT_KEY    AS [帳號]
-FROM BSADBTW..ACCT_XREF_DIM a
-JOIN CIF_Migrate_Mapping_TEMP v 
-    ON v.NEW_CIF_KEY = a.CIF_KEY
-JOIN BSA_SUB_CUST_FACT bb 
-    ON bb.CIF_KEY = v.NEW_CIF_KEY
-WHERE v.ACTION = 'insert'
-ORDER BY a.ACCT_KEY;
+WITH AcctData AS (
+    SELECT 
+        bb.CustomerNo AS [客戶ID],
+        a.ACCT_KEY    AS [帳號],
+        v.CUST_RE_NO_FLG,
+        CASE 
+            WHEN v.CUST_RE_NO_FLG IN (2, 3) THEN '純新光'
+            WHEN v.CUST_RE_NO_FLG = 1 THEN '共有戶'
+            ELSE '其他'
+        END AS [帳戶屬性],
+        ROW_NUMBER() OVER (
+            PARTITION BY (CASE WHEN v.CUST_RE_NO_FLG IN (2, 3) THEN '純新光' ELSE '共有戶' END) 
+            ORDER BY a.ACCT_KEY
+        ) AS rn
+    FROM BSADBTW..ACCT_XREF_DIM a
+    JOIN CIF_Migrate_Mapping_TEMP v 
+        ON v.NEW_CIF_KEY = a.CIF_KEY
+    JOIN BSA_SUB_CUST_FACT bb 
+        ON bb.CIF_KEY = v.NEW_CIF_KEY
+    WHERE v.ACTION = 'insert'
+      AND v.CUST_RE_NO_FLG IN (1, 2, 3)
+)
+SELECT 
+    [客戶ID],
+    [帳號],
+    [帳戶屬性]
+FROM AcctData
+WHERE rn <= 2
+ORDER BY [帳戶屬性] DESC, [客戶ID];
