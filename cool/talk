@@ -24,3 +24,9 @@ SELECT
 FROM AcctData
 WHERE rn <= 2
 ORDER BY [帳戶屬性] DESC, [客戶ID];
+
+
+因為客戶id 是新光的
+多加一個客戶id 台新ˇ的
+
+用CIF_Migrate_Mapping_TEMP 的NEW_CIF_KEY  去串 BSA_SUB_CUST_FACT 的CIF_KEY
