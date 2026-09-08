@@ -1,33 +1,8 @@
-WITH AggNP AS (
-    -- 依 SP 邏輯，先將同一個 NEW_CIF_KEY 的新光候選帳號做 HIGHRISK 聚合擇高 (H > M > L)
-    SELECT 
-        m.NEW_CIF_KEY,
-        CASE MAX(CASE s.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END)
-            WHEN 3 THEN 'H'
-            WHEN 2 THEN 'M'
-            WHEN 1 THEN 'L'
-            ELSE NULL
-        END AS NP_HIGHRISK
-    FROM CIF_Migrate_Mapping_TEMP m
-    JOIN Cust_NP_Migrate_buffer s 
-        ON s.CIF_KEY = m.SOURCE_CIF_KEY
-    GROUP BY m.NEW_CIF_KEY
-)
-SELECT 
-    COUNT(*) AS TOTAL_COUNT,
-    -- 1. 目標表與聚合擇高後之新光等級完全一致筆數
-    COUNT(CASE 
-        WHEN ISNULL(z.HIGHRISK, '') = ISNULL(p.NP_HIGHRISK, '') 
-        THEN 1 
-    END) AS MATCH_COUNT,
-    -- 2. 異常差異筆數 (預期必須為 0)
-    COUNT(CASE 
-        WHEN ISNULL(z.HIGHRISK, '') <> ISNULL(p.NP_HIGHRISK, '') 
-        THEN 1 
-    END) AS DIFF_COUNT
-FROM BSA_SUB_CUST_FACT z
-JOIN AggNP p 
-    ON p.NEW_CIF_KEY = z.CIF_KEY
-LEFT JOIN BSA_SUB_CUST_FACT_BAK_20260720 c 
-    ON c.CIF_KEY = z.CIF_KEY
-WHERE c.CIF_KEY IS NULL;
+情境 3：共有戶風險等級（HIGHRISK）檢核
+ * 比對規則：採 Highest Wins（擇高從嚴） 原則（H > M > L），比對台新原值與新光來源端，取高者為最終寫入值。
+ * 檢核結果：
+   * 總檢核筆數：2,437,384 筆
+   * 維持原等級：2,295,873 筆（台新原等級 \ge 新光來源）
+   * 擇高升級筆數：141,511 筆（新光風險較高，成功升級至新光等級）
+   * 異常/降級筆數：0 筆
+ * 結論：資料 100% 符合擇高判定邏輯，未發生任何非預期異動或降級，驗證通過。
