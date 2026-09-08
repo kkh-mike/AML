@@ -1,34 +1,18 @@
-SELECT 
-    r.session_id,
-    r.status,
-    r.cpu_time,
-    r.total_elapsed_time AS elapsed_time_ms,
-    r.wait_type,
-    r.wait_time AS wait_time_ms,
-    r.blocking_session_id AS blocked_by, -- 誰卡住了它 (大於 0 表示被擋住)
-    SUBSTRING(t.text, (r.statement_start_offset/2)+1,   
-        (((CASE r.statement_end_offset  
-            WHEN -1 THEN DATALENGTH(t.text)  
-            ELSE r.statement_end_offset  
-        END) - r.statement_start_offset)/2) + 1) AS running_statement,
-    DB_NAME(r.database_id) AS database_name
-FROM sys.dm_exec_requests r
-CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
-WHERE r.session_id <> @@SPID -- 排除自己
-  AND r.status NOT IN ('background', 'sleeping');
 
+-- CIF
+-- 客戶類型 企業
 
+SELECT bb.CustomerNo, a.highrisk   
+FROM Cust_NP_Migrate_buffer a
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE a.highrisk = 'H'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'update' --共有戶 高   
+--WHERE a.highrisk = 'M'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'update' --共有戶 中
+--WHERE a.highrisk = 'L'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'update' --共有戶 低
 
+--WHERE a.highrisk = 'H'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'INSERT' -- 純新光 高   個
+--WHERE a.highrisk = 'M'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'INSERT' -- 純新光 中
+--WHERE a.highrisk = 'L'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'INSERT' -- 純新光 低
 
-權限異動 SP 核心重點
-真正的權限異動只由以下 4 支 SP 負責：
- * WORKFLOW_MGMT_SAVUSERS（後台 UI 存檔）
-   管理員在畫面新增／修改權限時執行，直接寫入 WORKFLOW_MGMT_USERS。
- * Workflow_ResetForDeletedUsers（離職清理）
-   當同仁從主帳號表（UserAccounts）被刪除時執行，會清空該員所有工作群組權限並將未結案件退回關卡池。
- * WORKFLOW_MGMT_DELQUEUEINFO（群組清空）
-   管理者刪除整個工作群組（Queue）時，清空底下所有人員。
- * WORKFLOW_MGMT_SAVQUEUEINFO（歷程留痕）
-   修改群組時備份當前人員名單至 WORKFLOW_MGMT_USERS_HISTORY 與 Log 表。
-核心結論
-其餘所有 SP（如 %_GetAssignSupervisor、%_GetByFilter 等）都是純查詢（Read-only）。只要帳號沒有在 UserAccounts 被刪除、且新增時有設定 IsAutomated = 'FALSE'，權限就絕對不會被任何 SP 自動洗掉。
+我要怎麼寫才可以1次得到六個
