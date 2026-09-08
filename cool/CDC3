@@ -1,80 +1,9 @@
-WITH PURE_TS AS
-(
-    SELECT TS_CUST_ID 
-    FROM BANCS_SK_CUST_INFO a 
-    JOIN Customer_Migrate_buffer b ON a.SK_CUST_ID = b.CustomerNo
-    WHERE a.CUST_RE_NO_FLG = '1'
-    
-    EXCEPT
-    
-    SELECT TS_CUST_ID 
-    FROM BANCS_SK_CUST_INFO a 
-    JOIN Customer_Migrate_buffer b ON a.SK_CUST_ID = b.CustomerNo
-    WHERE a.CUST_RE_NO_FLG IN ('2','3')
-),
-AggNP AS (
-    -- 聚合新光端之最高風險等級與最早審查日 (僅鎖定共有戶更新案件)
-    SELECT 
-        m.NEW_CIF_KEY,
-        MAX(CASE s.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END) AS NP_RISK_SCORE,
-        MIN(s.ReviewDt) AS NP_ReviewDt
-    FROM CIF_Migrate_Mapping_TEMP m
-    JOIN Cust_NP_Migrate_buffer s ON s.CIF_KEY = m.SOURCE_CIF_KEY
-    WHERE s.ReviewDt IS NOT NULL
-      AND m.ACTION = 'UPDATE' -- 僅鎖定共有戶
-    GROUP BY m.NEW_CIF_KEY
-),
-TS_Current_Review AS (
-    -- 現行有效排程
-    SELECT CIFKey, ReviewDt
-    FROM EDD_ReviewSchedule
-    WHERE Status = 'P'
-),
-TS_Bak_Review AS (
-    -- 備份原有效排程
-    SELECT CIFKey, ReviewDt
-    FROM EDD_ReviewSchedule_20260626
-    WHERE Status = 'P'
-)
-SELECT 
-    COUNT(*) AS TOTAL_COUNT,
-    -- 1. 下審日維持台新原日期 (不符合縮短條件，或新光日期未更近)
-    COUNT(CASE 
-        WHEN CAST(r_now.ReviewDt AS DATE) = CAST(r_bak.ReviewDt AS DATE) 
-        THEN 1 
-    END) AS KEEP_TS_DATE_COUNT,
-    -- 2. 成功縮短下審日 (新光風險較高 且 新光審查日更近，成功取新光日期)
-    COUNT(CASE 
-        WHEN p.NP_RISK_SCORE > CASE u.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END
-         AND CAST(p.NP_ReviewDt AS DATE) < CAST(r_bak.ReviewDt AS DATE)
-         AND CAST(r_now.ReviewDt AS DATE) = CAST(p.NP_ReviewDt AS DATE)
-        THEN 1 
-    END) AS SHORTENED_NP_DATE_COUNT,
-    -- 3. 異常筆數 (未依規則縮短，或被無故變更日期)
-    COUNT(CASE 
-        WHEN (
-            -- 符合縮短條件但未縮短
-            p.NP_RISK_SCORE > CASE u.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END
-            AND CAST(p.NP_ReviewDt AS DATE) < CAST(r_bak.ReviewDt AS DATE)
-            AND CAST(r_now.ReviewDt AS DATE) <> CAST(p.NP_ReviewDt AS DATE)
-        ) OR (
-            -- 不符合縮短條件但被異動日期
-            NOT (
-                p.NP_RISK_SCORE > CASE u.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END
-                AND CAST(p.NP_ReviewDt AS DATE) < CAST(r_bak.ReviewDt AS DATE)
-            )
-            AND CAST(r_now.ReviewDt AS DATE) <> CAST(r_bak.ReviewDt AS DATE)
-        )
-        THEN 1 
-    END) AS UNEXPECTED_COUNT
-FROM BSA_SUB_CUST_FACT a
-JOIN PURE_TS d 
-    ON d.TS_CUST_ID = a.CustomerNo
-JOIN BSA_SUB_CUST_FACT_BAK_20260720 u 
-    ON u.CIF_KEY = a.CIF_KEY
-JOIN AggNP p 
-    ON p.NEW_CIF_KEY = a.CIF_KEY
-JOIN TS_Current_Review r_now 
-    ON r_now.CIFKey = a.CIF_KEY
-JOIN TS_Bak_Review r_bak 
-    ON r_bak.CIFKey = a.CIF_KEY;
+我測了一下
+
+SELECT * FROM Customer_Migrate_buffer WHERE customerno = 'B264313797'
+  SELECT HIGHRISK FROM Cust_NP_Migrate_buffer WHERE CIF_KEY = 'c40704d0-2beb-e511-80c8-0050568c710a'
+  SELECT HIGHRISK FROM BSA_SUB_CUST_FACT_BAK_20260720 WHERE customerno = 'B2643137970'
+  SELECT HIGHRISK FROM BSA_SUB_CUST_FACT WHERE customerno = 'B2643137970'
+  
+
+  有點奇怪 Cust_NP_Migrate_buffer  如果他的等級比 BSA_SUB_CUST_FACT 她的小  就代表他是拿舊的等級才對 沒有更新
