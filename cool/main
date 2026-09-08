@@ -1,53 +1,66 @@
-WITH AcctSummary AS (
+WITH TargetCustomers AS (
+    -- 1. 先按「純新光 / 共有戶」及「是否有寫入台新」在客戶層級各抽 2 位客戶
     SELECT 
-        c.CustomerNo                                                    AS [新光客戶ID],
-        a.ACCT_KEY                                                      AS [新光帳號],
+        c.CustomerNo,
+        v.ACTION,
         CASE 
-            WHEN v.ACTION = 'insert' THEN '純新光'
-            WHEN v.ACTION = 'update' THEN '共有戶'
-        END                                                             AS [分類],
-        x.EXTN_REF_NO                                                   AS [bancS 對應帳號],
-        ts.CustomerNo                                                   AS [台新客戶id],
+            WHEN EXISTS (
+                SELECT 1 FROM BSADBTW..ACCT_XREF_DIM dim 
+                WHERE dim.CIF_KEY = v.NEW_CIF_KEY 
+                  AND dim.ACCT_KEY = 'SK_' + a.ACCT_KEY
+            ) THEN 'Y' ELSE 'N' 
+        END AS HasWritten,
         ROW_NUMBER() OVER (
-            PARTITION BY v.ACTION 
-            ORDER BY c.CustomerNo, a.ACCT_KEY
+            PARTITION BY v.ACTION, 
+                         CASE WHEN EXISTS (
+                             SELECT 1 FROM BSADBTW..ACCT_XREF_DIM dim 
+                             WHERE dim.CIF_KEY = v.NEW_CIF_KEY 
+                               AND dim.ACCT_KEY = 'SK_' + a.ACCT_KEY
+                         ) THEN 'Y' ELSE 'N' END
+            ORDER BY c.CustomerNo
         ) AS rn
     FROM BSADBTW..Acct_Migrate_buffer a
     JOIN CIF_Migrate_Mapping_TEMP v 
         ON v.SOURCE_CIF_KEY = a.CIF_KEY
     JOIN Customer_Migrate_buffer c 
         ON c.CIF_KEY = v.SOURCE_CIF_KEY
-    LEFT JOIN BSA_SUB_CUST_FACT ts 
-        ON ts.CIF_KEY = v.NEW_CIF_KEY
-    LEFT JOIN BSADBTW..XREF x 
-        ON x.EXTN_REF_NO = RIGHT(REPLICATE('0', 25) + a.ACCT_KEY, 25)
     WHERE v.ACTION IN ('insert', 'update')
 )
 SELECT 
-    [新光客戶ID],
-    [新光帳號],
-    [分類],
-    [bancS 對應帳號],
-    [台新客戶id]
-FROM AcctSummary
-WHERE rn <= 2
-ORDER BY [分類] DESC, [新光客戶ID];
-
-
-像剛剛撈的
-新光客戶ID	新光帳號	分類	bancS 對應帳號	台新客戶id
-00000048	1076101113113	純新光	0000000000001076101113113	00000048
-00000687	0189108892232	純新光	0000000000000189108892232	00000687
-0000000000A	0037300000011	共有戶	0000000000000037300000011	86519539                                          
-00014021	0161108743556	共有戶	0000000000000161108743556	00014021                                          
-
-
-這樣就是BANCS帳號等於新光帳號
-
-但這樣我的台新實際寫入BSADBTW..ACCT_XREF_DIM 就沒有帳號  是正確沒錯
-
-但我希望我可以再加一欄位 是台新寫入帳號
-
-那在多4個好了 純新光兩個 共有戶兩個  要有台新寫入的帳號
-
-然後如果新光來源BSADBTW..Acct_Migrate_buffer   一個客戶對應到多個帳號都要顯示出來讓我知道
+    c.CustomerNo                                                    AS [新光客戶ID],
+    ts.CustomerNo                                                   AS [台新客戶id],
+    CASE 
+        WHEN v.ACTION = 'insert' THEN '純新光'
+        WHEN v.ACTION = 'update' THEN '共有戶'
+    END                                                             AS [分類],
+    a.ACCT_KEY                                                      AS [新光帳號],
+    x.EXTN_REF_NO                                                   AS [bancS 對應帳號],
+    dim.ACCT_KEY                                                    AS [台新寫入帳號],
+    CASE 
+        WHEN dim.ACCT_KEY IS NOT NULL THEN '已寫入'
+        WHEN x.EXTN_REF_NO IS NOT NULL THEN 'BANCS已存在(不寫入)'
+        ELSE '未寫入'
+    END                                                             AS [寫入狀態]
+FROM BSADBTW..Acct_Migrate_buffer a
+JOIN CIF_Migrate_Mapping_TEMP v 
+    ON v.SOURCE_CIF_KEY = a.CIF_KEY
+JOIN Customer_Migrate_buffer c 
+    ON c.CIF_KEY = v.SOURCE_CIF_KEY
+LEFT JOIN BSA_SUB_CUST_FACT ts 
+    ON ts.CIF_KEY = v.NEW_CIF_KEY
+LEFT JOIN BSADBTW..XREF x 
+    ON x.EXTN_REF_NO = RIGHT(REPLICATE('0', 25) + a.ACCT_KEY, 25)
+LEFT JOIN BSADBTW..ACCT_XREF_DIM dim 
+    ON dim.CIF_KEY = v.NEW_CIF_KEY 
+   AND dim.ACCT_KEY = 'SK_' + a.ACCT_KEY
+WHERE c.CustomerNo IN (
+    -- 取出「純新光(有寫入2戶、沒寫入2戶)」與「共有戶(有寫入2戶、沒寫入2戶)」
+    SELECT CustomerNo 
+    FROM TargetCustomers 
+    WHERE rn <= 2
+)
+ORDER BY 
+    [分類] DESC, 
+    [寫入狀態], 
+    [新光客戶ID], 
+    [新光帳號];
