@@ -17,9 +17,7 @@ WITH RankedData AS (
     JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
     JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
     JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
-    WHERE cc.CUST_TYPE_CDE IN ('N', 'P')
-      AND v.ACTION IN ('update', 'INSERT')
-      AND a.highrisk IN ('H', 'M', 'L')
+    WHERE cc.CUST_TYPE_CDE IN ('N', 'P')      AND v.ACTION IN ('update', 'INSERT')      AND a.highrisk IN ('H', 'M', 'L')
 )
 SELECT 
     CustomerNo,
@@ -28,5 +26,18 @@ SELECT
     highrisk,
     完整分類標籤
 FROM RankedData
-WHERE rn <= 3
+WHERE rn <= 1
 ORDER BY 完整分類標籤;
+
+
+
+
+SELECT a.highrisk, b.CUST_TYPE_CDE  FROM BSA_SUB_CUST_FACT a
+join PB_CUSTOMER_FACT b on  b.cif_KEY = a.cif_key
+WHERE a.customerno  in
+(
+''
+)
+
+
+我上面找出來的customer要帶到下面的BSA_SUB_CUST_FACT 那個join
