@@ -40,3 +40,23 @@ SELECT
 FROM AcctData
 WHERE rn <= 2
 ORDER BY [帳戶屬性] DESC, [新光客戶ID];
+
+
+
+
+少說了
+
+台新帳號
+如果有在xref 這個TABLE 是不寫入
+
+邏輯在這
+-- 未寫入的1527458筆資料，皆為已存在BANCS帳號當中
+SELECT COUNT(DISTINCT a.ACCT_KEY) AS Missing_But_In_XREF_Count FROM BSADBTW..Acct_Migrate_buffer a
+LEFT JOIN BSADBTW..XREF b
+	ON SUBSTRING(a.ACCT_KEY, PATINDEX('%[^0]%', a.ACCT_KEY+' '), LEN(a.ACCT_KEY))
+	= SUBSTRING(b.EXTN_REF_NO, PATINDEX('%[^0]%', b.EXTN_REF_NO+''), LEN(b.EXTN_REF_NO))
+WHERE NOT EXISTS (
+SELECT 1 FROM BSADBTW..ACCT_XREF_DIM d WHERE d.ACCT_KEY = 'SK_'+a.ACCT_KEY
+);
+
+
