@@ -1,66 +1,131 @@
-WITH TargetCustomers AS (
-    -- 1. 先按「純新光 / 共有戶」及「是否有寫入台新」在客戶層級各抽 2 位客戶
+-- NameProperty(CIF)
+WITH BaseData AS (
     SELECT 
-        c.CustomerNo,
-        v.ACTION,
-        CASE 
-            WHEN EXISTS (
-                SELECT 1 FROM BSADBTW..ACCT_XREF_DIM dim 
-                WHERE dim.CIF_KEY = v.NEW_CIF_KEY 
-                  AND dim.ACCT_KEY = 'SK_' + a.ACCT_KEY
-            ) THEN 'Y' ELSE 'N' 
-        END AS HasWritten,
-        ROW_NUMBER() OVER (
-            PARTITION BY v.ACTION, 
-                         CASE WHEN EXISTS (
-                             SELECT 1 FROM BSADBTW..ACCT_XREF_DIM dim 
-                             WHERE dim.CIF_KEY = v.NEW_CIF_KEY 
-                               AND dim.ACCT_KEY = 'SK_' + a.ACCT_KEY
-                         ) THEN 'Y' ELSE 'N' END
-            ORDER BY c.CustomerNo
-        ) AS rn
-    FROM BSADBTW..Acct_Migrate_buffer a
+        bb.CustomerNo,
+        cc.CUST_TYPE_CDE,
+        CASE cc.CUST_TYPE_CDE 
+            WHEN 'N' THEN '企業' 
+            WHEN 'P' THEN '個人' 
+            ELSE cc.CUST_TYPE_CDE 
+        END AS 客戶類型,
+        a.IsSARFiled,
+        a.SDST2400001,
+        a.Warn_Restrict_Account,
+        a.IsBearerShares,
+        a.IsComplexStructure,
+        c.PEPBitwiseCode
+    FROM Cust_NP_Migrate_buffer a
     JOIN CIF_Migrate_Mapping_TEMP v 
         ON v.SOURCE_CIF_KEY = a.CIF_KEY
-    JOIN Customer_Migrate_buffer c 
-        ON c.CIF_KEY = v.SOURCE_CIF_KEY
-    WHERE v.ACTION IN ('insert', 'update')
+    JOIN BSA_SUB_CUST_FACT bb 
+        ON bb.CIF_KEY = v.NEW_CIF_KEY
+    JOIN PB_CUSTOMER_FACT cc 
+        ON cc.CIF_KEY = bb.CIF_KEY
+    LEFT JOIN Customer_Migrate_buffer m 
+        ON m.CIF_KEY = a.CIF_KEY
+    LEFT JOIN Cust_NP_Migrate_buffer c 
+        ON c.CIF_KEY = a.CIF_KEY
+    WHERE v.ACTION = 'insert'
+),
+CategorizedData AS (
+    -- 1. 加強關注客戶 (企業)
+    SELECT 1 AS SortOrder, '加強關注客戶' AS 註記類型, '企業' AS 客戶類型, CustomerNo FROM BaseData 
+    WHERE CUST_TYPE_CDE = 'N' AND IsSARFiled = '1'
+
+    UNION ALL
+    -- 2. 告誡戶 (企業)
+    SELECT 2, '告誡戶', '企業', CustomerNo FROM BaseData 
+    WHERE CUST_TYPE_CDE = 'N' AND SDST2400001 = '1'
+
+    UNION ALL
+    -- 3. 衍生管制帳戶 (企業)
+    SELECT 3, '衍生管制帳戶', '企業', CustomerNo FROM BaseData 
+    WHERE CUST_TYPE_CDE = 'N' AND Warn_Restrict_Account = '1'
+
+    UNION ALL
+    -- 4. 負面新聞 (企業)
+    SELECT 4, '負面新聞', '企業', CustomerNo FROM BaseData 
+    WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 4) = 4
+
+    UNION ALL
+    -- 5. 無記名股票 (企業)
+    SELECT 5, '無記名股票', '企業', CustomerNo FROM BaseData 
+    WHERE CUST_TYPE_CDE = 'N' AND IsBearerShares = '1'
+
+    UNION ALL
+    -- 6. 黑名單 (企業)
+    SELECT 6, '黑名單', '企業', CustomerNo FROM BaseData 
+    WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 1) = 1
+
+    UNION ALL
+    -- 7. 複雜結構 (企業)
+    SELECT 7, '複雜結構', '企業', CustomerNo FROM BaseData 
+    WHERE CUST_TYPE_CDE = 'N' AND IsComplexStructure = '1'
+
+    UNION ALL
+    -- 8. 警示戶 (企業)
+    SELECT 8, '警示戶', '企業', CustomerNo FROM BaseData 
+    WHERE CUST_TYPE_CDE = 'N' AND Warn_Restrict_Account = '1'
+
+    UNION ALL
+    -- 9. PEP (個人)
+    SELECT 9, 'PEP', '個人', CustomerNo FROM BaseData 
+    WHERE CUST_TYPE_CDE = 'P' AND (PEPBitwiseCode & 2) = 2
+
+    UNION ALL
+    -- 10. 加強關注客戶 (個人)
+    SELECT 10, '加強關注客戶', '個人', CustomerNo FROM BaseData 
+    WHERE CUST_TYPE_CDE = 'P' AND IsSARFiled = '1'
+
+    UNION ALL
+    -- 11. 告誡戶 (個人)
+    SELECT 11, '告誡戶', '個人', CustomerNo FROM BaseData 
+    WHERE CUST_TYPE_CDE = 'P' AND SDST2400001 = '1'
+
+    UNION ALL
+    -- 12. 衍生管制帳戶 (個人)
+    SELECT 12, '衍生管制帳戶', '個人', CustomerNo FROM BaseData 
+    WHERE CUST_TYPE_CDE = 'P' AND Warn_Restrict_Account = '1'
+
+    UNION ALL
+    -- 13. 負面新聞 (個人)
+    SELECT 13, '負面新聞', '個人', CustomerNo FROM BaseData 
+    WHERE CUST_TYPE_CDE = 'P' AND (PEPBitwiseCode & 4) = 4
+
+    UNION ALL
+    -- 14. 黑名單 (個人)
+    SELECT 14, '黑名單', '個人', CustomerNo FROM BaseData 
+    WHERE CUST_TYPE_CDE = 'P' AND (PEPBitwiseCode & 1) = 1
+
+    UNION ALL
+    -- 15. 警示戶 (個人)
+    SELECT 15, '警示戶', '個人', CustomerNo FROM BaseData 
+    WHERE CUST_TYPE_CDE = 'P' AND Warn_Restrict_Account = '1'
+),
+RankedData AS (
+    SELECT 
+        SortOrder,
+        註記類型,
+        客戶類型,
+        CustomerNo AS ID,
+        ROW_NUMBER() OVER (PARTITION BY SortOrder ORDER BY CustomerNo) AS rn
+    FROM CategorizedData
 )
 SELECT 
-    c.CustomerNo                                                    AS [新光客戶ID],
-    ts.CustomerNo                                                   AS [台新客戶id],
-    CASE 
-        WHEN v.ACTION = 'insert' THEN '純新光'
-        WHEN v.ACTION = 'update' THEN '共有戶'
-    END                                                             AS [分類],
-    a.ACCT_KEY                                                      AS [新光帳號],
-    x.EXTN_REF_NO                                                   AS [bancS 對應帳號],
-    dim.ACCT_KEY                                                    AS [台新寫入帳號],
-    CASE 
-        WHEN dim.ACCT_KEY IS NOT NULL THEN '已寫入'
-        WHEN x.EXTN_REF_NO IS NOT NULL THEN 'BANCS已存在(不寫入)'
-        ELSE '未寫入'
-    END                                                             AS [寫入狀態]
-FROM BSADBTW..Acct_Migrate_buffer a
-JOIN CIF_Migrate_Mapping_TEMP v 
-    ON v.SOURCE_CIF_KEY = a.CIF_KEY
-JOIN Customer_Migrate_buffer c 
-    ON c.CIF_KEY = v.SOURCE_CIF_KEY
-LEFT JOIN BSA_SUB_CUST_FACT ts 
-    ON ts.CIF_KEY = v.NEW_CIF_KEY
-LEFT JOIN BSADBTW..XREF x 
-    ON x.EXTN_REF_NO = RIGHT(REPLICATE('0', 25) + a.ACCT_KEY, 25)
-LEFT JOIN BSADBTW..ACCT_XREF_DIM dim 
-    ON dim.CIF_KEY = v.NEW_CIF_KEY 
-   AND dim.ACCT_KEY = 'SK_' + a.ACCT_KEY
-WHERE c.CustomerNo IN (
-    -- 取出「純新光(有寫入2戶、沒寫入2戶)」與「共有戶(有寫入2戶、沒寫入2戶)」
-    SELECT CustomerNo 
-    FROM TargetCustomers 
-    WHERE rn <= 2
-)
-ORDER BY 
-    [分類] DESC, 
-    [寫入狀態], 
-    [新光客戶ID], 
-    [新光帳號];
+    註記類型,
+    客戶類型,
+    ID
+FROM RankedData
+WHERE rn = 1
+ORDER BY SortOrder;
+
+
+我這段我想多家2個欄位 來顯示新光客戶ID 跟顯示 共有戶還是純新光
+
+然後有可能有寫錯幫我看一下
+BSA_SUB_CUST_FACT 的 CustomerNo  是台新寫入客戶ID
+Customer_Migrate_buffer 的 CustomerNo  是新光寫入客戶ID
+CIF_Migrate_Mapping_TEMP  的 action = update 是共有戶  , insert 是純新光
+
+
+
