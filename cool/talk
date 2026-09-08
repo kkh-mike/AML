@@ -1,114 +1,15 @@
-將共用的關聯邏輯抽到 CTE 中，利用 UNION ALL 分類條件，並透過 ROW_NUMBER() 為每一組各隨選 1 筆，欄位與順序完全符合 Excel 格式：
-WITH BaseRP AS (
-    SELECT 
-        a.CustomerNo            AS CustID,
-        c.RefNo                 AS RPID,
-        cc.CUST_TYPE_CDE,
-        c.RP,
-        c.PEPBitwiseCode
-    FROM Customer_Migrate_buffer a
-    JOIN RP_NP_Migrate_buffer c 
-        ON c.CIFKey = a.CIF_KEY
-    JOIN CIF_Migrate_Mapping_TEMP v 
-        ON v.SOURCE_CIF_KEY = a.CIF_KEY
-    JOIN BSA_SUB_CUST_FACT bb 
-        ON bb.CIF_KEY = v.NEW_CIF_KEY
-    JOIN PB_CUSTOMER_FACT cc 
-        ON cc.CIF_KEY = bb.CIF_KEY
-    WHERE v.ACTION = 'insert'
-),
-CategorizedData AS (
-    -- 1. PEP | 企業 | 主要股東 (MS)
-    SELECT 1 AS SortOrder, 'PEP' AS 註記類型, '企業' AS 客戶類型, '主要股東' AS 關聯類型, CustID, RPID FROM BaseRP
-    WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 2) = 2 AND RP = 'MS'
+/*
+帳號資料
+*/
+ SELECT * FROM BSADBTW..ACCT_XREF_DIM a
+ join CIF_Migrate_Mapping_TEMP v on v.NEW_CIF_KEY = a.CIF_KEY
+ WHERE action = 'insert'
+/*
+自建名單
+*/
+ SELECT * FROM BSADBTW..ACCT_XREF_DIM a
+ join CIF_Migrate_Mapping_TEMP v on v.NEW_CIF_KEY = a.CIF_KEY
+ WHERE action = 'insert'
 
-    UNION ALL
-    -- 2. PEP | 企業 | 其他關連方 (OTH)
-    SELECT 2, 'PEP', '企業', '其他關連方', CustID, RPID FROM BaseRP
-    WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 2) = 2 AND RP = 'OTH'
-
-    UNION ALL
-    -- 3. PEP | 企業 | 法定代理人 (LA)
-    SELECT 3, 'PEP', '企業', '法定代理人', CustID, RPID FROM BaseRP
-    WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 2) = 2 AND RP = 'LA'
-
-    UNION ALL
-    -- 4. PEP | 企業 | 被授權人或委託人 (APP)
-    SELECT 4, 'PEP', '企業', '被授權人或委託人', CustID, RPID FROM BaseRP
-    WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 2) = 2 AND RP = 'APP'
-
-    UNION ALL
-    -- 5. PEP | 企業 | 董事會成員 (BOD)
-    SELECT 5, 'PEP', '企業', '董事會成員', CustID, RPID FROM BaseRP
-    WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 2) = 2 AND RP = 'BOD'
-
-    UNION ALL
-    -- 6. 負面新聞 | 企業 | 主要股東 (MS)
-    SELECT 6, '負面新聞', '企業', '主要股東', CustID, RPID FROM BaseRP
-    WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 4) = 4 AND RP = 'MS'
-
-    UNION ALL
-    -- 7. 負面新聞 | 企業 | 其他關連方 (OTH)
-    SELECT 7, '負面新聞', '企業', '其他關連方', CustID, RPID FROM BaseRP
-    WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 4) = 4 AND RP = 'OTH'
-
-    UNION ALL
-    -- 8. 負面新聞 | 企業 | 法定代理人 (LA)
-    SELECT 8, '負面新聞', '企業', '法定代理人', CustID, RPID FROM BaseRP
-    WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 4) = 4 AND RP = 'LA'
-
-    UNION ALL
-    -- 9. 負面新聞 | 企業 | 董事會成員 (BOD)
-    SELECT 9, '負面新聞', '企業', '董事會成員', CustID, RPID FROM BaseRP
-    WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 4) = 4 AND RP = 'BOD'
-
-    UNION ALL
-    -- 10. 黑名單 | 企業 | 董事會成員 (BOD)
-    SELECT 10, '黑名單', '企業', '董事會成員', CustID, RPID FROM BaseRP
-    WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 1) = 1 AND RP = 'BOD'
-
-    UNION ALL
-    -- 11. PEP | 個人 | 其他關連方 (OTH)
-    SELECT 11, 'PEP', '個人', '其他關連方', CustID, RPID FROM BaseRP
-    WHERE CUST_TYPE_CDE = 'P' AND (PEPBitwiseCode & 2) = 2 AND RP = 'OTH'
-
-    UNION ALL
-    -- 12. PEP | 個人 | 法定代理人 (LA)
-    SELECT 12, 'PEP', '個人', '法定代理人', CustID, RPID FROM BaseRP
-    WHERE CUST_TYPE_CDE = 'P' AND (PEPBitwiseCode & 2) = 2 AND RP = 'LA'
-
-    UNION ALL
-    -- 13. 負面新聞 | 個人 | 其他關連方 (OTH)
-    SELECT 13, '負面新聞', '個人', '其他關連方', CustID, RPID FROM BaseRP
-    WHERE CUST_TYPE_CDE = 'P' AND (PEPBitwiseCode & 4) = 4 AND RP = 'OTH'
-
-    UNION ALL
-    -- 14. 負面新聞 | 個人 | 法定代理人 (LA)
-    SELECT 14, '負面新聞', '個人', '法定代理人', CustID, RPID FROM BaseRP
-    WHERE CUST_TYPE_CDE = 'P' AND (PEPBitwiseCode & 4) = 4 AND RP = 'LA'
-),
-RankedData AS (
-    SELECT 
-        SortOrder,
-        註記類型,
-        客戶類型,
-        關聯類型,
-        CustID AS [ID(客戶主體)],
-        RPID   AS [ID(關聯方)],
-        ROW_NUMBER() OVER (PARTITION BY SortOrder ORDER BY CustID, RPID) AS rn
-    FROM CategorizedData
-)
-SELECT 
-    註記類型,
-    客戶類型,
-    關聯類型,
-    [ID(客戶主體)],
-    [ID(關聯方)]
-FROM RankedData
-WHERE rn = 1
-ORDER BY SortOrder;
-
-修正與對應說明：
- * 客群代碼除錯： 原本你的 SQL 中，「PEP 企業 法定代理人」與「PEP 企業 被授權人」寫成了 CUST_TYPE_CDE = 'P'，已修正為符合表格「企業」的 'N'。
- * 位元運算通用性： 將 PEPBitwiseCode = '2' 等寫法改為 (PEPBitwiseCode & 2) = 2，避免當關聯方同時具備多重標籤（例如兼具 PEP 與負面新聞）時被漏掉。
- * Excel 直出： 查詢欄位命名為 [ID(客戶主體)] 與 [ID(關聯方)]，整份結果 14 列可直接整批複製貼進 Excel 的 A2 到 E15 儲存格。
+如圖他要的表格資訊
+幫我修改一下
