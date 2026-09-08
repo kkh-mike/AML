@@ -1,4 +1,25 @@
-情境 2：純新光客戶 SAR 註記比對
- * 比對結果：檢核共 3,225,947 筆，一致 3,225,814 筆（99.99%），差異 133 筆。
- * 差異原因：133 筆均屬「一對多帳號」情境（CUST_RE_NO_FLG = 1），轉檔採高風險從嚴判定，關聯帳號中任一筆有 SAR 即註記為 1，致寫入值與單一來源表（值為 0）不同。
- * 結論：符合洗錢防制從嚴規則，非轉檔異常，驗證通過。
+
+
+
+
+SELECT 
+    COUNT(*) AS TOTAL_COUNT,
+    COUNT(CASE 
+        WHEN ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) = ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0) 
+        THEN 1 
+    END) AS MATCH_COUNT,
+    COUNT(CASE 
+        WHEN ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) <> ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0) 
+        THEN 1 
+    END) AS DIFF_COUNT
+FROM BSA_SUB_CUST_FACT z
+JOIN CIF_Migrate_Mapping_TEMP h 
+    ON h.NEW_CIF_KEY = z.CIF_KEY
+JOIN Cust_NP_Migrate_buffer t 
+    ON t.CIF_KEY = h.SOURCE_CIF_KEY
+LEFT JOIN BSA_SUB_CUST_FACT_BAK_20260720 c 
+    ON c.CIF_KEY = z.CIF_KEY
+WHERE c.CIF_KEY IS NULL;
+
+
+可是這段沒有證明他是flag = 1
