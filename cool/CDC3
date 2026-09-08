@@ -1,34 +1,32 @@
-SELECT 
-    COUNT(*) AS TOTAL_COUNT,
-    -- 註記一致筆數
-    COUNT(CASE 
-        WHEN ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) = ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0) 
-        THEN 1 
-    END) AS MATCH_COUNT,
-    -- 總差異筆數 (133 筆)
-    COUNT(CASE 
-        WHEN ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) <> ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0) 
-        THEN 1 
-    END) AS DIFF_COUNT,
-    -- 證明差異且符合多帳號標記 (應剛好為 133 筆)
-    COUNT(CASE 
-        WHEN ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) <> ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0)
-         AND b.CUST_RE_NO_FLG = 1
-        THEN 1 
-    END) AS DIFF_AND_FLAG1_COUNT,
-    -- 異常差異筆數 (若有其他未預期差異應為 0 筆)
-    COUNT(CASE 
-        WHEN ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) <> ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0)
-         AND ISNULL(b.CUST_RE_NO_FLG, 0) <> 1
-        THEN 1 
-    END) AS DIFF_OTHER_UNEXPECTED_COUNT
+---- 有差異 檢查
+
+SELECT
+    z.CIF_KEY AS NEW_CIF_KEY,
+    h.SOURCE_CIF_KEY,
+    y.CustomerNo,
+    t.IsSARFiled AS BUFFER_IsSARFiled,
+    z.IsSARFiled AS FACT_IsSARFiled,
+    ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) AS BUFFER_IsSARFiled_Int,
+    ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0) AS FACT_IsSARFiled_Int,
+    b.SK_CUST_ID,
+    b.CUST_RE_NO_FLG
 FROM BSA_SUB_CUST_FACT z
-JOIN CIF_Migrate_Mapping_TEMP h 
+JOIN CIF_Migrate_Mapping_TEMP h
     ON h.NEW_CIF_KEY = z.CIF_KEY
-JOIN Cust_NP_Migrate_buffer t 
+JOIN Cust_NP_Migrate_buffer t
     ON t.CIF_KEY = h.SOURCE_CIF_KEY
-LEFT JOIN BANCS_SK_CUST_INFO b 
-    ON b.CIF_KEY = h.SOURCE_CIF_KEY -- 依實際關聯鍵串接 (如 SOURCE_CIF_KEY 或 CUST_ID)
-LEFT JOIN BSA_SUB_CUST_FACT_BAK_20260720 c 
+JOIN Customer_Migrate_buffer y
+    ON y.CIF_KEY = h.SOURCE_CIF_KEY
+LEFT JOIN BSA_SUB_CUST_FACT_BAK_20260720 c
     ON c.CIF_KEY = z.CIF_KEY
-WHERE c.CIF_KEY IS NULL;
+LEFT JOIN BANCS_SK_CUST_INFO b
+    ON b.SK_CUST_ID = y.CustomerNo
+WHERE c.CIF_KEY IS NULL
+  AND ISNULL(TRY_CAST(t.IsSARFiled AS INT), 0) <> ISNULL(TRY_CAST(z.IsSARFiled AS INT), 0)
+ORDER BY z.CIF_KEY;
+
+
+有差異是這樣寫
+你應該寫錯
+
+整個重寫一下
