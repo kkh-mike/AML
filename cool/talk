@@ -1,14 +1,26 @@
-有錯
-
-
-只要
-ACTION  = UPDATE 就是共有戶
-= INSERT 是純新光
-
-然後應該是要從
-BSADBTW..Acct_Migrate_buffer 這邊拿帳戶
-他的CIF_KEY 對應CIF_Migrate_Mapping_TEMP  的 SOURCE_CIF_KEY
-他的CIF_KEY 對應Customer_Migrate_buffer  拿 CUSTOMERNO 
-
-
-
+WITH AcctData AS (
+    SELECT 
+        c.CustomerNo AS [客戶ID],
+        a.AccountNo  AS [帳號],
+        CASE 
+            WHEN v.ACTION = 'insert' THEN '純新光'
+            WHEN v.ACTION = 'update' THEN '共有戶'
+        END          AS [帳戶屬性],
+        ROW_NUMBER() OVER (
+            PARTITION BY v.ACTION 
+            ORDER BY c.CustomerNo, a.AccountNo
+        ) AS rn
+    FROM BSADBTW..Acct_Migrate_buffer a
+    JOIN CIF_Migrate_Mapping_TEMP v 
+        ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN Customer_Migrate_buffer c 
+        ON c.CIF_KEY = a.CIF_KEY
+    WHERE v.ACTION IN ('insert', 'update')
+)
+SELECT 
+    [客戶ID],
+    [帳號],
+    [帳戶屬性]
+FROM AcctData
+WHERE rn <= 2
+ORDER BY [帳戶屬性] DESC, [客戶ID];
