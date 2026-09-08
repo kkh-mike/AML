@@ -1,8 +1,3 @@
-主旨：
-RE: UAT R4_AML_測試資料_隱碼 - 轉入完成與抽樣檢視
-內文：
-Dear 育豪,
-UAT R4 資料已轉入測試區。
-附件為新光對應台新的抽樣檢視資料（含 CIF/RP 註記標籤、帳戶、自建名單），請協助驗測，謝謝！
-Best regards,
-Mike
+UPDATE BSA_SUB_CUST_FACT
+SET HIGHRISK = 'L'
+WHERE CustomerNo LIKE '97139661%';
