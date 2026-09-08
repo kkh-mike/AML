@@ -1,20 +1,32 @@
+WITH RankedData AS (
+    SELECT 
+        bb.CustomerNo,
+        cc.CUST_TYPE_CDE,
+        v.ACTION,
+        a.highrisk,
+        CONCAT(
+            CASE cc.CUST_TYPE_CDE WHEN 'N' THEN '企業' WHEN 'P' THEN '個人' END, ' ',
+            CASE v.ACTION WHEN 'update' THEN '共有戶' WHEN 'INSERT' THEN '純新光' END, ' ',
+            CASE a.highrisk WHEN 'H' THEN '高' WHEN 'M' THEN '中' WHEN 'L' THEN '低' END
+        ) AS 完整分類標籤,
+        ROW_NUMBER() OVER (
+            PARTITION BY cc.CUST_TYPE_CDE, v.ACTION, a.highrisk 
+            ORDER BY RAND()
+        ) AS rn
+    FROM Cust_NP_Migrate_buffer a
+    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+    WHERE cc.CUST_TYPE_CDE IN ('N', 'P')
+      AND v.ACTION IN ('update', 'INSERT')
+      AND a.highrisk IN ('H', 'M', 'L')
+)
 SELECT 
-    bb.CustomerNo,
-    cc.CUST_TYPE_CDE,
-    v.ACTION,
-    a.highrisk,
-    CONCAT(
-        CASE cc.CUST_TYPE_CDE WHEN 'N' THEN '企業' WHEN 'P' THEN '個人' END, ' ',
-        CASE v.ACTION WHEN 'update' THEN '共有戶' WHEN 'INSERT' THEN '純新光' END, ' ',
-        CASE a.highrisk WHEN 'H' THEN '高' WHEN 'M' THEN '中' WHEN 'L' THEN '低' END
-    ) AS 完整分類標籤
-FROM Cust_NP_Migrate_buffer a
-JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
-JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
-JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
-WHERE cc.CUST_TYPE_CDE IN ('N', 'P')
-  AND v.ACTION IN ('update', 'INSERT')
-  AND a.highrisk IN ('H', 'M', 'L');
-
-
-我只要每種隨機抽三個就好
+    CustomerNo,
+    CUST_TYPE_CDE,
+    ACTION,
+    highrisk,
+    完整分類標籤
+FROM RankedData
+WHERE rn <= 3
+ORDER BY 完整分類標籤;
