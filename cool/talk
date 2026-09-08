@@ -1,34 +1,85 @@
-
--- CIF
--- 客戶類型 企業
-
-SELECT bb.CustomerNo, a.highrisk   
+做法一：直式彙總表（12 列統計結果）
+將 cc.CUST_TYPE_CDE、v.ACTION 與 a.highrisk 同時加入 GROUP BY，一次列出 12 種組合的客戶數：
+SELECT 
+    CASE cc.CUST_TYPE_CDE
+        WHEN 'N' THEN '企業'
+        WHEN 'P' THEN '個人'
+        ELSE cc.CUST_TYPE_CDE
+    END AS 客戶類型,
+    CASE v.ACTION
+        WHEN 'update' THEN '共有戶'
+        WHEN 'INSERT' THEN '純新光'
+        ELSE v.ACTION
+    END AS 戶況,
+    CASE a.highrisk
+        WHEN 'H' THEN '高'
+        WHEN 'M' THEN '中'
+        WHEN 'L' THEN '低'
+        ELSE a.highrisk
+    END AS 風險等級,
+    COUNT(DISTINCT bb.CustomerNo) AS 客戶數
 FROM Cust_NP_Migrate_buffer a
-join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
-join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
-join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
-WHERE a.highrisk = 'H'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'update' --共有戶 高   
---WHERE a.highrisk = 'M'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'update' --共有戶 中
---WHERE a.highrisk = 'L'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'update' --共有戶 低
+JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+WHERE cc.CUST_TYPE_CDE IN ('N', 'P')
+  AND v.ACTION IN ('update', 'INSERT')
+  AND a.highrisk IN ('H', 'M', 'L')
+GROUP BY 
+    cc.CUST_TYPE_CDE,
+    v.ACTION,
+    a.highrisk
+ORDER BY 
+    cc.CUST_TYPE_CDE,
+    v.ACTION DESC,
+    CASE a.highrisk WHEN 'H' THEN 1 WHEN 'M' THEN 2 WHEN 'L' THEN 3 END;
 
---WHERE a.highrisk = 'H'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'INSERT' -- 純新光 高   個
---WHERE a.highrisk = 'M'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'INSERT' -- 純新光 中
---WHERE a.highrisk = 'L'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'INSERT' -- 純新光 低
-
-
--- 客戶類型 個人
--- 高中低 共有戶 純新光
-SELECT bb.CustomerNo, a.highrisk   
+做法二：矩陣樞紐報表（最適合出報表）
+橫向展開風險等級（高/中/低），一目了然看清 12 個交叉維度：
+SELECT 
+    CASE cc.CUST_TYPE_CDE
+        WHEN 'N' THEN '企業'
+        WHEN 'P' THEN '個人'
+    END AS 客戶類型,
+    CASE v.ACTION
+        WHEN 'update' THEN '共有戶'
+        WHEN 'INSERT' THEN '純新光'
+    END AS 戶況,
+    COUNT(DISTINCT CASE WHEN a.highrisk = 'H' THEN bb.CustomerNo END) AS 高,
+    COUNT(DISTINCT CASE WHEN a.highrisk = 'M' THEN bb.CustomerNo END) AS 中,
+    COUNT(DISTINCT CASE WHEN a.highrisk = 'L' THEN bb.CustomerNo END) AS 低,
+    COUNT(DISTINCT bb.CustomerNo) AS 小計
 FROM Cust_NP_Migrate_buffer a
-join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
-join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
-join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
-WHERE a.highrisk = 'H'  AND cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'update' --共有戶 高
---WHERE a.highrisk = 'M'  AND cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'update' --共有戶 中
---WHERE a.highrisk = 'L'  AND cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'update' --共有戶 低
+JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+WHERE cc.CUST_TYPE_CDE IN ('N', 'P')
+  AND v.ACTION IN ('update', 'INSERT')
+  AND a.highrisk IN ('H', 'M', 'L')
+GROUP BY 
+    cc.CUST_TYPE_CDE,
+    v.ACTION
+ORDER BY 
+    cc.CUST_TYPE_CDE, 
+    v.ACTION DESC;
 
---WHERE a.highrisk = 'H'  AND cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'INSERT' -- 純新光 高
---WHERE a.highrisk = 'M'  AND cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'INSERT' -- 純新光 中
---WHERE a.highrisk = 'L'  AND cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'INSERT' -- 純新光 低
+做法三：明細清單（保留每筆 CustomerNo 並標註 12 種情境標籤）
+若需要查出所有客戶清單並自動貼好 12 種標籤：
+SELECT 
+    bb.CustomerNo,
+    cc.CUST_TYPE_CDE,
+    v.ACTION,
+    a.highrisk,
+    CONCAT(
+        CASE cc.CUST_TYPE_CDE WHEN 'N' THEN '企業' WHEN 'P' THEN '個人' END, ' ',
+        CASE v.ACTION WHEN 'update' THEN '共有戶' WHEN 'INSERT' THEN '純新光' END, ' ',
+        CASE a.highrisk WHEN 'H' THEN '高' WHEN 'M' THEN '中' WHEN 'L' THEN '低' END
+    ) AS 完整分類標籤
+FROM Cust_NP_Migrate_buffer a
+JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+WHERE cc.CUST_TYPE_CDE IN ('N', 'P')
+  AND v.ACTION IN ('update', 'INSERT')
+  AND a.highrisk IN ('H', 'M', 'L');
 
-那怎樣一次看12個
