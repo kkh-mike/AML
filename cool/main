@@ -1,8 +1,14 @@
 WITH BaseRP AS (
     SELECT 
-        a.CustomerNo            AS CustID,
+        a.CustomerNo            AS 新光客戶ID,
+        bb.CustomerNo           AS 台新客戶ID,
         c.RefNo                 AS RPID,
         cc.CUST_TYPE_CDE,
+        CASE 
+            WHEN v.ACTION = 'insert' THEN '純新光'
+            WHEN v.ACTION = 'update' THEN '共有戶'
+            ELSE v.ACTION 
+        END                     AS 分類,
         c.RP,
         c.PEPBitwiseCode
     FROM Customer_Migrate_buffer a
@@ -14,76 +20,76 @@ WITH BaseRP AS (
         ON bb.CIF_KEY = v.NEW_CIF_KEY
     JOIN PB_CUSTOMER_FACT cc 
         ON cc.CIF_KEY = bb.CIF_KEY
-    WHERE v.ACTION = 'insert'
+    WHERE v.ACTION IN ('insert', 'update')
 ),
 CategorizedData AS (
     -- 1. PEP | 企業 | 主要股東 (MS)
-    SELECT 1 AS SortOrder, 'PEP' AS 註記類型, '企業' AS 客戶類型, '主要股東' AS 關聯類型, CustID, RPID FROM BaseRP
+    SELECT 1 AS SortOrder, 'PEP' AS 註記類型, '企業' AS 客戶類型, '主要股東' AS 關聯類型, 分類, 新光客戶ID, 台新客戶ID, RPID FROM BaseRP
     WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 2) = 2 AND RP = 'MS'
 
     UNION ALL
     -- 2. PEP | 企業 | 其他關連方 (OTH)
-    SELECT 2, 'PEP', '企業', '其他關連方', CustID, RPID FROM BaseRP
+    SELECT 2, 'PEP', '企業', '其他關連方', 分類, 新光客戶ID, 台新客戶ID, RPID FROM BaseRP
     WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 2) = 2 AND RP = 'OTH'
 
     UNION ALL
     -- 3. PEP | 企業 | 法定代理人 (LA)
-    SELECT 3, 'PEP', '企業', '法定代理人', CustID, RPID FROM BaseRP
+    SELECT 3, 'PEP', '企業', '法定代理人', 分類, 新光客戶ID, 台新客戶ID, RPID FROM BaseRP
     WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 2) = 2 AND RP = 'LA'
 
     UNION ALL
     -- 4. PEP | 企業 | 被授權人或委託人 (APP)
-    SELECT 4, 'PEP', '企業', '被授權人或委託人', CustID, RPID FROM BaseRP
+    SELECT 4, 'PEP', '企業', '被授權人或委託人', 分類, 新光客戶ID, 台新客戶ID, RPID FROM BaseRP
     WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 2) = 2 AND RP = 'APP'
 
     UNION ALL
     -- 5. PEP | 企業 | 董事會成員 (BOD)
-    SELECT 5, 'PEP', '企業', '董事會成員', CustID, RPID FROM BaseRP
+    SELECT 5, 'PEP', '企業', '董事會成員', 分類, 新光客戶ID, 台新客戶ID, RPID FROM BaseRP
     WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 2) = 2 AND RP = 'BOD'
 
     UNION ALL
     -- 6. 負面新聞 | 企業 | 主要股東 (MS)
-    SELECT 6, '負面新聞', '企業', '主要股東', CustID, RPID FROM BaseRP
+    SELECT 6, '負面新聞', '企業', '主要股東', 分類, 新光客戶ID, 台新客戶ID, RPID FROM BaseRP
     WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 4) = 4 AND RP = 'MS'
 
     UNION ALL
     -- 7. 負面新聞 | 企業 | 其他關連方 (OTH)
-    SELECT 7, '負面新聞', '企業', '其他關連方', CustID, RPID FROM BaseRP
+    SELECT 7, '負面新聞', '企業', '其他關連方', 分類, 新光客戶ID, 台新客戶ID, RPID FROM BaseRP
     WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 4) = 4 AND RP = 'OTH'
 
     UNION ALL
     -- 8. 負面新聞 | 企業 | 法定代理人 (LA)
-    SELECT 8, '負面新聞', '企業', '法定代理人', CustID, RPID FROM BaseRP
+    SELECT 8, '負面新聞', '企業', '法定代理人', 分類, 新光客戶ID, 台新客戶ID, RPID FROM BaseRP
     WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 4) = 4 AND RP = 'LA'
 
     UNION ALL
     -- 9. 負面新聞 | 企業 | 董事會成員 (BOD)
-    SELECT 9, '負面新聞', '企業', '董事會成員', CustID, RPID FROM BaseRP
+    SELECT 9, '負面新聞', '企業', '董事會成員', 分類, 新光客戶ID, 台新客戶ID, RPID FROM BaseRP
     WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 4) = 4 AND RP = 'BOD'
 
     UNION ALL
     -- 10. 黑名單 | 企業 | 董事會成員 (BOD)
-    SELECT 10, '黑名單', '企業', '董事會成員', CustID, RPID FROM BaseRP
+    SELECT 10, '黑名單', '企業', '董事會成員', 分類, 新光客戶ID, 台新客戶ID, RPID FROM BaseRP
     WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 1) = 1 AND RP = 'BOD'
 
     UNION ALL
     -- 11. PEP | 個人 | 其他關連方 (OTH)
-    SELECT 11, 'PEP', '個人', '其他關連方', CustID, RPID FROM BaseRP
+    SELECT 11, 'PEP', '個人', '其他關連方', 分類, 新光客戶ID, 台新客戶ID, RPID FROM BaseRP
     WHERE CUST_TYPE_CDE = 'P' AND (PEPBitwiseCode & 2) = 2 AND RP = 'OTH'
 
     UNION ALL
     -- 12. PEP | 個人 | 法定代理人 (LA)
-    SELECT 12, 'PEP', '個人', '法定代理人', CustID, RPID FROM BaseRP
+    SELECT 12, 'PEP', '個人', '法定代理人', 分類, 新光客戶ID, 台新客戶ID, RPID FROM BaseRP
     WHERE CUST_TYPE_CDE = 'P' AND (PEPBitwiseCode & 2) = 2 AND RP = 'LA'
 
     UNION ALL
     -- 13. 負面新聞 | 個人 | 其他關連方 (OTH)
-    SELECT 13, '負面新聞', '個人', '其他關連方', CustID, RPID FROM BaseRP
+    SELECT 13, '負面新聞', '個人', '其他關連方', 分類, 新光客戶ID, 台新客戶ID, RPID FROM BaseRP
     WHERE CUST_TYPE_CDE = 'P' AND (PEPBitwiseCode & 4) = 4 AND RP = 'OTH'
 
     UNION ALL
     -- 14. 負面新聞 | 個人 | 法定代理人 (LA)
-    SELECT 14, '負面新聞', '個人', '法定代理人', CustID, RPID FROM BaseRP
+    SELECT 14, '負面新聞', '個人', '法定代理人', 分類, 新光客戶ID, 台新客戶ID, RPID FROM BaseRP
     WHERE CUST_TYPE_CDE = 'P' AND (PEPBitwiseCode & 4) = 4 AND RP = 'LA'
 ),
 RankedData AS (
@@ -92,20 +98,21 @@ RankedData AS (
         註記類型,
         客戶類型,
         關聯類型,
-        CustID AS [ID(客戶主體)],
+        分類,
+        新光客戶ID,
+        台新客戶ID,
         RPID   AS [ID(關聯方)],
-        ROW_NUMBER() OVER (PARTITION BY SortOrder ORDER BY CustID, RPID) AS rn
+        ROW_NUMBER() OVER (PARTITION BY SortOrder ORDER BY 台新客戶ID, RPID) AS rn
     FROM CategorizedData
 )
 SELECT 
     註記類型,
     客戶類型,
     關聯類型,
-    [ID(客戶主體)],
+    分類,
+    新光客戶ID,
+    台新客戶ID,
     [ID(關聯方)]
 FROM RankedData
 WHERE rn = 1
 ORDER BY SortOrder;
-
-
-我這邊也是要調整一下 台新客戶ID  新光客戶ID  分類共有戶純新光
