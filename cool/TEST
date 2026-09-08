@@ -1,3 +1,6 @@
-UPDATE BSA_SUB_CUST_FACT
-SET HIGHRISK = 'L'
-WHERE CustomerNo LIKE '97139661%';
+
+SELECT count(*) FROM ofac_spec WHERE updated_date  = '09/08/2026'
+SELECT updated_date_UTC,* FROM ofac_spec WHERE updated_date  = '09/08/2026'
+
+
+我需要加上8小時
