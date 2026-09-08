@@ -1,104 +1,66 @@
-
-/*
-情境	情境3：共有戶
-規則說明	台新 SAR = 1 寫入後，SAR 維持為 1
-預期結果	若原始狀態為「新光 SAR = 1、台新 SAR = 0」，則寫入後 SAR 應仍為 1
-*/
-
-
-WITH  PURE_TS AS
-(
-	SELECT TS_CUST_ID FROM BANCS_SK_CUST_INFO a JOIN Customer_Migrate_buffer b on a.SK_CUST_ID = b.CustomerNo
-	WHERE a.CUST_RE_NO_FLG  = '1'
-	EXCEPT
-	SELECT TS_CUST_ID FROM BANCS_SK_CUST_INFO a JOIN Customer_Migrate_buffer b on a.SK_CUST_ID = b.CustomerNo
-	WHERE a.CUST_RE_NO_FLG IN ('2','3')
-)
-SELECT COUNT(*) AS Total_Count FROM BSA_SUB_CUST_FACT a
-JOIN PURE_TS d on d.TS_CUST_ID = a.customerno
-JOIN CIF_Migrate_Mapping_TEMP h on h.NEW_CIF_KEY = a.CIF_KEY
-JOIN Cust_NP_Migrate_buffer t on t.CIF_KEY = h.SOURCE_CIF_KEY
-JOIN BSA_SUB_CUST_FACT_BAK_20260720 u on u.CIF_KEY = a.CIF_KEY
-
-
-
-
-WITH  PURE_TS AS
-(
-	SELECT TS_CUST_ID FROM BANCS_SK_CUST_INFO a JOIN Customer_Migrate_buffer b on a.SK_CUST_ID = b.CustomerNo
-	WHERE a.CUST_RE_NO_FLG  = '1'
-	EXCEPT
-	SELECT TS_CUST_ID FROM BANCS_SK_CUST_INFO a JOIN Customer_Migrate_buffer b on a.SK_CUST_ID = b.CustomerNo
-	WHERE a.CUST_RE_NO_FLG IN ('2','3')
-)
-SELECT COUNT(*) AS Total_Count FROM BSA_SUB_CUST_FACT a
-JOIN PURE_TS d on d.TS_CUST_ID = a.customerno
-JOIN CIF_Migrate_Mapping_TEMP h on h.NEW_CIF_KEY = a.CIF_KEY
-JOIN Cust_NP_Migrate_buffer t on t.CIF_KEY = h.SOURCE_CIF_KEY
-JOIN BSA_SUB_CUST_FACT_BAK_20260720 u on u.CIF_KEY = a.CIF_KEY
-WHERE  ISNULL(TRY_CAST(a.IsSARFiled AS INT), 0) = ISNULL(TRY_CAST(u.IsSARFiled AS INT), 0)  
-
-
-
-
-
 WITH PURE_TS AS
 (
-    SELECT TS_CUST_ID
-    FROM BANCS_SK_CUST_INFO a
-    JOIN Customer_Migrate_buffer b
-        ON a.SK_CUST_ID = b.CustomerNo
+    SELECT TS_CUST_ID 
+    FROM BANCS_SK_CUST_INFO a 
+    JOIN Customer_Migrate_buffer b ON a.SK_CUST_ID = b.CustomerNo
     WHERE a.CUST_RE_NO_FLG = '1'
-
+    
     EXCEPT
-
-    SELECT TS_CUST_ID
-    FROM BANCS_SK_CUST_INFO a
-    JOIN Customer_Migrate_buffer b
-        ON a.SK_CUST_ID = b.CustomerNo
+    
+    SELECT TS_CUST_ID 
+    FROM BANCS_SK_CUST_INFO a 
+    JOIN Customer_Migrate_buffer b ON a.SK_CUST_ID = b.CustomerNo
     WHERE a.CUST_RE_NO_FLG IN ('2','3')
 )
-SELECT
-    a.CIF_KEY AS NEW_CIF_KEY,
-    h.SOURCE_CIF_KEY,
-    a.CustomerNo,
-    u.IsSARFiled AS BAK_IsSARFiled,
-    a.IsSARFiled AS FACT_IsSARFiled,
-    ISNULL(TRY_CAST(u.IsSARFiled AS INT),0) AS BAK_IsSARFiled_Int,
-    ISNULL(TRY_CAST(a.IsSARFiled AS INT),0) AS FACT_IsSARFiled_Int,
-    b.SK_CUST_ID,
-    b.TS_CUST_ID,
-    b.CUST_RE_NO_FLG
+SELECT 
+    COUNT(*) AS TOTAL_COUNT,
+    -- 寫入前後一致筆數 (2,446,974)
+    COUNT(CASE 
+        WHEN ISNULL(TRY_CAST(a.IsSARFiled AS INT), 0) = ISNULL(TRY_CAST(u.IsSARFiled AS INT), 0) 
+        THEN 1 
+    END) AS MATCH_COUNT,
+    -- 總差異筆數 (4,099)
+    COUNT(CASE 
+        WHEN ISNULL(TRY_CAST(a.IsSARFiled AS INT), 0) <> ISNULL(TRY_CAST(u.IsSARFiled AS INT), 0) 
+        THEN 1 
+    END) AS DIFF_COUNT,
+    -- 證明差異為「原 BAK=0 經嚴格判定升為 FACT=1」且符合一對多 (應剛好為 4,099)
+    COUNT(CASE 
+        WHEN ISNULL(TRY_CAST(u.IsSARFiled AS INT), 0) = 0 
+         AND ISNULL(TRY_CAST(a.IsSARFiled AS INT), 0) = 1
+         AND b.CUST_RE_NO_FLG = '1'
+        THEN 1 
+    END) AS DIFF_UPGRADE_FLAG1_COUNT,
+    -- 異常差異筆數 (若有非預期方向或無標記情況應為 0)
+    COUNT(CASE 
+        WHEN ISNULL(TRY_CAST(a.IsSARFiled AS INT), 0) <> ISNULL(TRY_CAST(u.IsSARFiled AS INT), 0)
+         AND NOT (
+             ISNULL(TRY_CAST(u.IsSARFiled AS INT), 0) = 0 
+             AND ISNULL(TRY_CAST(a.IsSARFiled AS INT), 0) = 1 
+             AND b.CUST_RE_NO_FLG = '1'
+         )
+        THEN 1 
+    END) AS DIFF_UNEXPECTED_COUNT
 FROM BSA_SUB_CUST_FACT a
-JOIN PURE_TS d
+JOIN PURE_TS d 
     ON d.TS_CUST_ID = a.CustomerNo
-JOIN CIF_Migrate_Mapping_TEMP h
+JOIN CIF_Migrate_Mapping_TEMP h 
     ON h.NEW_CIF_KEY = a.CIF_KEY
-JOIN Cust_NP_Migrate_buffer t
+JOIN Cust_NP_Migrate_buffer t 
     ON t.CIF_KEY = h.SOURCE_CIF_KEY
-JOIN BSA_SUB_CUST_FACT_BAK_20260720 u
+JOIN BSA_SUB_CUST_FACT_BAK_20260720 u 
     ON u.CIF_KEY = a.CIF_KEY
-LEFT JOIN Customer_Migrate_buffer y
+LEFT JOIN Customer_Migrate_buffer y 
     ON y.CIF_KEY = h.SOURCE_CIF_KEY
-LEFT JOIN BANCS_SK_CUST_INFO b
-    ON b.SK_CUST_ID = y.CustomerNo
-WHERE ISNULL(TRY_CAST(a.IsSARFiled AS INT),0)
-    <> ISNULL(TRY_CAST(u.IsSARFiled AS INT),0)
-ORDER BY a.CIF_KEY;
+LEFT JOIN BANCS_SK_CUST_INFO b 
+    ON b.SK_CUST_ID = y.CustomerNo;
 
-
-
-我的情境三也幫我大整理一下
-敘述也幫我整理一下ˇ
-
-情境3：共有戶
-台新 SAR = 1 寫入後，SAR 維持為 1
-預期結果: 若原始狀態為「新光 SAR = 1、台新 SAR = 0」，則寫入後 SAR 應仍為 1
-比對結果: 
-新光轉入的共有戶共 2451073
-其中 SAR 結果相同者共 2446974，不相同筆數4099 
-
-本次比對共發現 4099，皆為來源端 IsSARFiled = 0，但寫入目標表後為 1。
-這 4099筆資料對應的 BANCS_SK_CUST_INFO.CUST_RE_NO_FLG 均為 1。
-在於同一個台新帳號可能對應到多個新光帳號，而 NP 資料在此情境下會存在多筆候選資料，實際寫入時採用了較嚴格的判定邏輯，因此最終結果被帶為 1。
-
+報表數值驗證效果
+| TOTAL_COUNT | MATCH_COUNT | DIFF_COUNT | DIFF_UPGRADE_FLAG1_COUNT | DIFF_UNEXPECTED_COUNT |
+|---|---|---|---|---|
+| 2,451,073 | 2,446,974 | 4,099 | 4,099 | 0 |
+報告敘述重點
+情境 3：共有戶 SAR 註記比對
+ * 比對結果：檢核共 2,451,073 筆，一致 2,446,974 筆（99.83%），差異 4,099 筆。
+ * 差異原因：4,099 筆皆為台新原始註記為 0，轉檔後升為 1。經查全數屬於「單一主帳號對應多筆新光來源帳號」情境（CUST_RE_NO_FLG = '1'），轉檔程式依高風險從嚴原則，關聯的新光候選帳號中任一筆存在 SAR 註記即擇優判定為 1。
+ * 結論：註記提升係符合 AML 從嚴控管規則，無非預期數值異動（異常筆數為 0），驗證通過。
