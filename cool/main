@@ -1,105 +1,108 @@
--- NameProperty(CIF)
 WITH BaseData AS (
     SELECT 
-        bb.CustomerNo,
+        m.CustomerNo    AS 新光客戶ID,
+        bb.CustomerNo   AS 台新客戶ID,
         cc.CUST_TYPE_CDE,
         CASE cc.CUST_TYPE_CDE 
             WHEN 'N' THEN '企業' 
             WHEN 'P' THEN '個人' 
             ELSE cc.CUST_TYPE_CDE 
-        END AS 客戶類型,
+        END             AS 客戶類型,
+        CASE 
+            WHEN v.ACTION = 'insert' THEN '純新光'
+            WHEN v.ACTION = 'update' THEN '共有戶'
+            ELSE v.ACTION 
+        END             AS 分類,
         a.IsSARFiled,
         a.SDST2400001,
         a.Warn_Restrict_Account,
         a.IsBearerShares,
         a.IsComplexStructure,
-        c.PEPBitwiseCode
+        a.PEPBitwiseCode
     FROM Cust_NP_Migrate_buffer a
     JOIN CIF_Migrate_Mapping_TEMP v 
         ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN Customer_Migrate_buffer m 
+        ON m.CIF_KEY = v.SOURCE_CIF_KEY
     JOIN BSA_SUB_CUST_FACT bb 
         ON bb.CIF_KEY = v.NEW_CIF_KEY
     JOIN PB_CUSTOMER_FACT cc 
         ON cc.CIF_KEY = bb.CIF_KEY
-    LEFT JOIN Customer_Migrate_buffer m 
-        ON m.CIF_KEY = a.CIF_KEY
-    LEFT JOIN Cust_NP_Migrate_buffer c 
-        ON c.CIF_KEY = a.CIF_KEY
-    WHERE v.ACTION = 'insert'
+    WHERE v.ACTION IN ('insert', 'update')
 ),
 CategorizedData AS (
     -- 1. 加強關注客戶 (企業)
-    SELECT 1 AS SortOrder, '加強關注客戶' AS 註記類型, '企業' AS 客戶類型, CustomerNo FROM BaseData 
+    SELECT 1 AS SortOrder, '加強關注客戶' AS 註記類型, '企業' AS 客戶類型, 新光客戶ID, 台新客戶ID, 分類 FROM BaseData 
     WHERE CUST_TYPE_CDE = 'N' AND IsSARFiled = '1'
 
     UNION ALL
     -- 2. 告誡戶 (企業)
-    SELECT 2, '告誡戶', '企業', CustomerNo FROM BaseData 
+    SELECT 2, '告誡戶', '企業', 新光客戶ID, 台新客戶ID, 分類 FROM BaseData 
     WHERE CUST_TYPE_CDE = 'N' AND SDST2400001 = '1'
 
     UNION ALL
     -- 3. 衍生管制帳戶 (企業)
-    SELECT 3, '衍生管制帳戶', '企業', CustomerNo FROM BaseData 
+    SELECT 3, '衍生管制帳戶', '企業', 新光客戶ID, 台新客戶ID, 分類 FROM BaseData 
     WHERE CUST_TYPE_CDE = 'N' AND Warn_Restrict_Account = '1'
 
     UNION ALL
     -- 4. 負面新聞 (企業)
-    SELECT 4, '負面新聞', '企業', CustomerNo FROM BaseData 
+    SELECT 4, '負面新聞', '企業', 新光客戶ID, 台新客戶ID, 分類 FROM BaseData 
     WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 4) = 4
 
     UNION ALL
     -- 5. 無記名股票 (企業)
-    SELECT 5, '無記名股票', '企業', CustomerNo FROM BaseData 
+    SELECT 5, '無記名股票', '企業', 新光客戶ID, 台新客戶ID, 分類 FROM BaseData 
     WHERE CUST_TYPE_CDE = 'N' AND IsBearerShares = '1'
 
     UNION ALL
     -- 6. 黑名單 (企業)
-    SELECT 6, '黑名單', '企業', CustomerNo FROM BaseData 
+    SELECT 6, '黑名單', '企業', 新光客戶ID, 台新客戶ID, 分類 FROM BaseData 
     WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 1) = 1
 
     UNION ALL
     -- 7. 複雜結構 (企業)
-    SELECT 7, '複雜結構', '企業', CustomerNo FROM BaseData 
+    SELECT 7, '複雜結構', '企業', 新光客戶ID, 台新客戶ID, 分類 FROM BaseData 
     WHERE CUST_TYPE_CDE = 'N' AND IsComplexStructure = '1'
 
     UNION ALL
     -- 8. 警示戶 (企業)
-    SELECT 8, '警示戶', '企業', CustomerNo FROM BaseData 
+    SELECT 8, '警示戶', '企業', 新光客戶ID, 台新客戶ID, 分類 FROM BaseData 
     WHERE CUST_TYPE_CDE = 'N' AND Warn_Restrict_Account = '1'
 
     UNION ALL
     -- 9. PEP (個人)
-    SELECT 9, 'PEP', '個人', CustomerNo FROM BaseData 
+    SELECT 9, 'PEP', '個人', 新光客戶ID, 台新客戶ID, 分類 FROM BaseData 
     WHERE CUST_TYPE_CDE = 'P' AND (PEPBitwiseCode & 2) = 2
 
     UNION ALL
     -- 10. 加強關注客戶 (個人)
-    SELECT 10, '加強關注客戶', '個人', CustomerNo FROM BaseData 
+    SELECT 10, '加強關注客戶', '個人', 新光客戶ID, 台新客戶ID, 分類 FROM BaseData 
     WHERE CUST_TYPE_CDE = 'P' AND IsSARFiled = '1'
 
     UNION ALL
     -- 11. 告誡戶 (個人)
-    SELECT 11, '告誡戶', '個人', CustomerNo FROM BaseData 
+    SELECT 11, '告誡戶', '個人', 新光客戶ID, 台新客戶ID, 分類 FROM BaseData 
     WHERE CUST_TYPE_CDE = 'P' AND SDST2400001 = '1'
 
     UNION ALL
     -- 12. 衍生管制帳戶 (個人)
-    SELECT 12, '衍生管制帳戶', '個人', CustomerNo FROM BaseData 
+    SELECT 12, '衍生管制帳戶', '個人', 新光客戶ID, 台新客戶ID, 分類 FROM BaseData 
     WHERE CUST_TYPE_CDE = 'P' AND Warn_Restrict_Account = '1'
 
     UNION ALL
     -- 13. 負面新聞 (個人)
-    SELECT 13, '負面新聞', '個人', CustomerNo FROM BaseData 
+    SELECT 13, '負面新聞', '個人', 新光客戶ID, 台新客戶ID, 分類 FROM BaseData 
     WHERE CUST_TYPE_CDE = 'P' AND (PEPBitwiseCode & 4) = 4
 
     UNION ALL
     -- 14. 黑名單 (個人)
-    SELECT 14, '黑名單', '個人', CustomerNo FROM BaseData 
+    SELECT 14, '黑名單', '個人', 新光客戶ID, 台新客戶ID, 分類 FROM BaseData 
     WHERE CUST_TYPE_CDE = 'P' AND (PEPBitwiseCode & 1) = 1
 
     UNION ALL
     -- 15. 警示戶 (個人)
-    SELECT 15, '警示戶', '個人', CustomerNo FROM BaseData 
+    SELECT 15, '警示戶', '個人', 新光客戶ID, 台新客戶ID, 分類 FROM BaseData 
     WHERE CUST_TYPE_CDE = 'P' AND Warn_Restrict_Account = '1'
 ),
 RankedData AS (
@@ -107,25 +110,18 @@ RankedData AS (
         SortOrder,
         註記類型,
         客戶類型,
-        CustomerNo AS ID,
-        ROW_NUMBER() OVER (PARTITION BY SortOrder ORDER BY CustomerNo) AS rn
+        分類,
+        新光客戶ID,
+        台新客戶ID,
+        ROW_NUMBER() OVER (PARTITION BY SortOrder ORDER BY 台新客戶ID) AS rn
     FROM CategorizedData
 )
 SELECT 
     註記類型,
     客戶類型,
-    ID
+    分類,
+    新光客戶ID,
+    台新客戶ID
 FROM RankedData
 WHERE rn = 1
 ORDER BY SortOrder;
-
-
-我這段我想多家2個欄位 來顯示新光客戶ID 跟顯示 共有戶還是純新光
-
-然後有可能有寫錯幫我看一下
-BSA_SUB_CUST_FACT 的 CustomerNo  是台新寫入客戶ID
-Customer_Migrate_buffer 的 CustomerNo  是新光寫入客戶ID
-CIF_Migrate_Mapping_TEMP  的 action = update 是共有戶  , insert 是純新光
-
-
-
