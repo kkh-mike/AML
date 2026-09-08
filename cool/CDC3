@@ -1,9 +1,29 @@
-我測了一下
+-- 1. 查看該客戶在 Mapping 表與新光 Buffer 的所有關聯明細
+SELECT 
+    m.ACTION,
+    m.NEW_CIF_KEY,
+    m.SOURCE_CIF_KEY,
+    c.CustomerNo AS BUFFER_CUST_NO,
+    np.HIGHRISK AS NP_SINGLE_HIGHRISK,
+    np.ReviewDt AS NP_ReviewDt
+FROM CIF_Migrate_Mapping_TEMP m
+JOIN Customer_Migrate_buffer c 
+    ON c.CIF_KEY = m.SOURCE_CIF_KEY
+JOIN Cust_NP_Migrate_buffer np 
+    ON np.CIF_KEY = m.SOURCE_CIF_KEY
+WHERE c.CustomerNo LIKE 'B264313797%';
 
-SELECT * FROM Customer_Migrate_buffer WHERE customerno = 'B264313797'
-  SELECT HIGHRISK FROM Cust_NP_Migrate_buffer WHERE CIF_KEY = 'c40704d0-2beb-e511-80c8-0050568c710a'
-  SELECT HIGHRISK FROM BSA_SUB_CUST_FACT_BAK_20260720 WHERE customerno = 'B2643137970'
-  SELECT HIGHRISK FROM BSA_SUB_CUST_FACT WHERE customerno = 'B2643137970'
-  
+-- 2. 查看該客戶在目標表與備份表的寫入前後對照
+SELECT 
+    CIF_KEY,
+    CustomerNo,
+    HIGHRISK AS FACT_HIGHRISK
+FROM BSA_SUB_CUST_FACT 
+WHERE CustomerNo LIKE 'B264313797%';
 
-  有點奇怪 Cust_NP_Migrate_buffer  如果他的等級比 BSA_SUB_CUST_FACT 她的小  就代表他是拿舊的等級才對 沒有更新
+SELECT 
+    CIF_KEY,
+    CustomerNo,
+    HIGHRISK AS BAK_HIGHRISK
+FROM BSA_SUB_CUST_FACT_BAK_20260720 
+WHERE CustomerNo LIKE 'B264313797%';
