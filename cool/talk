@@ -1,50 +1,25 @@
-WITH AcctData AS (
-    SELECT 
-        -- 新光端
-        c.CustomerNo      AS [新光客戶ID],
-        a.ACCT_KEY        AS [新光帳號],
-        
-        -- 台新端
-        ts_c.CustomerNo   AS [台新客戶ID],
-        ts_a.ACCT_KEY     AS [台新帳號],
+新光客戶ID	新光帳號  分類   bancS 對應帳號   台新客戶id
+xxxx    xxx   
 
-        -- 屬性分類
-        CASE 
-            WHEN v.ACTION = 'insert' THEN '純新光'
-            WHEN v.ACTION = 'update' THEN '共有戶'
-        END               AS [帳戶屬性],
+我要幫USER 找資料
 
-        ROW_NUMBER() OVER (
-            PARTITION BY v.ACTION 
-            ORDER BY c.CustomerNo, a.ACCT_KEY
-        ) AS rn
-    FROM BSADBTW..Acct_Migrate_buffer a
-    JOIN CIF_Migrate_Mapping_TEMP v 
-        ON v.SOURCE_CIF_KEY = a.CIF_KEY
-    JOIN Customer_Migrate_buffer c 
-        ON c.CIF_KEY = a.CIF_KEY
-    -- 串接台新客戶 ID
-    LEFT JOIN BSA_SUB_CUST_FACT ts_c 
-        ON ts_c.CIF_KEY = v.NEW_CIF_KEY
-    -- 串接台新帳號（需同時對應 CIF_KEY 與 'SK_' + ACCT_KEY，避免多帳號笛卡兒積）
-    LEFT JOIN BSADBTW..ACCT_XREF_DIM ts_a 
-        ON ts_a.CIF_KEY = v.NEW_CIF_KEY
-       AND ts_a.ACCT_KEY = 'SK_' + a.ACCT_KEY
-    WHERE v.ACTION IN ('insert', 'update')
-      -- 排除邏輯：已存在於 XREF（去掉前導 0 相等）者不寫入，故排除
-      AND NOT EXISTS (
-          SELECT 1 
-          FROM BSADBTW..XREF x
-          WHERE SUBSTRING(a.ACCT_KEY, PATINDEX('%[^0]%', a.ACCT_KEY + ' '), LEN(a.ACCT_KEY))
-              = SUBSTRING(x.EXTN_REF_NO, PATINDEX('%[^0]%', x.EXTN_REF_NO + ' '), LEN(x.EXTN_REF_NO))
-      )
-)
-SELECT 
-    [新光客戶ID],
-    [台新客戶ID],
-    [新光帳號],
-    [台新帳號],
-    [帳戶屬性]
-FROM AcctData
-WHERE rn <= 2
-ORDER BY [帳戶屬性] DESC, [新光客戶ID];
+
+CIF_Migrate_Mapping_TEMP 
+ 這表格的action = 'insert' 分類就是 純新光
+action = 'UPDATE' 分類就是 共有戶
+然後他的NEW_CIF_KEY 對應 BSA_SUB_CUST_FACT 的 CIF_KEY 可以拿到customerno  這就是BANCS對應的客戶id
+
+CIF_Migrate_Mapping_TEMP 的SOURCE_CIF_KEY 對應Customer_Migrate_buffer 的customerno  
+這就是BANCS對應的新光客戶id
+
+新光帳號 = BSADBTW..Acct_Migrate_buffer   的 ACCT_KEY
+
+
+bancS 對應帳號  
+BSADBTW..XREF  WHERE EXTN_REF_NO   = 新光帳號前綴補0到25碼
+
+
+邏輯就是有新光給的帳號對應到bancs的帳號EXTN_REF_NO  就不寫入Acct_Migrate_buffer
+
+沒對應到的要寫入BSADBTW..Acct_Migrate_buffer 
+
