@@ -1,96 +1,19 @@
-如果不想寫在一起，最推薦使用實體暫存表（Temporary Table）。先執行第一段把隨機抽樣的名單存入暫存表，第二段再直接拿它來查。
-依您使用的資料庫類型選擇對應語法：
-做法一：SQL Server（使用 # 暫存表）
-第 1 步：抽樣並存入暫存表
--- 若暫存表已存在先刪除
-IF OBJECT_ID('tempdb..#SampleCust') IS NOT NULL DROP TABLE #SampleCust;
+SELECT 
+    CustomerNo,
+    CUST_TYPE_CDE,
+    ACTION,
+    highrisk,
+    完整分類標籤
+FROM #SampleCust
+ORDER BY 完整分類標籤;
 
-WITH RankedData AS (
-    SELECT 
-        bb.CustomerNo,
-        cc.CUST_TYPE_CDE,
-        v.ACTION,
-        a.highrisk,
-        ROW_NUMBER() OVER (
-            PARTITION BY cc.CUST_TYPE_CDE, v.ACTION, a.highrisk 
-            ORDER BY NEWID()
-        ) AS rn
-    FROM Cust_NP_Migrate_buffer a
-    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
-    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
-    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
-    WHERE cc.CUST_TYPE_CDE IN ('N', 'P')      
-      AND v.ACTION IN ('update', 'INSERT')      
-      AND a.highrisk IN ('H', 'M', 'L')
-)
-SELECT CustomerNo
-INTO #SampleCust
-FROM RankedData
-WHERE rn <= 1;
 
-第 2 步：直接拿暫存表查詢
 SELECT a.CustomerNo, a.highrisk, b.CUST_TYPE_CDE  
 FROM BSA_SUB_CUST_FACT a
 JOIN PB_CUSTOMER_FACT b ON b.CIF_KEY = a.CIF_KEY
 WHERE a.CustomerNo IN (SELECT CustomerNo FROM #SampleCust);
 
-做法二：Oracle（使用通用暫存檢視表或實體工作表）
-在 Oracle 介面（如 PL/SQL Developer 或 DBeaver）中最簡單的做法是建立暫時檢視表（View）：
-第 1 步：建立抽樣 View
-CREATE OR REPLACE VIEW V_SAMPLE_CUST AS
-WITH RankedData AS (
-    SELECT 
-        bb.CustomerNo,
-        cc.CUST_TYPE_CDE,
-        v.ACTION,
-        a.highrisk,
-        ROW_NUMBER() OVER (
-            PARTITION BY cc.CUST_TYPE_CDE, v.ACTION, a.highrisk 
-            ORDER BY DBMS_RANDOM.VALUE
-        ) AS rn
-    FROM Cust_NP_Migrate_buffer a
-    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
-    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
-    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
-    WHERE cc.CUST_TYPE_CDE IN ('N', 'P')      
-      AND v.ACTION IN ('update', 'INSERT')      
-      AND a.highrisk IN ('H', 'M', 'L')
-)
-SELECT CustomerNo
-FROM RankedData
-WHERE rn <= 1;
 
-第 2 步：執行您的第二段查詢
-SELECT a.CustomerNo, a.highrisk, b.CUST_TYPE_CDE  
-FROM BSA_SUB_CUST_FACT a
-JOIN PB_CUSTOMER_FACT b ON b.CIF_KEY = a.CIF_KEY
-WHERE a.CustomerNo IN (SELECT CustomerNo FROM V_SAMPLE_CUST);
+因為我這步驟是人工看 資訊有沒有一樣
 
-做法三：MySQL（使用 CREATE TEMPORARY TABLE）
-第 1 步：建立暫存表
-CREATE TEMPORARY TABLE tmp_sample_cust AS
-WITH RankedData AS (
-    SELECT 
-        bb.CustomerNo,
-        ROW_NUMBER() OVER (
-            PARTITION BY cc.CUST_TYPE_CDE, v.ACTION, a.highrisk 
-            ORDER BY RAND()
-        ) AS rn
-    FROM Cust_NP_Migrate_buffer a
-    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
-    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
-    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
-    WHERE cc.CUST_TYPE_CDE IN ('N', 'P')      
-      AND v.ACTION IN ('update', 'INSERT')      
-      AND a.highrisk IN ('H', 'M', 'L')
-)
-SELECT CustomerNo
-FROM RankedData
-WHERE rn <= 1;
-
-第 2 步：查詢驗證
-SELECT a.CustomerNo, a.highrisk, b.CUST_TYPE_CDE  
-FROM BSA_SUB_CUST_FACT a
-JOIN PB_CUSTOMER_FACT b ON b.CIF_KEY = a.CIF_KEY
-WHERE a.CustomerNo IN (SELECT CustomerNo FROM tmp_sample_cust);
-
+有沒有辦法做在同一格表格一次看懂
