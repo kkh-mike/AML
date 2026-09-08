@@ -1,18 +1,68 @@
-
--- CIF
--- 客戶類型 企業
-
-SELECT bb.CustomerNo, a.highrisk   
+如果想要一次性取得這 6 種組合的統計筆數（彙總表），直接使用 GROUP BY 是最簡潔高效的方式：
+SELECT 
+    CASE 
+        WHEN v.ACTION = 'update' THEN '共有戶'
+        WHEN v.ACTION = 'INSERT' THEN '純新光'
+        ELSE v.ACTION
+    END AS 客戶類別,
+    CASE a.highrisk
+        WHEN 'H' THEN '高'
+        WHEN 'M' THEN '中'
+        WHEN 'L' THEN '低'
+        ELSE a.highrisk
+    END AS 風險等級,
+    COUNT(DISTINCT bb.CustomerNo) AS 客戶數
 FROM Cust_NP_Migrate_buffer a
-join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
-join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
-join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
-WHERE a.highrisk = 'H'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'update' --共有戶 高   
---WHERE a.highrisk = 'M'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'update' --共有戶 中
---WHERE a.highrisk = 'L'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'update' --共有戶 低
+JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+WHERE cc.CUST_TYPE_CDE = 'N'
+  AND a.highrisk IN ('H', 'M', 'L')
+  AND v.ACTION IN ('update', 'INSERT')
+GROUP BY 
+    v.ACTION,
+    a.highrisk
+ORDER BY 
+    v.ACTION DESC, 
+    FIELD(a.highrisk, 'H', 'M', 'L'); -- 若資料庫不支援 FIELD()，可改用 CASE 排序
 
---WHERE a.highrisk = 'H'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'INSERT' -- 純新光 高   個
---WHERE a.highrisk = 'M'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'INSERT' -- 純新光 中
---WHERE a.highrisk = 'L'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'INSERT' -- 純新光 低
+如果需要的是所有明細清單（保留每筆 CustomerNo），並加上標籤欄位區分：
+SELECT 
+    bb.CustomerNo, 
+    a.highrisk,
+    v.ACTION,
+    CASE 
+        WHEN v.ACTION = 'update' AND a.highrisk = 'H' THEN '共有戶 高'
+        WHEN v.ACTION = 'update' AND a.highrisk = 'M' THEN '共有戶 中'
+        WHEN v.ACTION = 'update' AND a.highrisk = 'L' THEN '共有戶 低'
+        WHEN v.ACTION = 'INSERT' AND a.highrisk = 'H' THEN '純新光 高'
+        WHEN v.ACTION = 'INSERT' AND a.highrisk = 'M' THEN '純新光 中'
+        WHEN v.ACTION = 'INSERT' AND a.highrisk = 'L' THEN '純新光 低'
+    END AS 分類標籤
+FROM Cust_NP_Migrate_buffer a
+JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+WHERE cc.CUST_TYPE_CDE = 'N'
+  AND a.highrisk IN ('H', 'M', 'L')
+  AND v.ACTION IN ('update', 'INSERT');
 
-我要怎麼寫才可以1次得到六個
+如果希望輸出格式為橫向統計表（矩陣報表）：
+SELECT 
+    CASE 
+        WHEN v.ACTION = 'update' THEN '共有戶'
+        WHEN v.ACTION = 'INSERT' THEN '純新光'
+    END AS 客戶類別,
+    COUNT(DISTINCT CASE WHEN a.highrisk = 'H' THEN bb.CustomerNo END) AS 高,
+    COUNT(DISTINCT CASE WHEN a.highrisk = 'M' THEN bb.CustomerNo END) AS 中,
+    COUNT(DISTINCT CASE WHEN a.highrisk = 'L' THEN bb.CustomerNo END) AS 低,
+    COUNT(DISTINCT bb.CustomerNo) AS 合計
+FROM Cust_NP_Migrate_buffer a
+JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+WHERE cc.CUST_TYPE_CDE = 'N'
+  AND a.highrisk IN ('H', 'M', 'L')
+  AND v.ACTION IN ('update', 'INSERT')
+GROUP BY v.ACTION;
+
