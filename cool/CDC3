@@ -14,6 +14,9 @@ AggNP AS (
     SELECT 
         m.NEW_CIF_KEY,
         MAX(CASE s.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END) AS NP_RISK_SCORE,
+        CASE MAX(CASE s.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END)
+            WHEN 3 THEN 'H' WHEN 2 THEN 'M' WHEN 1 THEN 'L' ELSE NULL
+        END AS NP_HIGHRISK_TEXT,
         MIN(s.ReviewDt) AS NP_ReviewDt
     FROM CIF_Migrate_Mapping_TEMP m
     JOIN Cust_NP_Migrate_buffer s ON s.CIF_KEY = m.SOURCE_CIF_KEY
@@ -33,8 +36,11 @@ TS_Bak_Review AS (
 SELECT TOP 100
     a.CustomerNo,
     a.CIF_KEY,
-    u.HIGHRISK AS TS_BAK_HIGHRISK,
-    p.NP_RISK_SCORE,
+    -- 舊等級 vs 新等級 vs 新光來源等級
+    u.HIGHRISK AS [台新舊等級_BAK],
+    a.HIGHRISK AS [目前目標表等級_FACT],
+    p.NP_HIGHRISK_TEXT AS [新光來源最高等級_NP],
+    -- 審查日對照
     r_bak.ReviewDt AS BAK_ReviewDt,
     p.NP_ReviewDt AS NP_ReviewDt,
     r_now.ReviewDt AS NOW_ReviewDt,
@@ -49,7 +55,3 @@ JOIN TS_Bak_Review r_bak ON r_bak.CIFKey = a.CIF_KEY
 WHERE p.NP_RISK_SCORE > CASE u.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END
   AND CAST(p.NP_ReviewDt AS DATE) < CAST(r_bak.ReviewDt AS DATE)
   AND r_now.ReviewDt <> p.NP_ReviewDt;
-
-
-
-可以把新的等級跟舊的等級 放上來我看看
