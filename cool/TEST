@@ -1,6 +1,9 @@
+-- 1. 計算筆數 (若要以轉換後的日期判斷)
+SELECT count(*) 
+FROM ofac_spec 
+WHERE (updated_date_UTC + INTERVAL '8 hours')::date = '2026-09-08';
 
-SELECT count(*) FROM ofac_spec WHERE updated_date  = '09/08/2026'
-SELECT updated_date_UTC,* FROM ofac_spec WHERE updated_date  = '09/08/2026'
-
-
-我需要加上8小時
+-- 2. 查詢欄位並加 8 小時
+SELECT updated_date_UTC + INTERVAL '8 hours' AS updated_date_local, * 
+FROM ofac_spec 
+WHERE updated_date = '09/08/2026';
