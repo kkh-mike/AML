@@ -1,129 +1,252 @@
-將所有關聯與各屬性條件整合成一張基礎資料表，並使用 ROW_NUMBER() 為每個分類各挑選 任意 1 筆，輸出順序直接對齊 Excel 表格：
-WITH BaseData AS (
-    SELECT 
-        bb.CustomerNo,
-        cc.CUST_TYPE_CDE,
-        CASE cc.CUST_TYPE_CDE 
-            WHEN 'N' THEN '企業' 
-            WHEN 'P' THEN '個人' 
-            ELSE cc.CUST_TYPE_CDE 
-        END AS 客戶類型,
-        a.IsSARFiled,
-        a.SDST2400001,
-        a.Warn_Restrict_Account,
-        a.IsBearerShares,
-        a.IsComplexStructure,
-        c.PEPBitwiseCode
-    FROM Cust_NP_Migrate_buffer a
-    JOIN CIF_Migrate_Mapping_TEMP v 
-        ON v.SOURCE_CIF_KEY = a.CIF_KEY
-    JOIN BSA_SUB_CUST_FACT bb 
-        ON bb.CIF_KEY = v.NEW_CIF_KEY
-    JOIN PB_CUSTOMER_FACT cc 
-        ON cc.CIF_KEY = bb.CIF_KEY
-    LEFT JOIN Customer_Migrate_buffer m 
-        ON m.CIF_KEY = a.CIF_KEY
-    LEFT JOIN Cust_NP_Migrate_buffer c 
-        ON c.CIF_KEY = a.CIF_KEY
-    WHERE v.ACTION = 'insert'
-),
-CategorizedData AS (
-    -- 1. 加強關注客戶 (企業)
-    SELECT 1 AS SortOrder, '加強關注客戶' AS 註記類型, '企業' AS 客戶類型, CustomerNo FROM BaseData 
-    WHERE CUST_TYPE_CDE = 'N' AND IsSARFiled = '1'
 
-    UNION ALL
-    -- 2. 告誡戶 (企業)
-    SELECT 2, '告誡戶', '企業', CustomerNo FROM BaseData 
-    WHERE CUST_TYPE_CDE = 'N' AND SDST2400001 = '1'
+/*
+NameProperty(RP)
+*/
 
-    UNION ALL
-    -- 3. 衍生管制帳戶 (企業)
-    SELECT 3, '衍生管制帳戶', '企業', CustomerNo FROM BaseData 
-    WHERE CUST_TYPE_CDE = 'N' AND Warn_Restrict_Account = '1'
 
-    UNION ALL
-    -- 4. 負面新聞 (企業)
-    SELECT 4, '負面新聞', '企業', CustomerNo FROM BaseData 
-    WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 4) = 4
+----------- PEP 企業 主要股東
+----------MS 主要股東
 
-    UNION ALL
-    -- 5. 無記名股票 (企業)
-    SELECT 5, '無記名股票', '企業', CustomerNo FROM BaseData 
-    WHERE CUST_TYPE_CDE = 'N' AND IsBearerShares = '1'
-
-    UNION ALL
-    -- 6. 黑名單 (企業)
-    SELECT 6, '黑名單', '企業', CustomerNo FROM BaseData 
-    WHERE CUST_TYPE_CDE = 'N' AND (PEPBitwiseCode & 1) = 1
-
-    UNION ALL
-    -- 7. 複雜結構 (企業)
-    SELECT 7, '複雜結構', '企業', CustomerNo FROM BaseData 
-    WHERE CUST_TYPE_CDE = 'N' AND IsComplexStructure = '1'
-
-    UNION ALL
-    -- 8. 警示戶 (企業)
-    SELECT 8, '警示戶', '企業', CustomerNo FROM BaseData 
-    WHERE CUST_TYPE_CDE = 'N' AND Warn_Restrict_Account = '1'
-
-    UNION ALL
-    -- 9. PEP (個人)
-    SELECT 9, 'PEP', '個人', CustomerNo FROM BaseData 
-    WHERE CUST_TYPE_CDE = 'P' AND (PEPBitwiseCode & 2) = 2
-
-    UNION ALL
-    -- 10. 加強關注客戶 (個人)
-    SELECT 10, '加強關注客戶', '個人', CustomerNo FROM BaseData 
-    WHERE CUST_TYPE_CDE = 'P' AND IsSARFiled = '1'
-
-    UNION ALL
-    -- 11. 告誡戶 (個人)
-    SELECT 11, '告誡戶', '個人', CustomerNo FROM BaseData 
-    WHERE CUST_TYPE_CDE = 'P' AND SDST2400001 = '1'
-
-    UNION ALL
-    -- 12. 衍生管制帳戶 (個人)
-    SELECT 12, '衍生管制帳戶', '個人', CustomerNo FROM BaseData 
-    WHERE CUST_TYPE_CDE = 'P' AND Warn_Restrict_Account = '1'
-
-    UNION ALL
-    -- 13. 負面新聞 (個人)
-    SELECT 13, '負面新聞', '個人', CustomerNo FROM BaseData 
-    WHERE CUST_TYPE_CDE = 'P' AND (PEPBitwiseCode & 4) = 4
-
-    UNION ALL
-    -- 14. 黑名單 (個人)
-    SELECT 14, '黑名單', '個人', CustomerNo FROM BaseData 
-    WHERE CUST_TYPE_CDE = 'P' AND (PEPBitwiseCode & 1) = 1
-
-    UNION ALL
-    -- 15. 警示戶 (個人)
-    SELECT 15, '警示戶', '個人', CustomerNo FROM BaseData 
-    WHERE CUST_TYPE_CDE = 'P' AND Warn_Restrict_Account = '1'
-),
-RankedData AS (
-    SELECT 
-        SortOrder,
-        註記類型,
-        客戶類型,
-        CustomerNo AS ID,
-        ROW_NUMBER() OVER (PARTITION BY SortOrder ORDER BY CustomerNo) AS rn
-    FROM CategorizedData
-)
 SELECT 
-    註記類型,
-    客戶類型,
-    ID
-FROM RankedData
-WHERE rn = 1
-ORDER BY SortOrder;
+    a.CustomerNo,
+    c.RefNo,
+    c.PEPBitwiseCode,
+    CASE WHEN c.PEPBitwiseCode & 1   = 1   THEN 'Y' ELSE 'N' END AS BlackList,
+    CASE WHEN c.PEPBitwiseCode & 2   = 2   THEN 'Y' ELSE 'N' END AS PEP,
+    CASE WHEN c.PEPBitwiseCode & 4   = 4   THEN 'Y' ELSE 'N' END AS NN,
+    CASE WHEN c.PEPBitwiseCode & 8   = 8   THEN 'Y' ELSE 'N' END AS ForeignPEP,
+    CASE WHEN c.PEPBitwiseCode & 16  = 16  THEN 'Y' ELSE 'N' END AS LocalPEP,
+    CASE WHEN c.PEPBitwiseCode & 32  = 32  THEN 'Y' ELSE 'N' END AS ForeignOrgPEP,
+    CASE WHEN c.PEPBitwiseCode & 64  = 64  THEN 'Y' ELSE 'N' END AS EfPEP,
+    CASE WHEN c.PEPBitwiseCode & 128 = 128 THEN 'Y' ELSE 'N' END AS CustRPIsPEP
+FROM Customer_Migrate_buffer a
+JOIN RP_NP_Migrate_buffer c    ON c.CIFKey= a.CIF_KEY
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE  c.PEPBitwiseCode = '2'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'insert' AND c.RP = 'MS'
 
-修正與優化細節：
- * 原語法防呆修正：
-   * 原先「黑名單 企業」與「黑名單 個人」SQL 條件誤用到 IsBearerShares = '1'，已校正為黑名單標準位元運算 (PEPBitwiseCode & 1) = 1。
-   * 原先「無記名股票 企業」條件誤用到 PEPBitwiseCode = '1'，已校正為欄位 IsBearerShares = '1'。
-   * 原先最後一筆「警示戶 個人」的條件誤填為 CUST_TYPE_CDE = 'N'，已校正為 'P'。
-   * 位元運算改為 (PEPBitwiseCode & 4) = 4 形式，避免複合旗標（例如同時具備黑名單與負面新聞時）因直接等於被過濾。
- * 各選 1 筆： 使用 ROW_NUMBER() OVER (PARTITION BY SortOrder ...) 取 rn = 1，確保每組分類剛好只出一筆。
- * 無縫貼入： 查詢結果按 SortOrder 排序，欄位順序與內容完全對齊 Excel 的 A、B、C 欄。
+
+----------- PEP 企業 其他關連方
+-------------------------OTH 其他關連方
+SELECT 
+    a.CustomerNo,
+    c.RefNo,
+    c.PEPBitwiseCode,
+    CASE WHEN c.PEPBitwiseCode & 1   = 1   THEN 'Y' ELSE 'N' END AS BlackList,
+    CASE WHEN c.PEPBitwiseCode & 2   = 2   THEN 'Y' ELSE 'N' END AS PEP,
+    CASE WHEN c.PEPBitwiseCode & 4   = 4   THEN 'Y' ELSE 'N' END AS NN,
+    CASE WHEN c.PEPBitwiseCode & 8   = 8   THEN 'Y' ELSE 'N' END AS ForeignPEP,
+    CASE WHEN c.PEPBitwiseCode & 16  = 16  THEN 'Y' ELSE 'N' END AS LocalPEP,
+    CASE WHEN c.PEPBitwiseCode & 32  = 32  THEN 'Y' ELSE 'N' END AS ForeignOrgPEP,
+    CASE WHEN c.PEPBitwiseCode & 64  = 64  THEN 'Y' ELSE 'N' END AS EfPEP,
+    CASE WHEN c.PEPBitwiseCode & 128 = 128 THEN 'Y' ELSE 'N' END AS CustRPIsPEP
+FROM Customer_Migrate_buffer a
+JOIN RP_NP_Migrate_buffer c    ON c.CIFKey= a.CIF_KEY
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE  c.PEPBitwiseCode = '2'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'insert' AND c.RP = 'OTH'
+
+
+
+---PEP 企業 法定代理人
+-------------------------------------------------------- LA 法定代理人
+
+
+
+SELECT 
+    a.CustomerNo,
+    c.RefNo,
+    c.PEPBitwiseCode,
+    CASE WHEN c.PEPBitwiseCode & 1   = 1   THEN 'Y' ELSE 'N' END AS BlackList,
+    CASE WHEN c.PEPBitwiseCode & 2   = 2   THEN 'Y' ELSE 'N' END AS PEP,
+    CASE WHEN c.PEPBitwiseCode & 4   = 4   THEN 'Y' ELSE 'N' END AS NN,
+    CASE WHEN c.PEPBitwiseCode & 8   = 8   THEN 'Y' ELSE 'N' END AS ForeignPEP,
+    CASE WHEN c.PEPBitwiseCode & 16  = 16  THEN 'Y' ELSE 'N' END AS LocalPEP,
+    CASE WHEN c.PEPBitwiseCode & 32  = 32  THEN 'Y' ELSE 'N' END AS ForeignOrgPEP,
+    CASE WHEN c.PEPBitwiseCode & 64  = 64  THEN 'Y' ELSE 'N' END AS EfPEP,
+    CASE WHEN c.PEPBitwiseCode & 128 = 128 THEN 'Y' ELSE 'N' END AS CustRPIsPEP
+FROM Customer_Migrate_buffer a
+JOIN RP_NP_Migrate_buffer c    ON c.CIFKey= a.CIF_KEY
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE  c.PEPBitwiseCode = '2'  AND cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'insert' AND c.RP = 'LA'
+
+
+
+--PEP 企業 被授權人或委託人
+-------------------------------------------------------- APP 被授權人或委託人
+
+SELECT 
+    a.CustomerNo,
+    c.RefNo,
+    c.PEPBitwiseCode,
+    CASE WHEN c.PEPBitwiseCode & 1   = 1   THEN 'Y' ELSE 'N' END AS BlackList,
+    CASE WHEN c.PEPBitwiseCode & 2   = 2   THEN 'Y' ELSE 'N' END AS PEP,
+    CASE WHEN c.PEPBitwiseCode & 4   = 4   THEN 'Y' ELSE 'N' END AS NN,
+    CASE WHEN c.PEPBitwiseCode & 8   = 8   THEN 'Y' ELSE 'N' END AS ForeignPEP,
+    CASE WHEN c.PEPBitwiseCode & 16  = 16  THEN 'Y' ELSE 'N' END AS LocalPEP,
+    CASE WHEN c.PEPBitwiseCode & 32  = 32  THEN 'Y' ELSE 'N' END AS ForeignOrgPEP,
+    CASE WHEN c.PEPBitwiseCode & 64  = 64  THEN 'Y' ELSE 'N' END AS EfPEP,
+    CASE WHEN c.PEPBitwiseCode & 128 = 128 THEN 'Y' ELSE 'N' END AS CustRPIsPEP
+FROM Customer_Migrate_buffer a
+JOIN RP_NP_Migrate_buffer c    ON c.CIFKey= a.CIF_KEY
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE  c.PEPBitwiseCode = '2'  AND cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'insert' AND c.RP = 'APP'
+
+
+
+
+-- PEP 企業 董事會成員
+-------------------------BOD 董事會成員
+SELECT 
+    a.CustomerNo,
+    c.RefNo,
+    c.PEPBitwiseCode,
+    CASE WHEN c.PEPBitwiseCode & 1   = 1   THEN 'Y' ELSE 'N' END AS BlackList,
+    CASE WHEN c.PEPBitwiseCode & 2   = 2   THEN 'Y' ELSE 'N' END AS PEP,
+    CASE WHEN c.PEPBitwiseCode & 4   = 4   THEN 'Y' ELSE 'N' END AS NN,
+    CASE WHEN c.PEPBitwiseCode & 8   = 8   THEN 'Y' ELSE 'N' END AS ForeignPEP,
+    CASE WHEN c.PEPBitwiseCode & 16  = 16  THEN 'Y' ELSE 'N' END AS LocalPEP,
+    CASE WHEN c.PEPBitwiseCode & 32  = 32  THEN 'Y' ELSE 'N' END AS ForeignOrgPEP,
+    CASE WHEN c.PEPBitwiseCode & 64  = 64  THEN 'Y' ELSE 'N' END AS EfPEP,
+    CASE WHEN c.PEPBitwiseCode & 128 = 128 THEN 'Y' ELSE 'N' END AS CustRPIsPEP
+FROM Customer_Migrate_buffer a
+JOIN RP_NP_Migrate_buffer c    ON c.CIFKey= a.CIF_KEY
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE  c.PEPBitwiseCode = '2'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'insert' AND c.RP = 'BOD'
+
+
+
+--負面新聞 企業 主要股東
+--負面新聞 企業 其他關連方
+--負面新聞 企業 法定代理人
+--負面新聞 企業 董事會成員
+
+
+
+----------- 負面新聞 企業 主要股東
+----------MS 主要股東
+
+SELECT 
+    a.CustomerNo,
+    c.RefNo,
+    c.PEPBitwiseCode,
+    CASE WHEN c.PEPBitwiseCode & 1   = 1   THEN 'Y' ELSE 'N' END AS BlackList,
+    CASE WHEN c.PEPBitwiseCode & 2   = 2   THEN 'Y' ELSE 'N' END AS PEP,
+    CASE WHEN c.PEPBitwiseCode & 4   = 4   THEN 'Y' ELSE 'N' END AS NN,
+    CASE WHEN c.PEPBitwiseCode & 8   = 8   THEN 'Y' ELSE 'N' END AS ForeignPEP,
+    CASE WHEN c.PEPBitwiseCode & 16  = 16  THEN 'Y' ELSE 'N' END AS LocalPEP,
+    CASE WHEN c.PEPBitwiseCode & 32  = 32  THEN 'Y' ELSE 'N' END AS ForeignOrgPEP,
+    CASE WHEN c.PEPBitwiseCode & 64  = 64  THEN 'Y' ELSE 'N' END AS EfPEP,
+    CASE WHEN c.PEPBitwiseCode & 128 = 128 THEN 'Y' ELSE 'N' END AS CustRPIsPEP
+FROM Customer_Migrate_buffer a
+JOIN RP_NP_Migrate_buffer c    ON c.CIFKey= a.CIF_KEY
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE  c.PEPBitwiseCode = '4'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'insert' AND c.RP = 'MS'
+
+
+----------- 負面新聞 企業 其他關連方
+-------------------------OTH 其他關連方
+SELECT 
+    a.CustomerNo,
+    c.RefNo,
+    c.PEPBitwiseCode,
+    CASE WHEN c.PEPBitwiseCode & 1   = 1   THEN 'Y' ELSE 'N' END AS BlackList,
+    CASE WHEN c.PEPBitwiseCode & 2   = 2   THEN 'Y' ELSE 'N' END AS PEP,
+    CASE WHEN c.PEPBitwiseCode & 4   = 4   THEN 'Y' ELSE 'N' END AS NN,
+    CASE WHEN c.PEPBitwiseCode & 8   = 8   THEN 'Y' ELSE 'N' END AS ForeignPEP,
+    CASE WHEN c.PEPBitwiseCode & 16  = 16  THEN 'Y' ELSE 'N' END AS LocalPEP,
+    CASE WHEN c.PEPBitwiseCode & 32  = 32  THEN 'Y' ELSE 'N' END AS ForeignOrgPEP,
+    CASE WHEN c.PEPBitwiseCode & 64  = 64  THEN 'Y' ELSE 'N' END AS EfPEP,
+    CASE WHEN c.PEPBitwiseCode & 128 = 128 THEN 'Y' ELSE 'N' END AS CustRPIsPEP
+FROM Customer_Migrate_buffer a
+JOIN RP_NP_Migrate_buffer c    ON c.CIFKey= a.CIF_KEY
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE  c.PEPBitwiseCode = '4'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'insert' AND c.RP = 'OTH'
+
+
+
+---負面新聞 企業 法定代理人
+-------------------------------------------------------- LA 法定代理人
+
+
+
+SELECT 
+    a.CustomerNo,
+    c.RefNo,
+    c.PEPBitwiseCode,
+    CASE WHEN c.PEPBitwiseCode & 1   = 1   THEN 'Y' ELSE 'N' END AS BlackList,
+    CASE WHEN c.PEPBitwiseCode & 2   = 2   THEN 'Y' ELSE 'N' END AS PEP,
+    CASE WHEN c.PEPBitwiseCode & 4   = 4   THEN 'Y' ELSE 'N' END AS NN,
+    CASE WHEN c.PEPBitwiseCode & 8   = 8   THEN 'Y' ELSE 'N' END AS ForeignPEP,
+    CASE WHEN c.PEPBitwiseCode & 16  = 16  THEN 'Y' ELSE 'N' END AS LocalPEP,
+    CASE WHEN c.PEPBitwiseCode & 32  = 32  THEN 'Y' ELSE 'N' END AS ForeignOrgPEP,
+    CASE WHEN c.PEPBitwiseCode & 64  = 64  THEN 'Y' ELSE 'N' END AS EfPEP,
+    CASE WHEN c.PEPBitwiseCode & 128 = 128 THEN 'Y' ELSE 'N' END AS CustRPIsPEP
+FROM Customer_Migrate_buffer a
+JOIN RP_NP_Migrate_buffer c    ON c.CIFKey= a.CIF_KEY
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE  c.PEPBitwiseCode = '4'  AND cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'insert' AND c.RP = 'LA'
+
+
+
+
+-- 負面新聞 企業 董事會成員
+-------------------------BOD 董事會成員
+SELECT 
+    a.CustomerNo,
+    c.RefNo,
+    c.PEPBitwiseCode,
+    CASE WHEN c.PEPBitwiseCode & 1   = 1   THEN 'Y' ELSE 'N' END AS BlackList,
+    CASE WHEN c.PEPBitwiseCode & 2   = 2   THEN 'Y' ELSE 'N' END AS PEP,
+    CASE WHEN c.PEPBitwiseCode & 4   = 4   THEN 'Y' ELSE 'N' END AS NN,
+    CASE WHEN c.PEPBitwiseCode & 8   = 8   THEN 'Y' ELSE 'N' END AS ForeignPEP,
+    CASE WHEN c.PEPBitwiseCode & 16  = 16  THEN 'Y' ELSE 'N' END AS LocalPEP,
+    CASE WHEN c.PEPBitwiseCode & 32  = 32  THEN 'Y' ELSE 'N' END AS ForeignOrgPEP,
+    CASE WHEN c.PEPBitwiseCode & 64  = 64  THEN 'Y' ELSE 'N' END AS EfPEP,
+    CASE WHEN c.PEPBitwiseCode & 128 = 128 THEN 'Y' ELSE 'N' END AS CustRPIsPEP
+FROM Customer_Migrate_buffer a
+JOIN RP_NP_Migrate_buffer c    ON c.CIFKey= a.CIF_KEY
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE  c.PEPBitwiseCode = '4'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'insert' AND c.RP = 'BOD'
+
+
+--黑名單 企業 董事會成員
+-- 負面新聞 企業 董事會成員
+-------------------------BOD 董事會成員
+SELECT 
+    a.CustomerNo,
+    c.RefNo,
+    c.PEPBitwiseCode,
+    CASE WHEN c.PEPBitwiseCode & 1   = 1   THEN 'Y' ELSE 'N' END AS BlackList,
+    CASE WHEN c.PEPBitwiseCode & 2   = 2   THEN 'Y' ELSE 'N' END AS PEP,
+    CASE WHEN c.PEPBitwiseCode & 4   = 4   THEN 'Y' ELSE 'N' END AS NN,
+    CASE WHEN c.PEPBitwiseCode & 8   = 8   THEN 'Y' ELSE 'N' END AS ForeignPEP,
+    CASE WHEN c.PEPBitwiseCode & 16  = 16  THEN 'Y' ELSE 'N' END AS LocalPEP,
+    CASE WHEN c.PEPBitwiseCode & 32  = 32  THEN 'Y' ELSE 'N' END AS ForeignOrgPEP,
+    CASE WHEN c.PEPBitwiseCode & 64  = 64  THEN 'Y' ELSE 'N' END AS EfPEP,
+    CASE WHEN c.PEPBitwiseCode & 128 = 128 THEN 'Y' ELSE 'N' END AS CustRPIsPEP
+FROM Customer_Migrate_buffer a
+JOIN RP_NP_Migrate_buffer c    ON c.CIFKey= a.CIF_KEY
+join CIF_Migrate_Mapping_TEMP v on v.SOURCE_CIF_KEY = a.CIF_KEY
+join BSA_SUB_CUST_FACT bb on bb.CIF_KEY = v.NEW_CIF_KEY
+join PB_CUSTOMER_FACT cc on cc.CIF_KEY = bb.CIF_KEY
+WHERE  c.PEPBitwiseCode = '1'  AND cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'insert' AND c.RP = 'BOD'
+
+
+如圖，他要這個表格資料，但我現在SQL都是拆開寫 然後很亂，你能幫我一次寫好?
