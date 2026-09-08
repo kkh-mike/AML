@@ -1,10 +1,95 @@
--- 挑選 2 筆遷移成功的自建名單群組
-SELECT TOP 2
-    m.OldGroupID  AS [新光名單ID],
-    g.GROUPID     AS [自建名單ID],  -- 貼 Excel A 欄 (台新新 ID)
-    g.GROUPDESCR  AS [名稱],        -- 貼 Excel B 欄
-    g.SpecType    AS [名單類型]
-FROM dbo.lowrisklistgroups g
-JOIN dbo.lowrisklistgroups_Migrate_Mapping_TEMP m 
-    ON m.NewGroupId = g.GROUPID
-ORDER BY g.GROUPID;
+
+-- STEP 1 
+IF OBJECT_ID('tempdb..#SampleCust') IS NOT NULL DROP TABLE #SampleCust;
+
+WITH RankedData AS (
+    SELECT 
+        bb.CustomerNo,
+        cc.CUST_TYPE_CDE,
+        v.ACTION,
+        a.highrisk,
+        CONCAT(
+            CASE cc.CUST_TYPE_CDE WHEN 'N' THEN '企業' WHEN 'P' THEN '個人' END, ' ',
+            CASE v.ACTION WHEN 'update' THEN '共有戶' WHEN 'INSERT' THEN '純新光' END, ' ',
+            CASE a.highrisk WHEN 'H' THEN '高' WHEN 'M' THEN '中' WHEN 'L' THEN '低' END
+        ) AS 完整分類標籤,
+        ROW_NUMBER() OVER (
+            PARTITION BY cc.CUST_TYPE_CDE, v.ACTION, a.highrisk 
+            ORDER BY RAND()
+        ) AS rn
+    FROM Cust_NP_Migrate_buffer a
+    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+    WHERE cc.CUST_TYPE_CDE IN ('N', 'P')      AND v.ACTION IN ('update', 'INSERT')      AND a.highrisk IN ('H', 'M', 'L')
+)
+SELECT     
+	CustomerNo,
+    CUST_TYPE_CDE,
+    ACTION,
+    highrisk,
+    完整分類標籤
+INTO #SampleCust
+FROM RankedData
+WHERE rn <= 1;
+
+--撈出新光給的資料對應的資訊
+SELECT 
+    CustomerNo,
+    CUST_TYPE_CDE,
+    ACTION,
+    highrisk,
+    完整分類標籤
+FROM #SampleCust
+ORDER BY 完整分類標籤;
+
+
+--SELECT a.CustomerNo, a.highrisk, b.CUST_TYPE_CDE  
+--FROM BSA_SUB_CUST_FACT a
+--JOIN PB_CUSTOMER_FACT b ON b.CIF_KEY = a.CIF_KEY
+--WHERE a.CustomerNo IN (SELECT CustomerNo FROM #SampleCust);
+
+
+
+--確認台新寫入資訊跟新光的一樣
+-- *** 如果發現不一樣的 實際寫入的等級 要大於 SK等級
+SELECT 
+    s.CustomerNo,
+    s.完整分類標籤,
+    s.ACTION,
+    
+    -- 1. CUST_TYPE_CDE 比對
+    s.CUST_TYPE_CDE           AS SAMPLE_CUST_TYPE,
+    b.CUST_TYPE_CDE           AS FACT_CUST_TYPE,
+    CASE 
+        WHEN s.CUST_TYPE_CDE = b.CUST_TYPE_CDE THEN 'OK'
+        WHEN b.CUST_TYPE_CDE IS NULL THEN 'FACT無資料'
+        ELSE 'MISMATCH'
+    END                       AS CHECK_CUST_TYPE,
+
+    -- 2. highrisk 比對
+    s.highrisk                AS SAMPLE_HIGHRISK,
+    a.highrisk                AS FACT_HIGHRISK,
+    CASE 
+        WHEN s.highrisk = a.highrisk THEN 'OK'
+        WHEN a.highrisk IS NULL THEN 'FACT無資料'
+        ELSE 'MISMATCH'
+    END                       AS CHECK_HIGHRISK
+
+FROM #SampleCust s
+LEFT JOIN BSA_SUB_CUST_FACT a     ON a.CustomerNo = s.CustomerNo
+LEFT JOIN PB_CUSTOMER_FACT b     ON b.CIF_KEY = a.CIF_KEY
+ORDER BY 
+    -- 優先將有差異的列排在最上方
+    CASE 
+        WHEN s.CUST_TYPE_CDE <> b.CUST_TYPE_CDE 
+          OR s.highrisk <> a.highrisk 
+          OR a.CustomerNo IS NULL 
+        THEN 0 
+        ELSE 1 
+    END,
+    s.完整分類標籤;
+
+
+
+我覺得我需要修改一下 標記台新ID 跟新光ID
