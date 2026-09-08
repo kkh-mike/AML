@@ -30,3 +30,7 @@ ORDER BY [帳戶屬性] DESC, [客戶ID];
 多加一個客戶id 台新ˇ的
 
 用CIF_Migrate_Mapping_TEMP 的NEW_CIF_KEY  去串 BSA_SUB_CUST_FACT 的CIF_KEY
+
+帳號也是
+多加一個 台新的帳號
+用CIF_Migrate_Mapping_TEMP 的NEW_CIF_KEY  去串 BSADBTW..ACCT_XREF_DIM  的CIF_KEY
