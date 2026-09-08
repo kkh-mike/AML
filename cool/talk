@@ -2,7 +2,7 @@ WITH AcctData AS (
     SELECT 
         -- 新光端
         c.CustomerNo      AS [新光客戶ID],
-        a.AccountNo       AS [新光帳號],
+        a.ACCT_KEY        AS [新光帳號],
         
         -- 台新端
         ts_c.CustomerNo   AS [台新客戶ID],
@@ -16,7 +16,7 @@ WITH AcctData AS (
 
         ROW_NUMBER() OVER (
             PARTITION BY v.ACTION 
-            ORDER BY c.CustomerNo, a.AccountNo
+            ORDER BY c.CustomerNo, a.ACCT_KEY
         ) AS rn
     FROM BSADBTW..Acct_Migrate_buffer a
     JOIN CIF_Migrate_Mapping_TEMP v 
@@ -26,10 +26,18 @@ WITH AcctData AS (
     -- 串接台新客戶 ID
     LEFT JOIN BSA_SUB_CUST_FACT ts_c 
         ON ts_c.CIF_KEY = v.NEW_CIF_KEY
-    -- 串接台新帳號 (若單一客戶多帳號，建議依需要補齊帳號對應邏輯)
+    -- 串接台新帳號（需同時對應 CIF_KEY 與 'SK_' + ACCT_KEY，避免多帳號笛卡兒積）
     LEFT JOIN BSADBTW..ACCT_XREF_DIM ts_a 
         ON ts_a.CIF_KEY = v.NEW_CIF_KEY
+       AND ts_a.ACCT_KEY = 'SK_' + a.ACCT_KEY
     WHERE v.ACTION IN ('insert', 'update')
+      -- 排除邏輯：已存在於 XREF（去掉前導 0 相等）者不寫入，故排除
+      AND NOT EXISTS (
+          SELECT 1 
+          FROM BSADBTW..XREF x
+          WHERE SUBSTRING(a.ACCT_KEY, PATINDEX('%[^0]%', a.ACCT_KEY + ' '), LEN(a.ACCT_KEY))
+              = SUBSTRING(x.EXTN_REF_NO, PATINDEX('%[^0]%', x.EXTN_REF_NO + ' '), LEN(x.EXTN_REF_NO))
+      )
 )
 SELECT 
     [新光客戶ID],
@@ -40,23 +48,3 @@ SELECT
 FROM AcctData
 WHERE rn <= 2
 ORDER BY [帳戶屬性] DESC, [新光客戶ID];
-
-
-
-
-少說了
-
-台新帳號
-如果有在xref 這個TABLE 是不寫入
-
-邏輯在這
--- 未寫入的1527458筆資料，皆為已存在BANCS帳號當中
-SELECT COUNT(DISTINCT a.ACCT_KEY) AS Missing_But_In_XREF_Count FROM BSADBTW..Acct_Migrate_buffer a
-LEFT JOIN BSADBTW..XREF b
-	ON SUBSTRING(a.ACCT_KEY, PATINDEX('%[^0]%', a.ACCT_KEY+' '), LEN(a.ACCT_KEY))
-	= SUBSTRING(b.EXTN_REF_NO, PATINDEX('%[^0]%', b.EXTN_REF_NO+''), LEN(b.EXTN_REF_NO))
-WHERE NOT EXISTS (
-SELECT 1 FROM BSADBTW..ACCT_XREF_DIM d WHERE d.ACCT_KEY = 'SK_'+a.ACCT_KEY
-);
-
-
