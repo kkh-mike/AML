@@ -1,10 +1,10 @@
-
--- STEP 1 
+-- STEP 1: 抽樣暫存表（同時記錄新光 ID 與台新 ID）
 IF OBJECT_ID('tempdb..#SampleCust') IS NOT NULL DROP TABLE #SampleCust;
 
 WITH RankedData AS (
     SELECT 
-        bb.CustomerNo,
+        m.CustomerNo    AS SK_CustomerNo,     -- 新光客戶 ID
+        bb.CustomerNo   AS TS_CustomerNo,     -- 台新客戶 ID
         cc.CUST_TYPE_CDE,
         v.ACTION,
         a.highrisk,
@@ -15,16 +15,20 @@ WITH RankedData AS (
         ) AS 完整分類標籤,
         ROW_NUMBER() OVER (
             PARTITION BY cc.CUST_TYPE_CDE, v.ACTION, a.highrisk 
-            ORDER BY RAND()
+            ORDER BY NEWID()                  -- 改用 NEWID() 確保每組隨機抽樣 1 筆
         ) AS rn
     FROM Cust_NP_Migrate_buffer a
-    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
-    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
-    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
-    WHERE cc.CUST_TYPE_CDE IN ('N', 'P')      AND v.ACTION IN ('update', 'INSERT')      AND a.highrisk IN ('H', 'M', 'L')
+    JOIN CIF_Migrate_Mapping_TEMP v   ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN Customer_Migrate_buffer m    ON m.CIF_KEY = v.SOURCE_CIF_KEY
+    JOIN BSA_SUB_CUST_FACT bb         ON bb.CIF_KEY = v.NEW_CIF_KEY
+    JOIN PB_CUSTOMER_FACT cc          ON cc.CIF_KEY = bb.CIF_KEY
+    WHERE cc.CUST_TYPE_CDE IN ('N', 'P')
+      AND v.ACTION IN ('update', 'INSERT')
+      AND a.highrisk IN ('H', 'M', 'L')
 )
 SELECT     
-	CustomerNo,
+    SK_CustomerNo,
+    TS_CustomerNo,
     CUST_TYPE_CDE,
     ACTION,
     highrisk,
@@ -33,9 +37,10 @@ INTO #SampleCust
 FROM RankedData
 WHERE rn <= 1;
 
---撈出新光給的資料對應的資訊
+-- STEP 2: 檢視新光抽樣樣本
 SELECT 
-    CustomerNo,
+    SK_CustomerNo AS [新光客戶ID],
+    TS_CustomerNo AS [台新客戶ID],
     CUST_TYPE_CDE,
     ACTION,
     highrisk,
@@ -43,22 +48,18 @@ SELECT
 FROM #SampleCust
 ORDER BY 完整分類標籤;
 
-
---SELECT a.CustomerNo, a.highrisk, b.CUST_TYPE_CDE  
---FROM BSA_SUB_CUST_FACT a
---JOIN PB_CUSTOMER_FACT b ON b.CIF_KEY = a.CIF_KEY
---WHERE a.CustomerNo IN (SELECT CustomerNo FROM #SampleCust);
-
-
-
---確認台新寫入資訊跟新光的一樣
--- *** 如果發現不一樣的 實際寫入的等級 要大於 SK等級
+-- STEP 3: 台新寫入資料核對（含雙方 ID 與共有戶取高邏輯）
 SELECT 
-    s.CustomerNo,
+    s.SK_CustomerNo           AS [新光客戶ID],
+    s.TS_CustomerNo           AS [台新客戶ID],
     s.完整分類標籤,
-    s.ACTION,
+    CASE 
+        WHEN s.ACTION = 'INSERT' THEN '純新光'
+        WHEN s.ACTION = 'update' THEN '共有戶'
+        ELSE s.ACTION
+    END                       AS [客戶分類],
     
-    -- 1. CUST_TYPE_CDE 比對
+    -- 1. 客戶型態比對
     s.CUST_TYPE_CDE           AS SAMPLE_CUST_TYPE,
     b.CUST_TYPE_CDE           AS FACT_CUST_TYPE,
     CASE 
@@ -67,29 +68,33 @@ SELECT
         ELSE 'MISMATCH'
     END                       AS CHECK_CUST_TYPE,
 
-    -- 2. highrisk 比對
+    -- 2. 風險等級比對（共有戶取高邏輯：H > M > L）
     s.highrisk                AS SAMPLE_HIGHRISK,
     a.highrisk                AS FACT_HIGHRISK,
     CASE 
         WHEN s.highrisk = a.highrisk THEN 'OK'
         WHEN a.highrisk IS NULL THEN 'FACT無資料'
+        -- 共有戶若台新等級高於新光來源，屬合理覆蓋
+        WHEN s.ACTION = 'update' AND (
+            (s.highrisk = 'L' AND a.highrisk IN ('M', 'H')) OR
+            (s.highrisk = 'M' AND a.highrisk = 'H')
+        ) THEN 'OK_取高'
         ELSE 'MISMATCH'
     END                       AS CHECK_HIGHRISK
 
 FROM #SampleCust s
-LEFT JOIN BSA_SUB_CUST_FACT a     ON a.CustomerNo = s.CustomerNo
-LEFT JOIN PB_CUSTOMER_FACT b     ON b.CIF_KEY = a.CIF_KEY
+LEFT JOIN BSA_SUB_CUST_FACT a ON a.CustomerNo = s.TS_CustomerNo
+LEFT JOIN PB_CUSTOMER_FACT b  ON b.CIF_KEY = a.CIF_KEY
 ORDER BY 
-    -- 優先將有差異的列排在最上方
+    -- 異常列置頂
     CASE 
         WHEN s.CUST_TYPE_CDE <> b.CUST_TYPE_CDE 
-          OR s.highrisk <> a.highrisk 
+          OR (
+              s.highrisk <> a.highrisk 
+              AND NOT (s.ACTION = 'update' AND ((s.highrisk = 'L' AND a.highrisk IN ('M', 'H')) OR (s.highrisk = 'M' AND a.highrisk = 'H')))
+          )
           OR a.CustomerNo IS NULL 
         THEN 0 
         ELSE 1 
     END,
     s.完整分類標籤;
-
-
-
-我覺得我需要修改一下 標記台新ID 跟新光ID
