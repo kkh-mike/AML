@@ -1,90 +1,61 @@
-造成錯誤的主要原因是：當傳入的 @AcctMappingTable 包含多段式名稱（例如 BSADBTW..XREF 或 DB.SCHEMA.TABLE）時，直接使用 QUOTENAME(@AcctMappingTable) 會被轉義成單一識別字 [BSADBTW..XREF]，導致 SQL Server 找不到該物件。
-另外，針對動態 SQL 的引號轉義與 @Prefix 參數化，一併改用 sp_executesql 傳參處理，語法更乾淨且避免注入與截斷問題。
-以下為修正後的程式碼：
-   IF @ModuleName = 'TRXN'
-   BEGIN
-        --CREATE CLUSTERED INDEX IX_LoadTrxn_CIF 
-        --ON dbo.LoadTrxn_Migrate_buffer (CIF_KEY);
-        
-        --CREATE INDEX IX_LoadTrxn_YYYYMM
-        --ON dbo.LoadTrxn_Migrate_buffer (YYYYMM);	
-        
-        --CREATE INDEX IX_LoadTrxn_ACCT_KEY 
-        --ON dbo.LoadTrxn_Migrate_buffer (ACCT_KEY);	
-        
-        IF OBJECT_ID('tempdb..#TrxnAcctFinalMapping') IS NOT NULL
-            DROP TABLE #TrxnAcctFinalMapping;
+-- @AcctMappingTable  = XREF
 
-        CREATE TABLE #TrxnAcctFinalMapping
-            (
-              SourceAcctKey NVARCHAR(100) ,
-              FinalAcctKey NVARCHAR(100)
-            );
-        
-        IF ISNULL(@AcctMappingTable, '') <> ''
-        BEGIN
-            -- 解析多段式名稱（如 BSADBTW..XREF），避免 QUOTENAME 將整段包成單一名稱
-            DECLARE @SafeMappingTable NVARCHAR(500);
-            SET @SafeMappingTable = 
-                CASE 
-                    WHEN PARSENAME(@AcctMappingTable, 4) IS NOT NULL THEN QUOTENAME(PARSENAME(@AcctMappingTable, 4)) + '.' ELSE '' END +
-                CASE 
-                    WHEN PARSENAME(@AcctMappingTable, 3) IS NOT NULL THEN QUOTENAME(PARSENAME(@AcctMappingTable, 3)) + '.' 
-                    WHEN PARSENAME(@AcctMappingTable, 4) IS NOT NULL THEN '.' ELSE '' END +
-                CASE 
-                    WHEN PARSENAME(@AcctMappingTable, 2) IS NOT NULL THEN QUOTENAME(PARSENAME(@AcctMappingTable, 2)) + '.' 
-                    WHEN PARSENAME(@AcctMappingTable, 3) IS NOT NULL OR PARSENAME(@AcctMappingTable, 4) IS NOT NULL THEN '.' ELSE '' END +
-                QUOTENAME(PARSENAME(@AcctMappingTable, 1));
+IF OBJECT_ID('tempdb..#TrxnAcctFinalMapping') IS NOT NULL
+                            DROP TABLE #TrxnAcctFinalMapping;
 
-            SET @sql = N'
-            WITH MappedAccounts AS (
-                SELECT
-                    A.ACCT_KEY AS SourceAcctKey,
-                    -- 若有匹配到目標欄位則使用，否則補上前綴
-                    COALESCE(M.' + QUOTENAME(@AcctMappingTargetColumn) + N', 
-                             ISNULL(@Prefix, '''') + A.ACCT_KEY) AS FinalAcctKey,
-                    ROW_NUMBER() OVER (PARTITION BY A.ACCT_KEY ORDER BY (SELECT 1)) as rn
-                FROM dbo.LoadTrxn_Migrate_buffer A
-                LEFT JOIN ' + @SafeMappingTable + N' M
-                    ON M.' + QUOTENAME(@AcctMappingSourceColumn) + N' = (
-                        CASE 
-                            WHEN LEN(A.ACCT_KEY) < 25 
-                            THEN RIGHT(REPLICATE(''0'', 25) + A.ACCT_KEY, 25) 
-                            ELSE A.ACCT_KEY 
-                        END)
-            )
-            INSERT INTO #TrxnAcctFinalMapping (SourceAcctKey, FinalAcctKey)
-            SELECT
-                SourceAcctKey,
-                FinalAcctKey
-            FROM MappedAccounts
-            WHERE rn = 1 
-              AND ISNULL(SourceAcctKey, '''') <> '''';';
+                        CREATE TABLE #TrxnAcctFinalMapping
+                            (
+                              SourceAcctKey NVARCHAR(100) ,
+                              FinalAcctKey NVARCHAR(100)
+                            );
+                        
+                        IF ISNULL(BSADBTW..XREF, '') <> ''
+						BEGIN
+							SET @sql = '
+							WITH MappedAccounts AS (
+								SELECT
+									A.ACCT_KEY AS SourceAcctKey,
+									-- If a match exists in M, use it. Otherwise, apply the prefix.
+									COALESCE(M.' + QUOTENAME(@AcctMappingTargetColumn) + ', 
+											 ''' + ISNULL(@Prefix, '') + ''' + A.ACCT_KEY) AS FinalAcctKey,
+									ROW_NUMBER() OVER (PARTITION BY A.ACCT_KEY ORDER BY (SELECT 1)) as rn
+								FROM dbo.LoadTrxn_Migrate_buffer A
+								LEFT JOIN ' + QUOTENAME(@AcctMappingTable) + ' M
+									ON M.' + QUOTENAME(@AcctMappingSourceColumn) + ' = (
+										CASE 
+											WHEN LEN(A.ACCT_KEY) < 25 
+											THEN RIGHT(REPLICATE(''0'', 25) + A.ACCT_KEY, 25) 
+											ELSE A.ACCT_KEY 
+										END)
+							)
+							INSERT INTO #TrxnAcctFinalMapping (SourceAcctKey, FinalAcctKey)
+							SELECT
+								SourceAcctKey,
+								FinalAcctKey
+							FROM MappedAccounts
+							WHERE rn = 1 
+							AND ISNULL(SourceAcctKey, '''') <> '''';';
 
-            EXEC sp_executesql @sql, N'@Prefix NVARCHAR(50)', @Prefix = @Prefix;
-        END
-        ELSE
-        BEGIN
-            WITH PrefixedAccounts AS (
-                SELECT 
-                    ACCT_KEY AS SourceAcctKey,
-                    ISNULL(@Prefix, '') + ACCT_KEY AS FinalAcctKey,
-                    ROW_NUMBER() OVER (PARTITION BY ACCT_KEY ORDER BY (SELECT 1)) AS rn
-                FROM dbo.LoadTrxn_Migrate_buffer
-            )
-            INSERT INTO #TrxnAcctFinalMapping (SourceAcctKey, FinalAcctKey)
-            SELECT 
-                SourceAcctKey,
-                FinalAcctKey
-            FROM PrefixedAccounts
-            WHERE rn = 1
-              AND ISNULL(SourceAcctKey, '') <> '';                        
-        END
-
-        CREATE CLUSTERED INDEX IX_SourceAcctKey ON #TrxnAcctFinalMapping(SourceAcctKey);
-        -- WIRE MTHLY FACT
-   END
-
-調整重點說明：
- * 跨資料庫/綱要語法修復：使用 PARSENAME 分解段落再分別加括號，BSADBTW..XREF 會正確拼裝成 [BSADBTW]..[XREF]，而不會變成出錯的 [BSADBTW..XREF]。
- * 參數化傳遞 @Prefix：將前綴字串改以 sp_executesql 的參數傳入，避免動態 SQL 串接多層單引號易漏寫或注入的問題。
+							EXEC sp_executesql @sql;
+						END
+						ELSE
+						BEGIN
+                                WITH    PrefixedAccounts
+                                          AS ( SELECT   ACCT_KEY AS SourceAcctKey ,
+                                                        ISNULL(@Prefix, '')
+                                                        + ACCT_KEY AS FinalAcctKey ,
+                                                        ROW_NUMBER() OVER ( PARTITION BY ACCT_KEY ORDER BY ( SELECT
+                                                              1
+                                                              ) ) AS rn
+                                               FROM     dbo.LoadTrxn_Migrate_buffer
+                                             )
+                                    INSERT  INTO #TrxnAcctFinalMapping
+                                            ( SourceAcctKey ,
+                                              FinalAcctKey
+                                            )
+                                            SELECT  SourceAcctKey ,
+                                                    FinalAcctKey
+                                            FROM    PrefixedAccounts
+                                            WHERE   rn = 1 -- Keep only the first unique account
+                                                    AND ISNULL(SourceAcctKey,
+                                                              '') <> '';          
