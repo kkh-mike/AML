@@ -1,36 +1,17 @@
-這支預存程序的運作邏輯非常明確，可以拆解為 5 個核心階段：
-第一階段：決定「白名單」（誰應該留在群組內）
-程式先從當前資料庫名稱抓出銀行代號（例如 BSADBTW 去掉 BSADB 得到 TW），接著去中央庫 GCMAINDB.dbo.AutomatedEmployees 撈取名單塞入暫存表 WORKFLOW_MGMT_USERS_temp。
-人員要成功進入「白名單」，必須同時滿足以下全部條件：
- * 員工的分行代號符合（A.BANKNO = @BankNo）。
- * 員工的分行欄位不能為空（ISNULL(A.BRANCH, '') <> ''）。
- * 員工所屬工作群組（WORKGROUP）與模組（MODULE）能精準對應到本地啟用的群組（B.IsAutomated = 'TRUE' 且 B.DEL_FLAG = 'N'）。
- * 員工的角色代碼有效（存在於 WORKFLOW_MGMT_ROLE 且 FLAG = 'N'）。
-第二階段：檢查同步模式（全量 vs 部分同步）
-程式會去查控制參數表 dbo.PO_DIMDATA 的 IsFullUserList 欄位：
- * 模式 A：IsFullUserList = 'N'（部分同步）
-   * 只比對與來源資料庫（GCMAINDB）模組相關、且標記為自動化的群組。
- * 模式 B：其他情況（全量同步）
-   * 比對本地 WORKFLOW_MGMT_USERS 全部資料。
-第三階段：執行 MERGE 比對與汰除
-利用 MERGE 將目前的資料與第一階段的「白名單」進行比對：
- * 白名單有，本地沒有： INSERT 新增該使用者，並標記 IsAutomated = 'TRUE'。
- * 雙方都有，但本地未標記自動化： UPDATE 將其修正為 IsAutomated = 'TRUE'。
- * 本地有，但白名單沒有： 只要該人員原先是 IsAutomated = 'TRUE'，就直接 DELETE 刪除。
- * 稽核留存： 透過 OUTPUT 將所有新增與刪除的人員寫入歷史紀錄表 WORKFLOW_MGMT_USERS_HISTORY。
-第四階段：權限清理與補正
- * 將被刪除人員寫入暫存清單 WORKFLOW_AutomatedDeletedUsers_temp。
- * 從 WORKFLOW_MGMT_QUEUEACCESS 徹底拔除這些被刪除人員對該 Queue 的存取權限。
- * 從 GCMAINDB.dbo.CTCBBankAdmins 撈出新的銀行管理員（IsNew = 1），主動補上所有 Queue 的存取權。
-第五階段：重置案件（避免案件成為孤兒）
-針對 7 大業務系統進行盤點重置：
- * SWIFT（電文）
- * FLRS（匯款）
- * Outsource（委外）
- * FedWire（美金匯款）
- * NameCheck（姓名檢核）
- * DBCheck（名單資料庫檢核）
- * CIP / HighRisk / SAR / DWire / TradeFin（洗防風險評估、可疑交易、國內匯款、貿易融資等）
-對每個模組執行兩波處理：
- * 人員被刪除的案件： 只要案件未結案（Status <> '3'），且經辦人（HandledBy）落在剛被刪除的人員名單中，系統強制將 HandledBy 改回 NULL、狀態（Status）改回 '1'（待處理）、動作碼設為 11（重置），並在各模組的 Log 表留下 System Admin 異動紀錄。
- * 群組已停用的案件： 針對群組已標記刪除（DEL_FLAG = 'Y'）的案件，一併將 QueueID 與 HandledBy 清空，重回初始池。
+USE [BSADBTW]
+GO
+
+-- 1. 備份資料（自動建立帶有日期的備份實體表）
+SELECT * INTO dbo.BRANCH_DIM_BAK_20260909 FROM dbo.BRANCH_DIM;
+SELECT * INTO dbo.WORKFLOW_MGMT_BRANCH_BAK_20260909 FROM dbo.WORKFLOW_MGMT_BRANCH;
+
+-- 2. 驗證備份筆數（確認與原表完全一致）
+SELECT 
+    (SELECT COUNT(*) FROM dbo.BRANCH_DIM) AS [原表_BRANCH_DIM],
+    (SELECT COUNT(*) FROM dbo.BRANCH_DIM_BAK_20260909) AS [備份_BRANCH_DIM],
+    (SELECT COUNT(*) FROM dbo.WORKFLOW_MGMT_BRANCH) AS [原表_WORKFLOW_MGMT_BRANCH],
+    (SELECT COUNT(*) FROM dbo.WORKFLOW_MGMT_BRANCH_BAK_20260909) AS [備份_WORKFLOW_MGMT_BRANCH];
+
+-- 3. 確認備份無誤後，清空原表資料準備重寫
+TRUNCATE TABLE dbo.BRANCH_DIM;
+TRUNCATE TABLE dbo.WORKFLOW_MGMT_BRANCH;
