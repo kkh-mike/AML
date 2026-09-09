@@ -1,41 +1,213 @@
---將圖片中的設定值：
--- * @AcctMappingTable = BSADBTW..XREF
--- * @AcctMappingSourceColumn = EXTN_REF_NO
--- * @AcctMappingTargetColumn = INTN_REF_NO
--- * @Prefix = SK_
+對，你這段慢的最大嫌疑非常明確，就是 1.9 億筆 LoadTrxn_Migrate_buffer。而且你的 SQL 裡有幾個地方會讓 SQL Server 做非常重的工作。
+
+🔥 最慢的地方
+
+1. LEFT JOIN BSADBTW..XREF
+
+LEFT JOIN BSADBTW..XREF M
+    ON M.EXTN_REF_NO = (
+        CASE 
+            WHEN LEN(A.ACCT_KEY) < 25 
+            THEN RIGHT(REPLICATE('0', 25) + A.ACCT_KEY, 25) 
+            ELSE A.ACCT_KEY 
+        END)
+
+SQL Server 要處理：
+
+189,968,006 筆 A 資料
+
+每一筆都要算：
+
+LEN()
+REPLICATE()
+RIGHT()
++
+CASE
+
+然後拿結果去 XREF.EXTN_REF_NO 找。
+
+如果 XREF.EXTN_REF_NO 沒有 Index，那會非常恐怖。
+
+先查：
+
+EXEC sp_helpindex 'BSADBTW..XREF';
+
+你最希望看到的是類似：
+
+IX_XREF_EXTN_REF_NO
+    EXTN_REF_NO
+
+⸻
+
+2. ROW_NUMBER() 是第二個大問題
+
+你現在：
+
+ROW_NUMBER() OVER (
+    PARTITION BY A.ACCT_KEY 
+    ORDER BY (SELECT 1)
+) AS rn
+
+SQL Server 為了找：
+
+WHERE rn = 1
+
+需要處理 1.9 億筆 JOIN 後的資料，再依 ACCT_KEY 分組/排序。
+
+也就是說，你不是單純：
+
+找 XREF 對應
+
+而是：
+
+先產生巨大結果集 → 分組 → 排序 → ROW_NUMBER → 再只留下第一筆
+
+這很吃：
+
+* CPU
+* Memory
+* tempdb
+* Sort
+
+⸻
+
+3. 你可能其實不需要 ROW_NUMBER()
+
+如果你的目的是：
+
+每個 ACCT_KEY 只留一筆 mapping
+
+那真正要先確認的是：
+
+SELECT
+    COUNT(*) AS TotalRows,
+    COUNT(DISTINCT ACCT_KEY) AS DistinctAcct
+FROM dbo.LoadTrxn_Migrate_buffer
+WHERE ISNULL(ACCT_KEY, '') <> '';
+
+如果 1.9 億筆裡面只有例如：
+
+TotalRows       189,968,006
+DistinctAcct      5,000,000
+
+那你現在其實是在對 1.9 億筆交易做 mapping，但最後只想得到 500 萬個帳號。
+
+這就很浪費。
+
+⸻
+
+🚀 我會先這樣改
+
+第一步：先把帳號去重
+
+IF OBJECT_ID('tempdb..#SourceAcct') IS NOT NULL
+    DROP TABLE #SourceAcct;
+SELECT DISTINCT
+    A.ACCT_KEY AS SourceAcctKey
+INTO #SourceAcct
+FROM dbo.LoadTrxn_Migrate_buffer A
+WHERE ISNULL(A.ACCT_KEY, '') <> '';
+CREATE CLUSTERED INDEX IX_SourceAcct
+ON #SourceAcct(SourceAcctKey);
+
+然後才 JOIN XREF：
+
 IF OBJECT_ID('tempdb..#TrxnAcctFinalMapping') IS NOT NULL
     DROP TABLE #TrxnAcctFinalMapping;
-
 CREATE TABLE #TrxnAcctFinalMapping
-    (
-      SourceAcctKey NVARCHAR(100) ,
-      FinalAcctKey NVARCHAR(100)
-    );
-
-WITH MappedAccounts AS (
-    SELECT
-        A.ACCT_KEY AS SourceAcctKey,
-        COALESCE(M.INTN_REF_NO, 'SK_' + A.ACCT_KEY) AS FinalAcctKey,
-        ROW_NUMBER() OVER (PARTITION BY A.ACCT_KEY ORDER BY (SELECT 1)) AS rn
-    FROM dbo.LoadTrxn_Migrate_buffer A
-    LEFT JOIN BSADBTW..XREF M
-        ON M.EXTN_REF_NO = (
-            CASE 
-                WHEN LEN(A.ACCT_KEY) < 25 
-                THEN RIGHT(REPLICATE('0', 25) + A.ACCT_KEY, 25) 
-                ELSE A.ACCT_KEY 
-            END)
-)
-INSERT INTO #TrxnAcctFinalMapping (SourceAcctKey, FinalAcctKey)
-SELECT
+(
+    SourceAcctKey NVARCHAR(100),
+    FinalAcctKey NVARCHAR(100)
+);
+INSERT INTO #TrxnAcctFinalMapping
+(
     SourceAcctKey,
     FinalAcctKey
-FROM MappedAccounts
-WHERE rn = 1 
-  AND ISNULL(SourceAcctKey, '') <> '';
+)
+SELECT
+    A.SourceAcctKey,
+    COALESCE(M.INTN_REF_NO, 'SK_' + A.SourceAcctKey)
+FROM #SourceAcct A
+LEFT JOIN BSADBTW..XREF M
+    ON M.EXTN_REF_NO =
+       CASE 
+           WHEN LEN(A.SourceAcctKey) < 25
+           THEN RIGHT(REPLICATE('0', 25) + A.SourceAcctKey, 25)
+           ELSE A.SourceAcctKey
+       END;
 
-CREATE CLUSTERED INDEX IX_SourceAcctKey ON #TrxnAcctFinalMapping(SourceAcctKey);
+這樣如果：
 
+LoadTrxn_Migrate_buffer = 189,968,006
+Distinct ACCT_KEY       = 5,000,000
 
-我這段跑超久是慢再哪
-LoadTrxn_Migrate_buffer 數量有  189968006
+你的 JOIN 就從：
+
+1.9 億 → 500 萬
+
+差非常多。
+
+⸻
+
+⚠️ 但還有一個關鍵
+
+你原本的：
+
+ROW_NUMBER()
+
+其實是在偷偷處理：
+
+XREF 裡同一個 EXTN_REF_NO 有多筆資料
+
+所以我們不能直接把它刪掉，除非確認：
+
+SELECT
+    EXTN_REF_NO,
+    COUNT(*) AS Cnt
+FROM BSADBTW..XREF
+GROUP BY EXTN_REF_NO
+HAVING COUNT(*) > 1;
+
+如果這個查出很多筆，那就代表 XREF 本身有 duplicate。
+
+⸻
+
+⭐ 我建議你現在先跑這 3 個
+
+① 看 LoadTrxn 有多少不同帳號
+
+SELECT
+    COUNT(*) AS TotalRows,
+    COUNT(DISTINCT ACCT_KEY) AS DistinctAcctKey
+FROM dbo.LoadTrxn_Migrate_buffer
+WHERE ISNULL(ACCT_KEY, '') <> '';
+
+② 看 XREF 有沒有 Index
+
+EXEC sp_helpindex 'BSADBTW..XREF';
+
+③ 看 XREF 是否有重複
+
+SELECT
+    EXTN_REF_NO,
+    COUNT(*) AS Cnt
+FROM BSADBTW..XREF
+GROUP BY EXTN_REF_NO
+HAVING COUNT(*) > 1;
+
+⸻
+
+🎯 我目前的判斷
+
+你的瓶頸大概是：
+
+部分	影響
+LoadTrxn_Migrate_buffer 1.9 億筆	🔴🔴🔴🔴🔴
+ROW_NUMBER()	🔴🔴🔴🔴
+XREF EXTN_REF_NO 沒 Index	🔴🔴🔴🔴🔴
+JOIN 裡面的 CASE/LEN/RIGHT	🟠🟠
+建立 #TrxnAcctFinalMapping Index	🟢 相對不是主因
+
+先不要一直等原 SQL 跑。
+
+你把上面 ①②③ 的結果貼給我，我可以直接幫你判斷到底是 1.9 億筆掃描、XREF Index、還是 ROW_NUMBER/Sort 在卡，然後我可以幫你改成適合這 1.9 億筆資料的版本。
