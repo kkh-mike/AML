@@ -1,61 +1,31 @@
--- @AcctMappingTable  = XREF
-
 IF OBJECT_ID('tempdb..#TrxnAcctFinalMapping') IS NOT NULL
-                            DROP TABLE #TrxnAcctFinalMapping;
+    DROP TABLE #TrxnAcctFinalMapping;
 
-                        CREATE TABLE #TrxnAcctFinalMapping
-                            (
-                              SourceAcctKey NVARCHAR(100) ,
-                              FinalAcctKey NVARCHAR(100)
-                            );
-                        
-                        IF ISNULL(BSADBTW..XREF, '') <> ''
-						BEGIN
-							SET @sql = '
-							WITH MappedAccounts AS (
-								SELECT
-									A.ACCT_KEY AS SourceAcctKey,
-									-- If a match exists in M, use it. Otherwise, apply the prefix.
-									COALESCE(M.' + QUOTENAME(@AcctMappingTargetColumn) + ', 
-											 ''' + ISNULL(@Prefix, '') + ''' + A.ACCT_KEY) AS FinalAcctKey,
-									ROW_NUMBER() OVER (PARTITION BY A.ACCT_KEY ORDER BY (SELECT 1)) as rn
-								FROM dbo.LoadTrxn_Migrate_buffer A
-								LEFT JOIN ' + QUOTENAME(@AcctMappingTable) + ' M
-									ON M.' + QUOTENAME(@AcctMappingSourceColumn) + ' = (
-										CASE 
-											WHEN LEN(A.ACCT_KEY) < 25 
-											THEN RIGHT(REPLICATE(''0'', 25) + A.ACCT_KEY, 25) 
-											ELSE A.ACCT_KEY 
-										END)
-							)
-							INSERT INTO #TrxnAcctFinalMapping (SourceAcctKey, FinalAcctKey)
-							SELECT
-								SourceAcctKey,
-								FinalAcctKey
-							FROM MappedAccounts
-							WHERE rn = 1 
-							AND ISNULL(SourceAcctKey, '''') <> '''';';
+CREATE TABLE #TrxnAcctFinalMapping
+    (
+      SourceAcctKey NVARCHAR(100) ,
+      FinalAcctKey NVARCHAR(100)
+    );
 
-							EXEC sp_executesql @sql;
-						END
-						ELSE
-						BEGIN
-                                WITH    PrefixedAccounts
-                                          AS ( SELECT   ACCT_KEY AS SourceAcctKey ,
-                                                        ISNULL(@Prefix, '')
-                                                        + ACCT_KEY AS FinalAcctKey ,
-                                                        ROW_NUMBER() OVER ( PARTITION BY ACCT_KEY ORDER BY ( SELECT
-                                                              1
-                                                              ) ) AS rn
-                                               FROM     dbo.LoadTrxn_Migrate_buffer
-                                             )
-                                    INSERT  INTO #TrxnAcctFinalMapping
-                                            ( SourceAcctKey ,
-                                              FinalAcctKey
-                                            )
-                                            SELECT  SourceAcctKey ,
-                                                    FinalAcctKey
-                                            FROM    PrefixedAccounts
-                                            WHERE   rn = 1 -- Keep only the first unique account
-                                                    AND ISNULL(SourceAcctKey,
-                                                              '') <> '';          
+WITH MappedAccounts AS (
+    SELECT
+        A.ACCT_KEY AS SourceAcctKey,
+        -- 如果 XREF 有對應值就取 INTN_REF_NO，沒有就補上前綴 'SK_'
+        COALESCE(M.INTN_REF_NO, 'SK_' + A.ACCT_KEY) AS FinalAcctKey,
+        ROW_NUMBER() OVER (PARTITION BY A.ACCT_KEY ORDER BY (SELECT 1)) AS rn
+    FROM dbo.LoadTrxn_Migrate_buffer A
+    LEFT JOIN BSADBTW..XREF M
+        ON M.EXTN_REF_NO = (
+            CASE 
+                WHEN LEN(A.ACCT_KEY) < 25 
+                THEN RIGHT(REPLICATE('0', 25) + A.ACCT_KEY, 25) 
+                ELSE A.ACCT_KEY 
+            END)
+)
+INSERT INTO #TrxnAcctFinalMapping (SourceAcctKey, FinalAcctKey)
+SELECT
+    SourceAcctKey,
+    FinalAcctKey
+FROM MappedAccounts
+WHERE rn = 1 
+  AND ISNULL(SourceAcctKey, '') <> '';
