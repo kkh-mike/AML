@@ -1,27 +1,9 @@
- INSERT  INTO #AffectedNextReview
-                                        ( CIF_KEY ,
-                                          ReviewDt
-                                        )
-                                        SELECT  R.CIFKey ,
-                                                S.ReviewDt
-                                        FROM    dbo.EDD_ReviewSchedule R
-                                                JOIN dbo.CIF_Migrate_Mapping_TEMP M ON R.CIFKey = M.NEW_CIF_KEY
-                                                JOIN dbo.Cust_NP_Migrate_buffer S ON S.CIF_KEY = M.SOURCE_CIF_KEY
-                                                JOIN dbo.BSA_SUB_CUST_FACT T ON T.CIF_KEY = M.NEW_CIF_KEY
-                                        WHERE   R.Status = 'P'
-                                                AND CASE S.HIGHRISK
-                                                      WHEN 'L' THEN 1
-                                                      WHEN 'M' THEN 2
-                                                      WHEN 'H' THEN 3
-                                                      ELSE 0
-                                                    END > CASE T.HIGHRISK
-                                                            WHEN 'L' THEN 1
-                                                            WHEN 'M' THEN 2
-                                                            WHEN 'H' THEN 3
-                                                            ELSE 0
-                                                          END
-                                                AND S.ReviewDt < R.ReviewDt;
-
-
-你怎麼知道這時候的
-BSA_SUB_CUST_FACT  已經更新了?  
+SELECT 'TYP_02_PARTTIME', COUNT(*)
+FROM [TAS9-T].[TSAAS].[dbo].[TBL_CMPEMPAPP] T 
+JOIN [TAS9-T].[TSAAS].[dbo].[HREMPM_N]      H ON T.EMPCODE = H.EMP_ID 
+-- 改為四段式命名呼叫 Linked Server：
+JOIN [MSSQL2022DB05-T].[BatchJobDB].[dbo].[AML_EMP_DEPT_MAP] M 
+  ON T.EMPCODE = M.EMPCODE AND M.TYP = '02'
+WHERE T.EMPCODE = '1128072' 
+  AND H.COMP_CD = 'TSIB' 
+  AND T.APPCODE = 'AML';
