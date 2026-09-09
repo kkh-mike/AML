@@ -1,98 +1,14 @@
 USE [BSADBTW]
 GO
 
--- 1. 取得目前正式表的最大 QUEUEID
-DECLARE @CurrentMaxID INT;
-SELECT @CurrentMaxID = ISNULL(MAX(QUEUEID), 0) FROM [dbo].[WORKFLOW_MGMT_QUEUE];
-
--- 2. 自動接續編號並寫入正式表
-INSERT INTO [dbo].[WORKFLOW_MGMT_QUEUE] (
-    [QUEUEID],
-    [QUEUENAME],
-    [SRC],
-    [ALERT],
-    [TIMEOUT],
-    [ALERT_PERSONAL],
-    [TIMEOUT_PERSONAL],
-    [ALERT_THIRDPARTY],
-    [TIMEOUT_THIRDPARTY],
-    [ALERT_RESEND],
-    [TIMEOUT_RESEND],
-    [ALERT_MAKER_QUEUE],
-    [ALERT_MAKER_PERSONAL],
-    [ALERT_CHECKER_QUEUE],
-    [ALERT_CHECKER_PERSONAL],
-    [ALERT_AMLOFFICER_QUEUE],
-    [ALERT_AMLOFFICER_PERSONAL],
-    [ALERT_AMLOFFICER2_QUEUE],
-    [ALERT_AMLOFFICER2_PERSONAL],
-    [DEL_FLAG],
-    [CREATEDBY],
-    [CREATEDDT],
-    [LASTUPDATEDBY],
-    [LASTUPDATEDDT],
-    [CREATEDDT_UTC],
-    [LASTUPDATEDDT_UTC],
-    [DailyBaseReview],
-    [MonthlyBaseReview],
-    [IsAutomated],
-    [IsIncludeAllBranch],
-    [IsAutoAssignForAllBranch],
-    [IncludeAllMsgType],
-    [IncludeAllAdditionalMsgType],
-    [AutoAssignForAllMsgType],
-    [AutoAssignForAllAdditionalMsgType],
-    [IsDefaultWorkgroup],
-    [IsSARCaseReporterGroup],
-    [IsEmployeeInd],
-    [IsAllowMakerCompleteFalseMatchCase]
-)
-SELECT
-    -- 從目前最大號碼接續往後編號 (+1, +2, ...)
-    @CurrentMaxID + ROW_NUMBER() OVER (ORDER BY TRY_CAST(QUEUEID AS INT), QUEUENAME) AS [QUEUEID],
-    
-    QUEUENAME,
-    NULLIF(SRC, 'NULL'),
-    NULLIF(ALERT, 'NULL'),
-    NULLIF(TIMEOUT, 'NULL'),
-    NULLIF(ALERT_PERSONAL, 'NULL'),
-    NULLIF(TIMEOUT_PERSONAL, 'NULL'),
-    NULLIF(ALERT_THIRDPARTY, 'NULL'),
-    NULLIF(TIMEOUT_THIRDPARTY, 'NULL'),
-    NULLIF(ALERT_RESEND, 'NULL'),
-    NULLIF(TIMEOUT_RESEND, 'NULL'),
-    NULLIF(ALERT_MAKER_QUEUE, 'NULL'),
-    NULLIF(ALERT_MAKER_PERSONAL, 'NULL'),
-    NULLIF(ALERT_CHECKER_QUEUE, 'NULL'),
-    NULLIF(ALERT_CHECKER_PERSONAL, 'NULL'),
-    NULLIF(ALERT_AMLOFFICER_QUEUE, 'NULL'),
-    NULLIF(ALERT_AMLOFFICER_PERSONAL, 'NULL'),
-    NULLIF(ALERT_AMLOFFICER2_QUEUE, 'NULL'),
-    NULLIF(ALERT_AMLOFFICER2_PERSONAL, 'NULL'),
-    NULLIF(DEL_FLAG, 'NULL'),
-    NULLIF(CREATEDBY, 'NULL'),
-    TRY_CAST(NULLIF(CREATEDDT, 'NULL') AS DATETIME),
-    NULLIF(LASTUPDATEDBY, 'NULL'),
-    TRY_CAST(NULLIF(LASTUPDATEDDT, 'NULL') AS DATETIME),
-    TRY_CAST(NULLIF(CREATEDDT_UTC, 'NULL') AS DATETIME),
-    TRY_CAST(NULLIF(LASTUPDATEDDT_UTC, 'NULL') AS DATETIME),
-    ISNULL(TRY_CAST(NULLIF(DailyBaseReview, 'NULL') AS BIT), 0),
-    ISNULL(TRY_CAST(NULLIF(MonthlyBaseReview, 'NULL') AS BIT), 0),
-    TRY_CAST(NULLIF(IsAutomated, 'NULL') AS BIT),
-    TRY_CAST(NULLIF(IsIncludeAllBranch, 'NULL') AS BIT),
-    TRY_CAST(NULLIF(IsAutoAssignForAllBranch, 'NULL') AS BIT),
-    TRY_CAST(NULLIF(IncludeAllMsgType, 'NULL') AS BIT),
-    TRY_CAST(NULLIF(IncludeAllAdditionalMsgType, 'NULL') AS BIT),
-    TRY_CAST(NULLIF(AutoAssignForAllMsgType, 'NULL') AS BIT),
-    TRY_CAST(NULLIF(AutoAssignForAllAdditionalMsgType, 'NULL') AS BIT),
-    TRY_CAST(NULLIF(IsDefaultWorkgroup, 'NULL') AS BIT),
-    ISNULL(TRY_CAST(NULLIF(IsSARCaseReporterGroup, 'NULL') AS BIT), 0),
-    ISNULL(TRY_CAST(NULLIF(IsEmployeeInd, 'NULL') AS BIT), 0),
-    TRY_CAST(NULLIF(IsAllowMakerCompleteFalseMatchCase, 'NULL') AS BIT)
-FROM [dbo].[test];
-
--- 3. 查詢剛剛寫入的 400 筆資料確認號碼
-SELECT TOP 20 * 
+-- 1. 先確認要被刪除的筆數是否剛好是 400 筆
+SELECT COUNT(*) AS [預計刪除筆數]
 FROM [dbo].[WORKFLOW_MGMT_QUEUE]
-WHERE [QUEUEID] > @CurrentMaxID
-ORDER BY [QUEUEID] ASC;
+WHERE QUEUENAME IN (SELECT QUEUENAME FROM [dbo].[test]);
+
+-- 2. 確定筆數正確後，執行刪除
+DELETE FROM [dbo].[WORKFLOW_MGMT_QUEUE]
+WHERE QUEUENAME IN (SELECT QUEUENAME FROM [dbo].[test]);
+
+-- 3. 最後把暫存表也刪除
+DROP TABLE [dbo].[test];
