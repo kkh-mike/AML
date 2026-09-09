@@ -1,3 +1,6 @@
+="UPDATE [dbo].[BRANCH_DIM] SET [BRNCH_DESC] = N'" & B2 & "', [BRNCH_ADDR1] = " & IF(OR(C2="NULL", ISBLANK(C2)), "NULL", "N'" & C2 & "'") & " WHERE [BRNCH_NBR] = '" & A2 & "';"
+
+
 
 ="UPDATE [dbo].[BRANCH_DIM] SET [BRNCH_DESC] = N'" & C2 & "' WHERE [BRNCH_NBR] = '" & B2 & "';"
 
