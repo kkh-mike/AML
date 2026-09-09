@@ -1,76 +1,159 @@
 USE [BSADBTW]
 GO
 
-/****** Object:  Table [dbo].[WORKFLOW_MGMT_QUEUE]    Script Date: 2026/9/9 下午 03:40:05 ******/
-SET ANSI_NULLS ON
-GO
+-- 1. 建立結構對應的暫存表 (全數使用 NVARCHAR 接收，避免 CSV 格式問題導致 BULK 失敗)
+IF OBJECT_ID('tempdb..#TempQueueCSV') IS NOT NULL DROP TABLE #TempQueueCSV;
 
-SET QUOTED_IDENTIFIER ON
-GO
+CREATE TABLE #TempQueueCSV (
+    CSV_QUEUEID                         NVARCHAR(50),
+    QUEUENAME                           NVARCHAR(100),
+    SRC                                 NVARCHAR(20),
+    ALERT                               NVARCHAR(10),
+    TIMEOUT                             NVARCHAR(10),
+    ALERT_PERSONAL                      NVARCHAR(10),
+    TIMEOUT_PERSONAL                    NVARCHAR(10),
+    ALERT_THIRDPARTY                    NVARCHAR(10),
+    TIMEOUT_THIRDPARTY                  NVARCHAR(10),
+    ALERT_RESEND                        NVARCHAR(10),
+    TIMEOUT_RESEND                      NVARCHAR(10),
+    ALERT_MAKER_QUEUE                   NVARCHAR(10),
+    ALERT_MAKER_PERSONAL                NVARCHAR(10),
+    ALERT_CHECKER_QUEUE                 NVARCHAR(10),
+    ALERT_CHECKER_PERSONAL              NVARCHAR(10),
+    ALERT_AMLOFFICER_QUEUE              NVARCHAR(10),
+    ALERT_AMLOFFICER_PERSONAL           NVARCHAR(10),
+    ALERT_AMLOFFICER2_QUEUE             NVARCHAR(10),
+    ALERT_AMLOFFICER2_PERSONAL          NVARCHAR(10),
+    DEL_FLAG                            NVARCHAR(10),
+    CREATEDBY                           NVARCHAR(60),
+    CREATEDDT                           NVARCHAR(50),
+    LASTUPDATEDBY                       NVARCHAR(60),
+    LASTUPDATEDDT                       NVARCHAR(50),
+    CREATEDDT_UTC                       NVARCHAR(50),
+    LASTUPDATEDDT_UTC                   NVARCHAR(50),
+    DailyBaseReview                     NVARCHAR(10),
+    MonthlyBaseReview                   NVARCHAR(10),
+    IsAutomated                         NVARCHAR(10),
+    IsIncludeAllBranch                  NVARCHAR(10),
+    IsAutoAssignForAllBranch            NVARCHAR(10),
+    IncludeAllMsgType                   NVARCHAR(10),
+    IncludeAllAdditionalMsgType         NVARCHAR(10),
+    AutoAssignForAllMsgType             NVARCHAR(10),
+    AutoAssignForAllAdditionalMsgType   NVARCHAR(10),
+    IsDefaultWorkgroup                  NVARCHAR(10),
+    IsSARCaseReporterGroup              NVARCHAR(10),
+    IsEmployeeInd                       NVARCHAR(10),
+    IsAllowMakerCompleteFalseMatchCase  NVARCHAR(10)
+);
 
-CREATE TABLE [dbo].[WORKFLOW_MGMT_QUEUE](
-	[QUEUEID] [int] NOT NULL,
-	[QUEUENAME] [nvarchar](100) NOT NULL,
-	[SRC] [nvarchar](20) NULL,
-	[ALERT] [varchar](1) NULL,
-	[TIMEOUT] [nvarchar](10) NULL,
-	[ALERT_PERSONAL] [varchar](1) NULL,
-	[TIMEOUT_PERSONAL] [nvarchar](10) NULL,
-	[ALERT_THIRDPARTY] [varchar](1) NULL,
-	[TIMEOUT_THIRDPARTY] [nvarchar](10) NULL,
-	[ALERT_RESEND] [varchar](1) NULL,
-	[TIMEOUT_RESEND] [nvarchar](10) NULL,
-	[ALERT_MAKER_QUEUE] [nvarchar](1) NULL,
-	[ALERT_MAKER_PERSONAL] [nvarchar](1) NULL,
-	[ALERT_CHECKER_QUEUE] [nvarchar](1) NULL,
-	[ALERT_CHECKER_PERSONAL] [nvarchar](1) NULL,
-	[ALERT_AMLOFFICER_QUEUE] [nvarchar](1) NULL,
-	[ALERT_AMLOFFICER_PERSONAL] [nvarchar](1) NULL,
-	[ALERT_AMLOFFICER2_QUEUE] [nvarchar](1) NULL,
-	[ALERT_AMLOFFICER2_PERSONAL] [nvarchar](1) NULL,
-	[DEL_FLAG] [varchar](1) NULL,
-	[CREATEDBY] [nvarchar](60) NULL,
-	[CREATEDDT] [datetime] NULL,
-	[LASTUPDATEDBY] [nvarchar](60) NULL,
-	[LASTUPDATEDDT] [datetime] NULL,
-	[CREATEDDT_UTC] [datetime] NULL,
-	[LASTUPDATEDDT_UTC] [datetime] NULL,
-	[DailyBaseReview] [bit] NOT NULL,
-	[MonthlyBaseReview] [bit] NOT NULL,
-	[IsAutomated] [bit] NULL,
-	[IsIncludeAllBranch] [bit] NULL,
-	[IsAutoAssignForAllBranch] [bit] NULL,
-	[IncludeAllMsgType] [bit] NULL,
-	[IncludeAllAdditionalMsgType] [bit] NULL,
-	[AutoAssignForAllMsgType] [bit] NULL,
-	[AutoAssignForAllAdditionalMsgType] [bit] NULL,
-	[IsDefaultWorkgroup] [bit] NULL,
-	[IsSARCaseReporterGroup] [bit] NOT NULL,
-	[IsEmployeeInd] [bit] NOT NULL,
-	[IsAllowMakerCompleteFalseMatchCase] [bit] NULL,
- CONSTRAINT [pk_WORKFLOW_MGMT_QUEUE] PRIMARY KEY CLUSTERED 
-(
-	[QUEUEID] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
-) ON [PRIMARY]
+-- 2. 匯入 CSV (請置換成你的實際 CSV 檔案絕對路徑)
+BULK INSERT #TempQueueCSV
+FROM 'C:\path\to\test.csv'
+WITH (
+    FIRSTROW = 2,            -- 跳過標頭列
+    FIELDTERMINATOR = ',',   -- 欄位分隔符號
+    ROWTERMINATOR = '\n',    -- 換行符號 (若讀取有問題可換成 '0x0a' 或 '\r\n')
+    CODEPAGE = '65001'       -- UTF-8 編碼 (若有中文亂碼可嘗試 '950')
+);
 
-GO
+-- 3. 計算目前最大 QUEUEID，並接續流水號寫入目標表
+DECLARE @CurrentMaxID INT;
+SELECT @CurrentMaxID = ISNULL(MAX(QUEUEID), 0) FROM [dbo].[WORKFLOW_MGMT_QUEUE];
 
-ALTER TABLE [dbo].[WORKFLOW_MGMT_QUEUE] ADD  CONSTRAINT [df_WORKFLOW_MGMT_QUEUE_DailyBaseReview]  DEFAULT ('FALSE') FOR [DailyBaseReview]
-GO
+INSERT INTO [dbo].[WORKFLOW_MGMT_QUEUE] (
+    [QUEUEID],
+    [QUEUENAME],
+    [SRC],
+    [ALERT],
+    [TIMEOUT],
+    [ALERT_PERSONAL],
+    [TIMEOUT_PERSONAL],
+    [ALERT_THIRDPARTY],
+    [TIMEOUT_THIRDPARTY],
+    [ALERT_RESEND],
+    [TIMEOUT_RESEND],
+    [ALERT_MAKER_QUEUE],
+    [ALERT_MAKER_PERSONAL],
+    [ALERT_CHECKER_QUEUE],
+    [ALERT_CHECKER_PERSONAL],
+    [ALERT_AMLOFFICER_QUEUE],
+    [ALERT_AMLOFFICER_PERSONAL],
+    [ALERT_AMLOFFICER2_QUEUE],
+    [ALERT_AMLOFFICER2_PERSONAL],
+    [DEL_FLAG],
+    [CREATEDBY],
+    [CREATEDDT],
+    [LASTUPDATEDBY],
+    [LASTUPDATEDDT],
+    [CREATEDDT_UTC],
+    [LASTUPDATEDDT_UTC],
+    [DailyBaseReview],
+    [MonthlyBaseReview],
+    [IsAutomated],
+    [IsIncludeAllBranch],
+    [IsAutoAssignForAllBranch],
+    [IncludeAllMsgType],
+    [IncludeAllAdditionalMsgType],
+    [AutoAssignForAllMsgType],
+    [AutoAssignForAllAdditionalMsgType],
+    [IsDefaultWorkgroup],
+    [IsSARCaseReporterGroup],
+    [IsEmployeeInd],
+    [IsAllowMakerCompleteFalseMatchCase]
+)
+SELECT
+    -- 核心：從目前最大號碼往後接續編號
+    @CurrentMaxID + ROW_NUMBER() OVER (ORDER BY TRY_CAST(CSV_QUEUEID AS INT), QUEUENAME) AS [QUEUEID],
+    
+    QUEUENAME,
+    NULLIF(SRC, 'NULL'),
+    NULLIF(ALERT, 'NULL'),
+    NULLIF(TIMEOUT, 'NULL'),
+    NULLIF(ALERT_PERSONAL, 'NULL'),
+    NULLIF(TIMEOUT_PERSONAL, 'NULL'),
+    NULLIF(ALERT_THIRDPARTY, 'NULL'),
+    NULLIF(TIMEOUT_THIRDPARTY, 'NULL'),
+    NULLIF(ALERT_RESEND, 'NULL'),
+    NULLIF(TIMEOUT_RESEND, 'NULL'),
+    NULLIF(ALERT_MAKER_QUEUE, 'NULL'),
+    NULLIF(ALERT_MAKER_PERSONAL, 'NULL'),
+    NULLIF(ALERT_CHECKER_QUEUE, 'NULL'),
+    NULLIF(ALERT_CHECKER_PERSONAL, 'NULL'),
+    NULLIF(ALERT_AMLOFFICER_QUEUE, 'NULL'),
+    NULLIF(ALERT_AMLOFFICER_PERSONAL, 'NULL'),
+    NULLIF(ALERT_AMLOFFICER2_QUEUE, 'NULL'),
+    NULLIF(ALERT_AMLOFFICER2_PERSONAL, 'NULL'),
+    NULLIF(DEL_FLAG, 'NULL'),
+    NULLIF(CREATEDBY, 'NULL'),
+    
+    -- 日期欄位清洗
+    TRY_CAST(NULLIF(CREATEDDT, 'NULL') AS DATETIME),
+    NULLIF(LASTUPDATEDBY, 'NULL'),
+    TRY_CAST(NULLIF(LASTUPDATEDDT, 'NULL') AS DATETIME),
+    TRY_CAST(NULLIF(CREATEDDT_UTC, 'NULL') AS DATETIME),
+    TRY_CAST(NULLIF(LASTUPDATEDDT_UTC, 'NULL') AS DATETIME),
+    
+    -- bit 欄位清洗 (處理 0/1, TRUE/FALSE 或 NULL 情況)
+    ISNULL(TRY_CAST(NULLIF(DailyBaseReview, 'NULL') AS BIT), 0),
+    ISNULL(TRY_CAST(NULLIF(MonthlyBaseReview, 'NULL') AS BIT), 0),
+    TRY_CAST(NULLIF(IsAutomated, 'NULL') AS BIT),
+    TRY_CAST(NULLIF(IsIncludeAllBranch, 'NULL') AS BIT),
+    TRY_CAST(NULLIF(IsAutoAssignForAllBranch, 'NULL') AS BIT),
+    TRY_CAST(NULLIF(IncludeAllMsgType, 'NULL') AS BIT),
+    TRY_CAST(NULLIF(IncludeAllAdditionalMsgType, 'NULL') AS BIT),
+    TRY_CAST(NULLIF(AutoAssignForAllMsgType, 'NULL') AS BIT),
+    TRY_CAST(NULLIF(AutoAssignForAllAdditionalMsgType, 'NULL') AS BIT),
+    TRY_CAST(NULLIF(IsDefaultWorkgroup, 'NULL') AS BIT),
+    ISNULL(TRY_CAST(NULLIF(IsSARCaseReporterGroup, 'NULL') AS BIT), 0),
+    ISNULL(TRY_CAST(NULLIF(IsEmployeeInd, 'NULL') AS BIT), 0),
+    TRY_CAST(NULLIF(IsAllowMakerCompleteFalseMatchCase, 'NULL') AS BIT)
+FROM #TempQueueCSV;
 
-ALTER TABLE [dbo].[WORKFLOW_MGMT_QUEUE] ADD  CONSTRAINT [df_WORKFLOW_MGMT_QUEUE_MonthlyBaseReview]  DEFAULT ('FALSE') FOR [MonthlyBaseReview]
-GO
+-- 4. 驗證新寫入的筆數與序號
+SELECT TOP 20 * 
+FROM [dbo].[WORKFLOW_MGMT_QUEUE]
+WHERE [QUEUEID] > @CurrentMaxID
+ORDER BY [QUEUEID] ASC;
 
-ALTER TABLE [dbo].[WORKFLOW_MGMT_QUEUE] ADD  CONSTRAINT [df_WORKFLOW_MGMT_QUEUE_IsSARCaseReporterGroup]  DEFAULT ((0)) FOR [IsSARCaseReporterGroup]
-GO
-
-ALTER TABLE [dbo].[WORKFLOW_MGMT_QUEUE] ADD  CONSTRAINT [df_WORKFLOW_MGMT_QUEUE_IsEmployeeInd]  DEFAULT ((0)) FOR [IsEmployeeInd]
-GO
-
-
-
-他有這些欄位
-我有個csv要匯入
-但csv的第一個欄位需要編碼 因為我不知道原本table 到哪裡了 所以不能用csv的值
-我該怎麼寫
+-- 5. 釋放暫存表
+DROP TABLE #TempQueueCSV;
