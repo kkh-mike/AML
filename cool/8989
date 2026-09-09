@@ -1,3 +1,8 @@
+
+="UPDATE [dbo].[BRANCH_DIM] SET [BRNCH_DESC] = N'" & C2 & "' WHERE [BRNCH_NBR] = '" & B2 & "';"
+
+
+
 USE [BSADBTW]
 GO
 
