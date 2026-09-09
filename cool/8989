@@ -1,54 +1,36 @@
-要保證資料不會被排程洗掉，最標準且不破壞系統機制的方法是將自己寫入排程的「來源資料表」。
-根據你前面截圖中的預存程序 WORKFLOW_AutomatedUSERS，排程同步的核心邏輯是：
-> 讀取 GCMAINDB.dbo.AutomatedEmployees 寫入暫存表，比對後更新/覆蓋本機表。
-> 
-因此，只要來源表有你的資料，每次排程執行時只會自動把你重新加進去，絕對不會被洗掉。
-步驟 1：先查看來源表需要填哪些欄位與格式
-執行以下查詢，參考別人是怎麼設定的：
-SELECT TOP 3 * 
-FROM GCMAINDB.dbo.AutomatedEmployees 
-WHERE BANKNO = REPLACE(DB_NAME(), 'BSADB', '');
-
-特別注意以下幾個關鍵欄位的填法：
- * CN：通常是員工編號（例如 '1141923'）
- * WORKGROUP：工作群組名稱（必須與 dbo.WORKFLOW_MGMT_QUEUE.QUEUENAME 完全一致，例如 '0900 CIP'）
- * ROLE：角色代碼（1: 經辦、2: 主管/Checker）
- * BANKNO：當前分行/資料庫代號（直接用 REPLACE(DB_NAME(), 'BSADB', '') 帶入即可）
- * 狀態標記欄位（如 DEL_FLAG 或 IS_ACTIVE，通常填 'N' 或 'Y'）
-步驟 2：直接寫入來源表 GCMAINDB.dbo.AutomatedEmployees
-確認欄位後，使用 INSERT 將自己加入來源表：
-INSERT INTO GCMAINDB.dbo.AutomatedEmployees (
-    CN,
-    WORKGROUP,
-    ROLE,
-    BANKNO,
-    BRANCH,         -- 若無分行代碼可給 '' 或 NULL (依步驟1查詢結果填寫)
-    DEL_FLAG        -- 若該表有刪除標記欄位，通常填 'N'
-    -- 依步驟 1 檢查是否有其他 NOT NULL 欄位需補齊
-)
-VALUES (
-    '1141923',
-    '0900 CIP',                                  -- 替換為你的目標群組名稱
-    2,                                           -- 1:經辦 / 2:主管(Checker)
-    REPLACE(DB_NAME(), 'BSADB', ''),             -- 自動帶入當前庫的 BANKNO
-    '',
-    'N'
-);
-
-步驟 3：立即驗證與手動觸發同步
-寫入來源表後，手動執行一次同步 SP，看看本機表有沒有順利被更新：
--- 1. 手動執行同步排程
-EXEC dbo.WORKFLOW_AutomatedUSERS;
-
--- 2. 驗證本機表是否成功建立
-SELECT 
-    q.QUEUENAME AS WorkGroup,
-    u.USERID,
-    u.ROLE AS ROLE_ID,
-    r.ROLE_DESC_zh_TW
-FROM dbo.WORKFLOW_MGMT_USERS u
-JOIN dbo.WORKFLOW_MGMT_QUEUE q ON u.QUEUEID = q.QUEUEID
-JOIN dbo.WORKFLOW_MGMT_ROLE r ON u.ROLE = r.ID
-WHERE u.USERID = '1141923';
-
-只要這裡能查出資料，未來不論排程跑多少次，資料都會被完整保留。
+這支預存程序的運作邏輯非常明確，可以拆解為 5 個核心階段：
+第一階段：決定「白名單」（誰應該留在群組內）
+程式先從當前資料庫名稱抓出銀行代號（例如 BSADBTW 去掉 BSADB 得到 TW），接著去中央庫 GCMAINDB.dbo.AutomatedEmployees 撈取名單塞入暫存表 WORKFLOW_MGMT_USERS_temp。
+人員要成功進入「白名單」，必須同時滿足以下全部條件：
+ * 員工的分行代號符合（A.BANKNO = @BankNo）。
+ * 員工的分行欄位不能為空（ISNULL(A.BRANCH, '') <> ''）。
+ * 員工所屬工作群組（WORKGROUP）與模組（MODULE）能精準對應到本地啟用的群組（B.IsAutomated = 'TRUE' 且 B.DEL_FLAG = 'N'）。
+ * 員工的角色代碼有效（存在於 WORKFLOW_MGMT_ROLE 且 FLAG = 'N'）。
+第二階段：檢查同步模式（全量 vs 部分同步）
+程式會去查控制參數表 dbo.PO_DIMDATA 的 IsFullUserList 欄位：
+ * 模式 A：IsFullUserList = 'N'（部分同步）
+   * 只比對與來源資料庫（GCMAINDB）模組相關、且標記為自動化的群組。
+ * 模式 B：其他情況（全量同步）
+   * 比對本地 WORKFLOW_MGMT_USERS 全部資料。
+第三階段：執行 MERGE 比對與汰除
+利用 MERGE 將目前的資料與第一階段的「白名單」進行比對：
+ * 白名單有，本地沒有： INSERT 新增該使用者，並標記 IsAutomated = 'TRUE'。
+ * 雙方都有，但本地未標記自動化： UPDATE 將其修正為 IsAutomated = 'TRUE'。
+ * 本地有，但白名單沒有： 只要該人員原先是 IsAutomated = 'TRUE'，就直接 DELETE 刪除。
+ * 稽核留存： 透過 OUTPUT 將所有新增與刪除的人員寫入歷史紀錄表 WORKFLOW_MGMT_USERS_HISTORY。
+第四階段：權限清理與補正
+ * 將被刪除人員寫入暫存清單 WORKFLOW_AutomatedDeletedUsers_temp。
+ * 從 WORKFLOW_MGMT_QUEUEACCESS 徹底拔除這些被刪除人員對該 Queue 的存取權限。
+ * 從 GCMAINDB.dbo.CTCBBankAdmins 撈出新的銀行管理員（IsNew = 1），主動補上所有 Queue 的存取權。
+第五階段：重置案件（避免案件成為孤兒）
+針對 7 大業務系統進行盤點重置：
+ * SWIFT（電文）
+ * FLRS（匯款）
+ * Outsource（委外）
+ * FedWire（美金匯款）
+ * NameCheck（姓名檢核）
+ * DBCheck（名單資料庫檢核）
+ * CIP / HighRisk / SAR / DWire / TradeFin（洗防風險評估、可疑交易、國內匯款、貿易融資等）
+對每個模組執行兩波處理：
+ * 人員被刪除的案件： 只要案件未結案（Status <> '3'），且經辦人（HandledBy）落在剛被刪除的人員名單中，系統強制將 HandledBy 改回 NULL、狀態（Status）改回 '1'（待處理）、動作碼設為 11（重置），並在各模組的 Log 表留下 System Admin 異動紀錄。
+ * 群組已停用的案件： 針對群組已標記刪除（DEL_FLAG = 'Y'）的案件，一併將 QueueID 與 HandledBy 清空，重回初始池。
