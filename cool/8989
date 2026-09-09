@@ -1,47 +1,41 @@
--- TRSF MTHLY SMRY
-INSERT  INTO dbo.TRSF_MTHLY_ACCT_SMRY
-        ( CIF_KEY ,
-          APPL ,
-          ACCT_KEY ,
-          YYYYMM ,
-          TRSFTTL ,
-          TRSFCRTTL ,
-          TRSFDRTTL ,
-          TRSFCNT ,
-          TRSFCRCNT ,
-          TRSFDRCNT ,
-          TRSFMIN ,
-          TRSFMAX ,
-          CRMIN ,
-          DRMIN ,
-          CRMAX ,
-          DRMAX
-        )
-        SELECT  B.NEW_CIF_KEY ,
-                APPL ,
-                ISNULL(C.FinalAcctKey, 'SK_' + A.ACCT_KEY) ,
-                YYYYMM ,
-                TTL ,
-                CRTTL ,
-                DRTTL ,
-                CNT ,
-                CRCNT ,
-                DRCNT ,
-                MIN ,
-                MAX ,
-                CRMIN ,
-                DRMIN ,
-                CRMAX ,
-                DRMAX
-        FROM    dbo.LoadTrxn_Migrate_buffer A
-                LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
-                INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
-        WHERE   TrxnType = 'TRSF MTHLY SMRY'
-                AND NOT EXISTS ( SELECT
-                                  1
-                                 FROM
-                                  dbo.TRSF_MTHLY_ACCT_SMRY Z
-                                 WHERE
-                                  Z.CIF_KEY = B.NEW_CIF_KEY
-                                  AND Z.YYYYMM = A.YYYYMM
-                                  AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, 'SK_' + A.ACCT_KEY) );
+--將圖片中的設定值：
+-- * @AcctMappingTable = BSADBTW..XREF
+-- * @AcctMappingSourceColumn = EXTN_REF_NO
+-- * @AcctMappingTargetColumn = INTN_REF_NO
+-- * @Prefix = SK_
+IF OBJECT_ID('tempdb..#TrxnAcctFinalMapping') IS NOT NULL
+    DROP TABLE #TrxnAcctFinalMapping;
+
+CREATE TABLE #TrxnAcctFinalMapping
+    (
+      SourceAcctKey NVARCHAR(100) ,
+      FinalAcctKey NVARCHAR(100)
+    );
+
+WITH MappedAccounts AS (
+    SELECT
+        A.ACCT_KEY AS SourceAcctKey,
+        COALESCE(M.INTN_REF_NO, 'SK_' + A.ACCT_KEY) AS FinalAcctKey,
+        ROW_NUMBER() OVER (PARTITION BY A.ACCT_KEY ORDER BY (SELECT 1)) AS rn
+    FROM dbo.LoadTrxn_Migrate_buffer A
+    LEFT JOIN BSADBTW..XREF M
+        ON M.EXTN_REF_NO = (
+            CASE 
+                WHEN LEN(A.ACCT_KEY) < 25 
+                THEN RIGHT(REPLICATE('0', 25) + A.ACCT_KEY, 25) 
+                ELSE A.ACCT_KEY 
+            END)
+)
+INSERT INTO #TrxnAcctFinalMapping (SourceAcctKey, FinalAcctKey)
+SELECT
+    SourceAcctKey,
+    FinalAcctKey
+FROM MappedAccounts
+WHERE rn = 1 
+  AND ISNULL(SourceAcctKey, '') <> '';
+
+CREATE CLUSTERED INDEX IX_SourceAcctKey ON #TrxnAcctFinalMapping(SourceAcctKey);
+
+
+我這段跑超久是慢再哪
+LoadTrxn_Migrate_buffer 數量有  189968006
