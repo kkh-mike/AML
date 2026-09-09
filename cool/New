@@ -1,0 +1,83 @@
+   IF @ModuleName = 'TRXN'
+   BEGIN
+        --CREATE CLUSTERED INDEX IX_LoadTrxn_CIF 
+        --ON dbo.LoadTrxn_Migrate_buffer (CIF_KEY);
+        
+        --CREATE INDEX IX_LoadTrxn_YYYYMM
+        --ON dbo.LoadTrxn_Migrate_buffer (YYYYMM);	
+        
+        --CREATE INDEX IX_LoadTrxn_ACCT_KEY 
+        --ON dbo.LoadTrxn_Migrate_buffer (ACCT_KEY);	
+        
+        IF OBJECT_ID('tempdb..#TrxnAcctFinalMapping') IS NOT NULL
+            DROP TABLE #TrxnAcctFinalMapping;
+
+        CREATE TABLE #TrxnAcctFinalMapping
+            (
+              SourceAcctKey NVARCHAR(100) ,
+              FinalAcctKey NVARCHAR(100)
+            );
+        
+        IF ISNULL(@AcctMappingTable, '') <> ''
+        BEGIN
+            -- 解析多段式名稱（如 BSADBTW..XREF），避免 QUOTENAME 將整段包成單一名稱
+            DECLARE @SafeMappingTable NVARCHAR(500);
+            SET @SafeMappingTable = 
+                CASE 
+                    WHEN PARSENAME(@AcctMappingTable, 4) IS NOT NULL THEN QUOTENAME(PARSENAME(@AcctMappingTable, 4)) + '.' ELSE '' END +
+                CASE 
+                    WHEN PARSENAME(@AcctMappingTable, 3) IS NOT NULL THEN QUOTENAME(PARSENAME(@AcctMappingTable, 3)) + '.' 
+                    WHEN PARSENAME(@AcctMappingTable, 4) IS NOT NULL THEN '.' ELSE '' END +
+                CASE 
+                    WHEN PARSENAME(@AcctMappingTable, 2) IS NOT NULL THEN QUOTENAME(PARSENAME(@AcctMappingTable, 2)) + '.' 
+                    WHEN PARSENAME(@AcctMappingTable, 3) IS NOT NULL OR PARSENAME(@AcctMappingTable, 4) IS NOT NULL THEN '.' ELSE '' END +
+                QUOTENAME(PARSENAME(@AcctMappingTable, 1));
+
+            SET @sql = N'
+            WITH MappedAccounts AS (
+                SELECT
+                    A.ACCT_KEY AS SourceAcctKey,
+                    -- 若有匹配到目標欄位則使用，否則補上前綴
+                    COALESCE(M.' + QUOTENAME(@AcctMappingTargetColumn) + N', 
+                             ISNULL(@Prefix, '''') + A.ACCT_KEY) AS FinalAcctKey,
+                    ROW_NUMBER() OVER (PARTITION BY A.ACCT_KEY ORDER BY (SELECT 1)) as rn
+                FROM dbo.LoadTrxn_Migrate_buffer A
+                LEFT JOIN ' + @SafeMappingTable + N' M
+                    ON M.' + QUOTENAME(@AcctMappingSourceColumn) + N' = (
+                        CASE 
+                            WHEN LEN(A.ACCT_KEY) < 25 
+                            THEN RIGHT(REPLICATE(''0'', 25) + A.ACCT_KEY, 25) 
+                            ELSE A.ACCT_KEY 
+                        END)
+            )
+            INSERT INTO #TrxnAcctFinalMapping (SourceAcctKey, FinalAcctKey)
+            SELECT
+                SourceAcctKey,
+                FinalAcctKey
+            FROM MappedAccounts
+            WHERE rn = 1 
+              AND ISNULL(SourceAcctKey, '''') <> '''';';
+
+            EXEC sp_executesql @sql, N'@Prefix NVARCHAR(50)', @Prefix = @Prefix;
+        END
+        ELSE
+        BEGIN
+            WITH PrefixedAccounts AS (
+                SELECT 
+                    ACCT_KEY AS SourceAcctKey,
+                    ISNULL(@Prefix, '') + ACCT_KEY AS FinalAcctKey,
+                    ROW_NUMBER() OVER (PARTITION BY ACCT_KEY ORDER BY (SELECT 1)) AS rn
+                FROM dbo.LoadTrxn_Migrate_buffer
+            )
+            INSERT INTO #TrxnAcctFinalMapping (SourceAcctKey, FinalAcctKey)
+            SELECT 
+                SourceAcctKey,
+                FinalAcctKey
+            FROM PrefixedAccounts
+            WHERE rn = 1
+              AND ISNULL(SourceAcctKey, '') <> '';                        
+        END
+
+        CREATE CLUSTERED INDEX IX_SourceAcctKey ON #TrxnAcctFinalMapping(SourceAcctKey);
+        -- WIRE MTHLY FACT
+   END
