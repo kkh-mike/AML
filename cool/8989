@@ -1,47 +1,51 @@
--- DCD MTHLY SMRY
-INSERT  INTO dbo.DCD_MTHLY_ACCT_SMRY
-        ( CIF_KEY ,
-          APPL ,
-          ACCT_KEY ,
-          YYYYMM ,
-          DCDTTL ,
-          DCDCRTTL ,
-          DCDDRTTL ,
-          DCDCNT ,
-          DCDCRCNT ,
-          DCDDRCNT ,
-          DCDMIN ,
-          DCDMAX ,
-          CRMIN ,
-          DRMIN ,
-          CRMAX ,
-          DRMAX
-        )
-        SELECT  B.NEW_CIF_KEY ,
-                APPL ,
-                ISNULL(C.FinalAcctKey, 'SK_' + A.ACCT_KEY) ,
-                YYYYMM ,
-                TTL ,
-                CRTTL ,
-                DRTTL ,
-                CNT ,
-                CRCNT ,
-                DRCNT ,
-                MIN ,
-                MAX ,
-                CRMIN ,
-                DRMIN ,
-                CRMAX ,
-                DRMAX
-        FROM    dbo.LoadTrxn_Migrate_buffer A
-                LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
-                INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
-        WHERE   TrxnType = 'DCD MTHLY SMRY'
-                AND NOT EXISTS ( SELECT
-                                  1
-                                 FROM
-                                  dbo.DCD_MTHLY_ACCT_SMRY Z
-                                 WHERE
-                                  Z.CIF_KEY = B.NEW_CIF_KEY
-                                  AND Z.YYYYMM = A.YYYYMM 
-                                  AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, 'SK_' + A.ACCT_KEY) );
+  -- TRSF MTHLY SMRY
+                            INSERT  INTO dbo.TRSF_MTHLY_ACCT_SMRY
+                                    ( CIF_KEY ,
+                                      APPL ,
+                                      ACCT_KEY ,
+                                      YYYYMM ,
+                                     TRSFTTL ,
+                                      TRSFCRTTL ,
+                                      TRSFDRTTL ,
+                                      TRSFCNT ,
+                                      TRSFCRCNT ,
+                                      TRSFDRCNT ,
+                                      TRSFMIN ,
+                                      TRSFMAX ,
+                                      CRMIN ,
+                                      DRMIN ,
+                                      CRMAX ,
+                                      DRMAX
+                                    )
+                                    SELECT  B.NEW_CIF_KEY ,
+                                            APPL ,
+                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
+                                            YYYYMM ,
+                                            TTL ,
+                                            CRTTL ,
+                                            DRTTL ,
+                                            CNT ,
+                                            CRCNT ,
+                                            DRCNT ,
+                                            MIN ,
+                                            MAX ,
+                                            CRMIN ,
+                                            DRMIN ,
+                                            CRMAX ,
+                                            DRMAX
+                                    FROM    dbo.LoadTrxn_Migrate_buffer A
+											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
+                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+                                    WHERE   TrxnType = 'TRSF MTHLY SMRY'
+                                            AND NOT EXISTS ( SELECT
+                                                              1
+                                                             FROM
+                                                              dbo.TRSF_MTHLY_ACCT_SMRY Z
+                                                             WHERE
+                                                              Z.CIF_KEY = B.NEW_CIF_KEY
+                                                              AND Z.YYYYMM = A.YYYYMM
+                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+
+
+
+幫我改
