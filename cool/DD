@@ -1,9 +1,7 @@
-測試結果摘要
-Name 相同時，我測試了 Chinese Name 或 Address 欄位有差異時才會判定為新資料並寫入；
-若僅有 Source 欄位不同，則不會重複新增。
-
-
-我不要寫死
-因為我沒看到code
-
-我只有測試source chinese name 跟address
+Dear 鈺婷,
+針對目前測試的幾個欄位，初步驗證 AML 系統寫入 Internal List 的行為如下：
+在 Name 相同 的情況下：
+ * Source 不同：測試結果不會新增資料。
+ * Chinese Name 或 Address 不同：測試結果會新增一筆。
+目前僅先針對這三個欄位進行黑箱測試（尚未核對底層 Code 完整判定邏輯），先同步此現象給妳參考，謝謝！
+Mike
