@@ -1,12 +1,10 @@
-
-
 /*
-拷貝別人的權限
+拷貝別人的權限（差集補齊）
 */
 BEGIN TRAN;
 
-DECLARE @NewUser NVARCHAR(60) = '922798';   -- 新同仁工號
-DECLARE @SampleUser NVARCHAR(60) = '1091707'; -- 範本同仁工號
+DECLARE @TargetUser NVARCHAR(60) = '922798';   -- 目標同仁工號（已存在舊權限）
+DECLARE @SampleUser NVARCHAR(60) = '1091707';  -- 範本同仁工號
 
 INSERT INTO dbo.WORKFLOW_MGMT_USERS (
     QUEUEID, 
@@ -17,32 +15,28 @@ INSERT INTO dbo.WORKFLOW_MGMT_USERS (
     IsAutomated
 )
 SELECT 
-    QUEUEID, 
-    @NewUser, 
-    ROLE, 
-    ALERTMAIN, 
-    ALERTPERSONAL, 
-    'FALSE' -- 核心關鍵：設為 FALSE，確保排程 MERGE 時永不被自動刪除
-FROM dbo.WORKFLOW_MGMT_USERS
-WHERE USERID = @SampleUser
+    src.QUEUEID, 
+    @TargetUser, 
+    src.ROLE, 
+    src.ALERTMAIN, 
+    src.ALERTPERSONAL, 
+    'FALSE' -- 設為 FALSE，確保排程 MERGE 時不被自動刪除
+FROM dbo.WORKFLOW_MGMT_USERS AS src
+WHERE src.USERID = @SampleUser
   AND NOT EXISTS (
-      SELECT 1 FROM dbo.WORKFLOW_MGMT_USERS 
-      WHERE USERID = @NewUser 
-        AND QUEUEID = dbo.WORKFLOW_MGMT_USERS.QUEUEID 
-        AND ROLE = dbo.WORKFLOW_MGMT_USERS.ROLE
+      -- 檢查目標同仁是否已有相同的 QUEUEID 與 ROLE
+      SELECT 1 
+      FROM dbo.WORKFLOW_MGMT_USERS AS chk
+      WHERE chk.USERID = @TargetUser 
+        AND chk.QUEUEID = src.QUEUEID 
+        AND chk.ROLE = src.ROLE
   );
 
--- 檢查新增筆數與內容
-SELECT * FROM dbo.WORKFLOW_MGMT_USERS WHERE USERID = @NewUser;
+-- 檢查最終該員擁有的所有工作群組權限
+SELECT * 
+FROM dbo.WORKFLOW_MGMT_USERS 
+WHERE USERID = @TargetUser;
 
 -- 檢查無誤執行 COMMIT 存檔；若有異常反白執行 ROLLBACK 取消
 COMMIT TRAN;
 -- ROLLBACK TRAN;
-
-
-
-幫我修改一下
-
-因為現在的922798 不是新同事  他裡面可能已經有一些工作群組
-
-我要對照1091707 的工作群組 如果沒有的要寫入 
