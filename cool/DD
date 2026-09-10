@@ -1,148 +1,237 @@
-直接將組態檔（Config）中對應的參數帶入，即可獨立在 SSMS 執行並精確計時：
-SET NOCOUNT ON;
 
--- 1. 依據你的 Config 設定對應變數
-DECLARE @ModuleName NVARCHAR(50) = 'TRXN';
-DECLARE @AcctMappingTable NVARCHAR(128) = 'XREF';
-DECLARE @AcctMappingSourceColumn NVARCHAR(128) = 'EXTN_REF_NO';
-DECLARE @AcctMappingTargetColumn NVARCHAR(128) = 'INTN_REF_NO';
-DECLARE @Prefix NVARCHAR(50) = 'SK_';
-DECLARE @sql NVARCHAR(MAX);
 
--- 計時專用變數
-DECLARE @t_start DATETIME2 = SYSDATETIME();
-DECLARE @t_mapping_done DATETIME2;
-DECLARE @t_insert_done DATETIME2;
+ /*
+        ============================================================
+		tempdb..#tempDJBlacklistDetailsSCO
+		
+        第二段：制裁控制與實質所有權名單（Sanctions Control & Ownership, SCO）
+        目標表：BSADBTW.dbo.OFAC_SPEC（固定 GROUPID = 27）
+        稽核表：BSADBTW.dbo.OFAC_SPEC_LOG
+        備註：2025/12/19 IT20202509021049 拆分 Dow Jones SCO 名單
+        ============================================================
+    */
 
--- 2. 開啟交易（測試結束自動 ROLLBACK，不污染正式資料）
-BEGIN TRANSACTION;
+    IF OBJECT_ID('tempdb..#tempDJBlacklistSCO') IS NOT NULL
+        DROP TABLE #tempDJBlacklistSCO
+    IF OBJECT_ID('tempdb..#tempDJBlacklistDetailsSCO') IS NOT NULL
+        DROP TABLE #tempDJBlacklistDetailsSCO
 
--- =======================================================
--- 階段 A: 產生暫存 Mapping 表 (#TrxnAcctFinalMapping)
--- =======================================================
-IF OBJECT_ID('tempdb..#TrxnAcctFinalMapping') IS NOT NULL
-    DROP TABLE #TrxnAcctFinalMapping;
-
-CREATE TABLE #TrxnAcctFinalMapping
-(
-    SourceAcctKey NVARCHAR(100),
-    FinalAcctKey NVARCHAR(100)
-);
-
-IF ISNULL(@AcctMappingTable, '') <> ''
-BEGIN
-    SET @sql = '
-    WITH MappedAccounts AS (
-        SELECT
-            A.ACCT_KEY AS SourceAcctKey,
-            COALESCE(M.' + QUOTENAME(@AcctMappingTargetColumn) + ', 
-                     ''' + ISNULL(@Prefix, '') + ''' + A.ACCT_KEY) AS FinalAcctKey,
-            ROW_NUMBER() OVER (PARTITION BY A.ACCT_KEY ORDER BY (SELECT 1)) as rn
-        FROM dbo.LoadTrxn_Migrate_buffer A
-        LEFT JOIN ' + QUOTENAME(@AcctMappingTable) + ' M
-            ON M.' + QUOTENAME(@AcctMappingSourceColumn) + ' = (
-                CASE 
-                    WHEN LEN(A.ACCT_KEY) < 25 
-                    THEN RIGHT(REPLICATE(''0'', 25) + A.ACCT_KEY, 25) 
-                    ELSE A.ACCT_KEY 
-                END)
+    CREATE TABLE #tempDJBlacklistSCO (
+        EntNum INT NOT NULL, 
+        SdnName NVARCHAR(350) NOT NULL, 
+        UpdatedDate VARCHAR(8) NOT NULL
     )
-    INSERT INTO #TrxnAcctFinalMapping (SourceAcctKey, FinalAcctKey)
-    SELECT
-        SourceAcctKey,
-        FinalAcctKey
-    FROM MappedAccounts
-    WHERE rn = 1 
-      AND ISNULL(SourceAcctKey, '''') <> '''';';
 
-    EXEC sp_executesql @sql;
-END
-ELSE
-BEGIN
-    WITH PrefixedAccounts AS (
-        SELECT   
-            ACCT_KEY AS SourceAcctKey,
-            ISNULL(@Prefix, '') + ACCT_KEY AS FinalAcctKey,
-            ROW_NUMBER() OVER (PARTITION BY ACCT_KEY ORDER BY (SELECT 1)) AS rn
-        FROM dbo.LoadTrxn_Migrate_buffer
+    CREATE TABLE #tempDJBlacklistDetailsSCO(
+        Num INT,
+        EntNum INT NOT NULL, 
+        SdnName NVARCHAR(350) NOT NULL, 
+        UpdatedDate VARCHAR(8) NOT NULL, 
+        Address NVARCHAR(400), 
+        City NVARCHAR(200), 
+        Country NVARCHAR(100), 
+        IdentType VARCHAR(2), 
+        IdentNumber NVARCHAR(44), 
+        DOB VARCHAR(8)
     )
-    INSERT INTO #TrxnAcctFinalMapping (SourceAcctKey, FinalAcctKey)
-    SELECT SourceAcctKey, FinalAcctKey
-    FROM PrefixedAccounts
-    WHERE rn = 1 
-      AND ISNULL(SourceAcctKey, '') <> '';                        
-END
+        
+    -- 2-1. 篩選 OFAC/EU 股權大於50% (Majority Owned) 或具控制力 (Control) 的活躍實體名單
+    INSERT INTO #tempDJBlacklistSCO (EntNum, SdnName, UpdatedDate )
+    SELECT  C.EntNum, C.SdnName, MAX(C.UpdatedDate) AS UpdatedDate 
+    FROM BSADB.dbo.DJ_Entity A 
+    JOIN BSADB.dbo.DJ_ListCategory B ON A.EntityId = B.EntityId
+    JOIN DJ_List_Data_A C ON A.EntityId = C.EntNum
+    LEFT JOIN DJ_AltName D ON C.EntNum = D.EntityId AND C.AltNum = D.AltNameId
+    WHERE A.PersonStatus <> 'Inactive' 
+      AND B.Description3 IN (
+        'OFAC Related - Majority Owned',
+        'OFAC Related – Control',
+        'OFAC - Regional Sanctions Related - Majority Owned',
+        'OFAC - Regional Sanctions Related - Control',
+        'EU Related - Majority Owned',
+        'EU Related - Control',
+        'EU - Regional Sanctions Related - Majority Owned',
+        'EU - Regional Sanctions Related – Control'
+      ) 
+      AND ISNULL(D.NameSubType,'') <> 'OSN'
+      AND B.Deleted = 0
+    GROUP BY C.EntNum, C.SdnName 
 
-CREATE CLUSTERED INDEX IX_SourceAcctKey ON #TrxnAcctFinalMapping(SourceAcctKey);
+    -- 2-2. 彙整制裁清單參考資訊 (SanctionListReference)，若字數超過 400 字則以通用提示取代
+    IF OBJECT_ID('tempdb..#DJ_SanctionListReference') IS NOT NULL
+        DROP TABLE #DJ_SanctionListReference
 
-SET @t_mapping_done = SYSDATETIME();
+    SELECT  T.EntityId,
+        STUFF((
+            SELECT ';' + t2.SanctionListReference
+            FROM DJ_SanctionListReference t2
+            WHERE T2.EntityId = T.EntityId
+            FOR XML PATH(''), TYPE
+        ).value('.', 'nvarchar(max)'), 1, 1, '') AS SanctionListReference
+    INTO #DJ_SanctionListReference
+    FROM DJ_SanctionListReference t
+    GROUP BY T.EntityId;
+    
+    UPDATE #DJ_SanctionListReference
+    SET SanctionListReference = 'Visit the Dow Jones for further information'
+    WHERE LEN(SanctionListReference) >= 400
 
--- =======================================================
--- 階段 B: 寫入目標彙總表 (TTL_MTHLY_ACCT_SMRY)
--- =======================================================
-INSERT INTO dbo.TTL_MTHLY_ACCT_SMRY
-(
-    CIF_KEY,
-    APPL,
-    ACCT_KEY,
-    YYYYMM,
-    TTL,
-    CRTTL,
-    DRTTL,
-    CNT,
-    CRCNT,
-    DRCNT,
-    MIN,
-    MAX,
-    CRMIN,
-    DRMIN,
-    CRMAX,
-    DRMAX
-)
-SELECT  
-    B.NEW_CIF_KEY,
-    A.APPL,
-    ISNULL(C.FinalAcctKey, ISNULL(@Prefix, '') + A.ACCT_KEY),
-    A.YYYYMM,
-    A.TTL,
-    A.CRTTL,
-    A.DRTTL,
-    A.CNT,
-    A.CRCNT,
-    A.DRCNT,
-    A.MIN,
-    A.MAX,
-    A.CRMIN,
-    A.DRMIN,
-    A.CRMAX,
-    A.DRMAX
-FROM dbo.LoadTrxn_Migrate_buffer A
-LEFT JOIN #TrxnAcctFinalMapping C 
-    ON A.ACCT_KEY = C.SourceAcctKey
-INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B 
-    ON A.CIF_KEY = B.SOURCE_CIF_KEY
-WHERE A.TrxnType = 'TTL MTHLY SMRY'
-  AND NOT EXISTS (
-      SELECT 1
-      FROM dbo.TTL_MTHLY_ACCT_SMRY Z
-      WHERE Z.CIF_KEY = B.NEW_CIF_KEY
-        AND Z.YYYYMM = A.YYYYMM 
-        AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix, '') + A.ACCT_KEY)
-  );
+    -- 2-3. 將制裁參考資料作為 Address 填入，並比對目前目標表已存在的 ent_num
+    ;WITH TempAddress AS (
+        SELECT A.EntityId, A.SanctionListReference, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.EntityId) 'RowId'
+        FROM #DJ_SanctionListReference A WITH(NOLOCK) 
+        WHERE EXISTS(SELECT 1 FROM #tempDJBlacklistSCO X WHERE A.EntityId = X.EntNum)
+    ), TempNUM AS (
+        SELECT A.spec_name, A.remark, A.ent_num
+        FROM BSADBTW..OFAC_SPEC A 
+        WHERE A.GROUPID = 27 AND A.DInd = 'N'
+    )
+    INSERT INTO #tempDJBlacklistDetailsSCO (Num, EntNum, SdnName, UpdatedDate, Address)
+    SELECT E.ent_num, A.EntNum, A.SdnName, A.UpdatedDate, B.SanctionListReference
+    FROM #tempDJBlacklistSCO A 
+        LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1 
+        LEFT JOIN TempNUM E ON A.EntNum = E.remark AND A.SdnName = E.spec_name
 
-DECLARE @InsertedCount INT = @@ROWCOUNT;
-SET @t_insert_done = SYSDATETIME();
+    -- 2-4. 自動編號：為新名單循序指派新的 ent_num
+    DECLARE @MAXNo INT
+    SELECT @MAXNo = MAX(ent_num) FROM BSADBTW..OFAC_SPEC
 
--- 3. 測試完成直接回滾（如果要正式保留請改為 COMMIT TRANSACTION）
-ROLLBACK TRANSACTION;
+    UPDATE #tempDJBlacklistDetailsSCO
+    SET @MAXNo = @MAXNo + 1, Num = @MAXNo
+    WHERE Num IS NULL
 
--- 4. 統計耗時報表
-SELECT 
-    @InsertedCount AS [預計寫入筆數],
-    DATEDIFF(SECOND, @t_start, @t_mapping_done) AS [Mapping耗時(秒)],
-    DATEDIFF(SECOND, @t_mapping_done, @t_insert_done) AS [純Insert耗時(秒)],
-    DATEDIFF(SECOND, @t_start, @t_insert_done) AS [總耗時(秒)];
+    -- 2-5. MERGE 同步 SCO 名單至 BSADBTW..OFAC_SPEC (GROUPID = 27)
+    ;WITH TargetTable AS (
+        SELECT A.spec_name, A.updated_date, A.remark, A.TaxID, A.IDENT, A.IDENTO, A.TaxIDCD, A.IDNUM, A.issBy, A.DInd, A.creUserID, A.STATE, A.ADDRESS, A.COUNTRY,
+                A.GROUPID, A.SOURCE, A.EnterFlag, A.ApprovedBy, A.ApprovedDate, A.DelUserID, A.DelDate, A.ApproveDelUserID, A.ApproveDelDate, A.creDate,
+                A.updated_date_UTC, A.ApprovedDate_UTC, A.DelDate_UTC, A.ApproveDelDate_UTC, A.creDate_UTC, A.ent_num, A.DOB
+        FROM BSADBTW..OFAC_SPEC A WHERE A.GROUPID = 27
+    )
+    MERGE TargetTable T
+    USING (SELECT NUM, EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB FROM #tempDJBlacklistDetailsSCO) S
+    ON T.spec_name = S.SdnName AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+    WHEN NOT MATCHED BY TARGET THEN
+        INSERT (spec_name,updated_date,remark,TaxID,IDENT,IDENTO,TaxIDCD,IDNUM,IssBy,DInd,
+                creUserID,STATE,ADDRESS,COUNTRY,GROUPID,SOURCE,EnterFlag,ApprovedBy,ApprovedDate,DelUserID,
+                DelDate,ApproveDelUserID,ApproveDelDate,creDate,updated_date_UTC,ApprovedDate_UTC,DelDate_UTC,ApproveDelDate_UTC,creDate_UTC,
+                ent_num,DOB)
+        VALUES(S.SdnName, S.UpdatedDate, EntNum, '', S.IdentType, S.IdentNumber, '', '', '', 'N', 
+                'System Admin', ISNULL(S.City,''), S.Address, S.Country, '27', 'Sanctions Control Ownership', 'D', 'System Admin', GETDATE(), NULL, 
+                NULL, NULL, NULL, GETDATE(), GETUTCDATE(), GETUTCDATE(), NULL, NULL, GETUTCDATE(), S.Num,
+                S.DOB)
+    WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN 
+        UPDATE SET T.DInd = 'Y', T.DelUserID = 'System Admin', T.DelDate = GETDATE(), T.ApproveDelUserID = 'System Admin', T.ApproveDelDate = GETDATE(),
+                T.DelDate_UTC = GETUTCDATE()
+    WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN 
+        UPDATE SET T.DInd = 'N', T.updated_date = S.UpdatedDate, T.DelUserID = NULL, T.DelDate = NULL, T.ApproveDelUserID = NULL, T.ApproveDelDate = NULL,
+                T.DelDate_UTC = NULL, T.EnterFlag = 'D', T.updated_date_UTC = GETUTCDATE(),
+                T.ADDRESS = S.ADDRESS, T.STATE = ISNULL(S.City,''), T.COUNTRY = S.Country, T.IDENT = S.IdentType, T.IDNUM = S.IdentNumber, T.DOB = S.DOB
+    OUTPUT CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ent_num ELSE Deleted.ent_num END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.spec_name ELSE Deleted.spec_name END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date ELSE Deleted.updated_date END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.remark ELSE Deleted.remark END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.taxid ELSE Deleted.taxid END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENT ELSE Deleted.IDENT END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENTO ELSE Deleted.IDENTO END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.TaxIDCD ELSE Deleted.TaxIDCD END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDNUM ELSE Deleted.IDNUM END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.issby ELSE Deleted.issby END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DInd ELSE Deleted.DInd END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creUserID ELSE Deleted.creUserID END,
+        CASE WHEN $ACTION IN ('INSERT') THEN 'System Admin' ELSE 'System Admin' END,
+        CASE WHEN $ACTION IN ('INSERT') THEN GETUTCDATE() ELSE GETUTCDATE() END,        
+        CASE WHEN $ACTION = 'INSERT' OR ($ACTION = 'UPDATE' AND Deleted.DInd = 'Y' AND Inserted.DInd = 'N') THEN '01' 
+             WHEN $ACTION = 'UPDATE' AND Inserted.DInd = 'Y' THEN '03' 
+             ELSE '02' END, 
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ADDRESS ELSE Deleted.ADDRESS END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.STATE ELSE Deleted.STATE END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.COUNTRY ELSE Deleted.COUNTRY END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.GROUPID ELSE Deleted.GROUPID END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.SOURCE ELSE Deleted.SOURCE END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.EnterFlag ELSE Deleted.EnterFlag END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedBy ELSE Deleted.ApprovedBy END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate ELSE Deleted.ApprovedDate END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelUserID ELSE Deleted.DelUserID END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate ELSE Deleted.DelDate END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelUserID ELSE Deleted.ApproveDelUserID END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate ELSE Deleted.ApproveDelDate END,
+        CASE WHEN $ACTION IN ('INSERT') THEN GETUTCDATE() ELSE GETUTCDATE() END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate_UTC ELSE Deleted.ApprovedDate_UTC END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate_UTC ELSE Deleted.DelDate_UTC END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate_UTC ELSE Deleted.ApproveDelDate_UTC END,
+        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DOB ELSE Deleted.DOB END
+    INTO BSADBTW.dbo.OFAC_SPEC_LOG (ent_num, spec_name, updated_date, remark, TaxID, IDENT, IDENTO,
+        TaxIDCD, IDNUM, IssBy, DInd, creUserID, UserID, ActionDT, ActionCD, Address, State, Country, GROUPID, SOURCE, EnterFlag,
+        ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, ActionDT_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC,
+        DOB);
 
-測試效能排查重點：
- * NOT EXISTS 瓶頸： 若 dbo.TTL_MTHLY_ACCT_SMRY 原本已存在大量歷史資料，NOT EXISTS 查詢條件 (CIF_KEY, YYYYMM, ACCT_KEY) 若在該表上缺乏複合索引（Composite Index），會對目標表進行多次 Index Scan / Table Scan。
- * 來源表索引影響： dbo.LoadTrxn_Migrate_buffer 先前註解掉的 CREATE INDEX，會影響 WHERE TrxnType = 'TTL MTHLY SMRY' 以及與 CIF_Migrate_Mapping_TEMP 的 Join 效能。若執行時間遠超預期，取消註解那幾組索引可大幅降低 I/O 成本。
+
+
+
+
+我要把 BSADBTW..OFAC_SPEC 改成  BSADB.dbo.OFAC_GLSpec
+
+
+這是 BSADB.dbo.OFAC_GLSpec 的規格給你參考一下 
+Name	Owner	Type	Created_datetime
+OFAC_GLSpec	dbo	user table	2016-02-26 16:22:14.760
+
+
+Column_name	Type	Computed	Length	Prec	Scale	Nullable	TrimTrailingBlanks	FixedLenNullInSource	Collation
+spec_name	nvarchar	no	1020	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+updated_date	nvarchar	no	40	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+remark	nvarchar	no	4000	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+TaxID	nvarchar	no	40	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+IDENT	nvarchar	no	4	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+IDENTO	nvarchar	no	160	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+TaxIDCD	nvarchar	no	4	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+IDNUM	nvarchar	no	88	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+IssBy	nvarchar	no	8	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+DInd	nvarchar	no	4	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+creUserID	nvarchar	no	200	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+STATE	nvarchar	no	400	     	     	no	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+ADDRESS	nvarchar	no	800	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+COUNTRY	nvarchar	no	200	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+GROUPID	bigint	no	8	19   	0    	yes	(n/a)	(n/a)	NULL
+SOURCE	nvarchar	no	2000	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+EnterFlag	char	no	1	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+ApprovedBy	nvarchar	no	120	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+ApprovedDate	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+DelUserID	nvarchar	no	120	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+DelDate	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+ApproveDelUserID	nvarchar	no	120	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+ApproveDelDate	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+creDate	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+updated_date_UTC	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+ApprovedDate_UTC	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+DelDate_UTC	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+ApproveDelDate_UTC	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+creDate_UTC	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+ent_num	bigint	no	8	19   	0    	no	(n/a)	(n/a)	NULL
+spec_name_cn	nvarchar	no	510	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+BatchID	uniqueidentifier	no	16	     	     	yes	(n/a)	(n/a)	NULL
+ISSBY_STATE	varchar	no	2	     	     	yes	no	yes	Chinese_Taiwan_Stroke_CI_AS
+DOB	nvarchar	no	16	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+ApproveEditUserID	nvarchar	no	120	     	     	yes	(n/a)	(n/a)	Chinese_Taiwan_Stroke_CI_AS
+ApproveEditDate	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+ApproveEditDate_UTC	datetime	no	8	     	     	yes	(n/a)	(n/a)	NULL
+
+
+
+Identity	Seed	Increment	Not For Replication
+ent_num	1	1	0
+
+
+RowGuidCol
+No rowguidcol column defined.
+
+Data_located_on_filegroup
+PRIMARY
+
+
+
+index_name	index_description	index_keys
+IDX_OFAC_GLSpec_BATCHID	nonclustered located on PRIMARY	BatchID
+idx_OFAC_GLSpec_DInd_ent_num	nonclustered located on PRIMARY	DInd, ent_num
+
+
