@@ -1,11 +1,12 @@
-SELECT 
+	
+
+  SELECT 
     -- 1. DJ 來源端的死亡名單總數
     (
         SELECT COUNT(DISTINCT A.EntityId)
         FROM BSADB.dbo.DJ_Entity A
         JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE A.Deceased = 1
-          AND B.SanctionListReference LIKE '%Japanese Finance%'
+        WHERE  B.SanctionListReference LIKE '%Japanese Finance%'
     ) AS [DJ死亡名單總數],
 
     -- 2. 實際上真的有進到目標表的死亡名單數
@@ -16,7 +17,6 @@ SELECT
         JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
         WHERE T.GROUPID = 5
           AND T.DInd = 'N'
-          AND A.Deceased = 1
           AND B.SanctionListReference LIKE '%Japanese Finance%'
     ) AS [已在目標表中的死亡名單數],
 
@@ -25,8 +25,7 @@ SELECT
         SELECT COUNT(DISTINCT A.EntityId)
         FROM BSADB.dbo.DJ_Entity A
         JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE A.Deceased = 1
-          AND B.SanctionListReference LIKE '%Japanese Finance%'
+        WHERE  B.SanctionListReference LIKE '%Japanese Finance%'
     )
     -
     (
@@ -36,6 +35,19 @@ SELECT
         JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
         WHERE T.GROUPID = 5
           AND T.DInd = 'N'
-          AND A.Deceased = 1
           AND B.SanctionListReference LIKE '%Japanese Finance%'
     ) AS [差額_漏掉筆數];
+
+
+如果我現在這樣
+
+DJ死亡名單總數	已在目標表中的死亡名單數	差額_漏掉筆數
+3673	3672	1
+
+
+差1
+
+我要怎麼找出原因
+
+
+
