@@ -1,39 +1,41 @@
-直接用以下這段查詢，一次比對「已寫入數量」與「DJ符合條件的實際數量」：
 SELECT 
-    -- 1. 目前已成功寫入目標表且有效的數量
-    (
-        SELECT COUNT(DISTINCT T.remark)
-        FROM BSADBJP..OFAC_SPEC T
-        WHERE T.GROUPID = 5
-          AND T.DInd = 'N'
-    ) AS [目標表_已寫入有效筆數],
-
-    -- 2. DJ 來源端符合條件的總人數 (Deceased=1 且 Japanese Finance)
+    -- 1. DJ 來源端的死亡名單總數
     (
         SELECT COUNT(DISTINCT A.EntityId)
         FROM BSADB.dbo.DJ_Entity A
         JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
         WHERE A.Deceased = 1
           AND B.SanctionListReference LIKE '%Japanese Finance%'
-    ) AS [DJ來源_符合條件總筆數];
+    ) AS [DJ死亡名單總數],
 
-結果判定
- * 兩邊數字一樣：代表來源端所有死亡名單都已完整寫入。
- * 目標表比來源少：代表有資料漏寫或被標記為刪除 (DInd = 'Y')。
-若數字對不起來，查「哪幾筆沒寫入」
-執行這段即可抓出「DJ 有符合條件，但目標表裡卻沒有」的名單：
-SELECT 
-    A.EntityId, 
-    A.FullName
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-WHERE A.Deceased = 1
-  AND B.SanctionListReference LIKE '%Japanese Finance%'
-  AND NOT EXISTS (
-      SELECT 1 
-      FROM BSADBJP..OFAC_SPEC T 
-      WHERE T.GROUPID = 5 
-        AND T.DInd = 'N'
-        AND T.remark = CAST(A.EntityId AS VARCHAR(100))
-  );
+    -- 2. 實際上真的有進到目標表的死亡名單數
+    (
+        SELECT COUNT(DISTINCT T.remark)
+        FROM BSADBJP..OFAC_SPEC T
+        JOIN BSADB.dbo.DJ_Entity A ON T.remark = CAST(A.EntityId AS VARCHAR(100))
+        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+        WHERE T.GROUPID = 5
+          AND T.DInd = 'N'
+          AND A.Deceased = 1
+          AND B.SanctionListReference LIKE '%Japanese Finance%'
+    ) AS [已在目標表中的死亡名單數],
 
+    -- 3. 兩者相減：若是 0 就代表「全部都在裡面，一個沒漏」
+    (
+        SELECT COUNT(DISTINCT A.EntityId)
+        FROM BSADB.dbo.DJ_Entity A
+        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+        WHERE A.Deceased = 1
+          AND B.SanctionListReference LIKE '%Japanese Finance%'
+    )
+    -
+    (
+        SELECT COUNT(DISTINCT T.remark)
+        FROM BSADBJP..OFAC_SPEC T
+        JOIN BSADB.dbo.DJ_Entity A ON T.remark = CAST(A.EntityId AS VARCHAR(100))
+        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+        WHERE T.GROUPID = 5
+          AND T.DInd = 'N'
+          AND A.Deceased = 1
+          AND B.SanctionListReference LIKE '%Japanese Finance%'
+    ) AS [差額_漏掉筆數];
