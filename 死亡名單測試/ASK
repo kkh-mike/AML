@@ -1,34 +1,39 @@
+直接用以下這段查詢，一次比對「已寫入數量」與「DJ符合條件的實際數量」：
 SELECT 
-    T.ent_num,
-    T.spec_name          AS [OFAC_SPEC姓名],
-    E.FullName           AS [DJ原始姓名],
-    T.remark             AS [OFAC_SPEC_EntityId],
-    E.EntityId           AS [DJ_EntityId],
-    E.Deceased           AS [是否死亡(1=是)],
-    R.SanctionListReference AS [命中制裁名單],
-    T.updated_date       AS [OFAC更新日期],
-    CONVERT(VARCHAR, E.UpdatedDate_UTC, 112) AS [DJ轉UTC更新日],
-    T.DInd               AS [有效註記(N為有效)],
-    T.SOURCE             AS [來源標記],
-    T.creDate            AS [寫入時間]
-FROM BSADBJP..OFAC_SPEC T
--- 關聯 DJ 主檔（remark 存的是 EntityId）
-JOIN BSADB.dbo.DJ_Entity E 
-    ON CAST(E.EntityId AS VARCHAR(100)) = T.remark
--- 關聯 DJ 制裁清單
-JOIN BSADB.dbo.DJ_SanctionListReference R 
-    ON E.EntityId = R.EntityId
-WHERE T.GROUPID = 5
-  AND E.Deceased = 1
-  AND R.SanctionListReference LIKE '%Japanese Finance%';
+    -- 1. 目前已成功寫入目標表且有效的數量
+    (
+        SELECT COUNT(DISTINCT T.remark)
+        FROM BSADBJP..OFAC_SPEC T
+        WHERE T.GROUPID = 5
+          AND T.DInd = 'N'
+    ) AS [目標表_已寫入有效筆數],
 
+    -- 2. DJ 來源端符合條件的總人數 (Deceased=1 且 Japanese Finance)
+    (
+        SELECT COUNT(DISTINCT A.EntityId)
+        FROM BSADB.dbo.DJ_Entity A
+        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+        WHERE A.Deceased = 1
+          AND B.SanctionListReference LIKE '%Japanese Finance%'
+    ) AS [DJ來源_符合條件總筆數];
 
-我現在用這個是可以知道他有寫進去
+結果判定
+ * 兩邊數字一樣：代表來源端所有死亡名單都已完整寫入。
+ * 目標表比來源少：代表有資料漏寫或被標記為刪除 (DInd = 'Y')。
+若數字對不起來，查「哪幾筆沒寫入」
+執行這段即可抓出「DJ 有符合條件，但目標表裡卻沒有」的名單：
+SELECT 
+    A.EntityId, 
+    A.FullName
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND NOT EXISTS (
+      SELECT 1 
+      FROM BSADBJP..OFAC_SPEC T 
+      WHERE T.GROUPID = 5 
+        AND T.DInd = 'N'
+        AND T.remark = CAST(A.EntityId AS VARCHAR(100))
+  );
 
-但我想要比對數量
-
-寫進去的數量
-
-跟實際名單符合條件的數量有一樣?
-
-怎麼寫
