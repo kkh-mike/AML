@@ -1,29 +1,5 @@
-從暫存表 #tempDJBlacklistDetailsSID 的欄位來看，裡面完全沒有放實體名稱（SdnName），只有 IdentificationNumber（ISIN 證券代碼，例如 RU000A105823）和 EntNum（1053059）。
-實體真正的名字通常存在以下兩個地方：
- * 原始來源表（道瓊 DJ 表）：
-   名字原本是在 DJ_Entity 或 DJ_List_Data_A。如果想知道這組 EntNum 是誰，可以執行：
-   SELECT DISTINCT EntNum, SdnName 
-FROM DJ_List_Data_A 
-WHERE EntNum = 1053059;
-
-   或者：
-   SELECT EntityId, LastName, FirstName, OriginalScriptName
-FROM BSADB.dbo.DJ_Entity
-WHERE EntityId = 1053059;
-
- * 目標表 OFAC_SPEC 中的定義差異：
-   * 在一般的黑名單（如主要的制裁名單或 SCO）中，spec_name 放的是受制裁人/公司名稱（SdnName）。
-   * 但在 SID（證券代碼 / Securities Identification）名單 的架構下，spec_name 本身就是直接放證券代號（即 IdentificationNumber），而母體公司代號則記錄在 remark（EntNum）。
-如果要一次檢視「證券代號 + 發行實體名稱」，可以用這段查詢關聯出來：
-SELECT 
-    S.EntNum,
-    D.SdnName AS EntityName,       -- 這就是對應的公司/實體名字
-    S.IdentificationNumber AS SID, -- 證券代號 (通常寫入 spec_name)
-    S.IdentificationType,
-    S.UpdatedDate
-FROM #tempDJBlacklistDetailsSID S
-LEFT JOIN (
-    SELECT DISTINCT EntNum, SdnName 
-    FROM DJ_List_Data_A
-) D ON S.EntNum = D.EntNum;
-
+這是一張 Dow Jones（道瓊黑名單）名單匯入的批次對帳與監控表。
+核心重點：
+ * 查核批次有沒有漏抓：比對名單從收檔（RAW）到進庫處理（Feedlog）的筆數（COUNT）是否一致。
+ * 看更新類型：數百萬筆是全量匯入（Full Load），幾十到幾百筆是每日增量更新（Delta）。
+ * 追蹤最後執行時間：透過 LastUpdatedDate_UTC 確認排程是否正常運作。
