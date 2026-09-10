@@ -1,0 +1,34 @@
+SELECT 
+    T.ent_num,
+    T.spec_name          AS [OFAC_SPEC姓名],
+    E.FullName           AS [DJ原始姓名],
+    T.remark             AS [OFAC_SPEC_EntityId],
+    E.EntityId           AS [DJ_EntityId],
+    E.Deceased           AS [是否死亡(1=是)],
+    R.SanctionListReference AS [命中制裁名單],
+    T.updated_date       AS [OFAC更新日期],
+    CONVERT(VARCHAR, E.UpdatedDate_UTC, 112) AS [DJ轉UTC更新日],
+    T.DInd               AS [有效註記(N為有效)],
+    T.SOURCE             AS [來源標記],
+    T.creDate            AS [寫入時間]
+FROM BSADBJP..OFAC_SPEC T
+-- 關聯 DJ 主檔（remark 存的是 EntityId）
+JOIN BSADB.dbo.DJ_Entity E 
+    ON CAST(E.EntityId AS VARCHAR(100)) = T.remark
+-- 關聯 DJ 制裁清單
+JOIN BSADB.dbo.DJ_SanctionListReference R 
+    ON E.EntityId = R.EntityId
+WHERE T.GROUPID = 5
+  AND E.Deceased = 1
+  AND R.SanctionListReference LIKE '%Japanese Finance%';
+
+
+我現在用這個是可以知道他有寫進去
+
+但我想要比對數量
+
+寫進去的數量
+
+跟實際名單符合條件的數量有一樣?
+
+怎麼寫
