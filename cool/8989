@@ -1,47 +1,45 @@
--- TTL MTHLY SMRY
-INSERT  INTO dbo.TTL_MTHLY_ACCT_SMRY
-        ( CIF_KEY ,
-          APPL ,
-          ACCT_KEY ,
-          YYYYMM ,
-          TTL ,
-          CRTTL ,
-          DRTTL ,
-          CNT ,
-          CRCNT ,
-          DRCNT ,
-          MIN ,
-          MAX ,
-          CRMIN ,
-          DRMIN ,
-          CRMAX ,
-          DRMAX
-        )
-        SELECT  B.NEW_CIF_KEY ,
-                APPL ,
-                ISNULL(C.FinalAcctKey, 'SK_' + A.ACCT_KEY) ,
-                YYYYMM ,
-                TTL ,
-                CRTTL ,
-                DRTTL ,
-                CNT ,
-                CRCNT ,
-                DRCNT ,
-                MIN ,
-                MAX ,
-                CRMIN ,
-                DRMIN ,
-                CRMAX ,
-                DRMAX
-        FROM    dbo.LoadTrxn_Migrate_buffer A
-                LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
-                INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
-        WHERE   TrxnType = 'TTL MTHLY SMRY'
-                AND NOT EXISTS ( SELECT
-                                  1
-                                 FROM
-                                  dbo.TTL_MTHLY_ACCT_SMRY Z
-                                 WHERE
-                                  Z.CIF_KEY = B.NEW_CIF_KEY
-                                  AND Z.YYYYMM = A.YYYYMM 
-                                  AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, 'SK_' + A.ACCT_KEY) );
+DECLARE @InsertCount INT;
+
+INSERT INTO dbo.TTL_MTHLY_ACCT_SMRY
+(
+    CIF_KEY, APPL, ACCT_KEY, YYYYMM,
+    TTL, CRTTL, DRTTL, CNT, CRCNT, DRCNT,
+    MIN, MAX, CRMIN, DRMIN, CRMAX, DRMAX
+)
+SELECT
+    B.NEW_CIF_KEY,
+    APPL,
+    ISNULL(C.FinalAcctKey, 'SK_' + A.ACCT_KEY),
+    YYYYMM,
+    TTL,
+    CRTTL,
+    DRTTL,
+    CNT,
+    CRCNT,
+    DRCNT,
+    MIN,
+    MAX,
+    CRMIN,
+    DRMIN,
+    CRMAX,
+    DRMAX
+FROM dbo.LoadTrxn_Migrate_buffer A
+LEFT JOIN #TrxnAcctFinalMapping C
+    ON A.ACCT_KEY = C.SourceAcctKey
+INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B
+    ON A.CIF_KEY = B.SOURCE_CIF_KEY
+WHERE TrxnType = 'TTL MTHLY SMRY'
+AND NOT EXISTS
+(
+    SELECT 1
+    FROM dbo.TTL_MTHLY_ACCT_SMRY Z
+    WHERE Z.CIF_KEY = B.NEW_CIF_KEY
+      AND Z.YYYYMM = A.YYYYMM
+      AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, 'SK_' + A.ACCT_KEY)
+);
+
+SET @InsertCount = @@ROWCOUNT;
+
+PRINT 'TTL MTHLY SMRY Insert筆數 = ' + CAST(@InsertCount AS VARCHAR(20));
+
+SELECT @InsertCount AS InsertCount;
