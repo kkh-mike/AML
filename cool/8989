@@ -1,45 +1,48 @@
-DECLARE @InsertCount INT;
 
-INSERT INTO dbo.TTL_MTHLY_ACCT_SMRY
-(
-    CIF_KEY, APPL, ACCT_KEY, YYYYMM,
-    TTL, CRTTL, DRTTL, CNT, CRCNT, DRCNT,
-    MIN, MAX, CRMIN, DRMIN, CRMAX, DRMAX
+
+/*
+拷貝別人的權限
+*/
+BEGIN TRAN;
+
+DECLARE @NewUser NVARCHAR(60) = '922798';   -- 新同仁工號
+DECLARE @SampleUser NVARCHAR(60) = '1091707'; -- 範本同仁工號
+
+INSERT INTO dbo.WORKFLOW_MGMT_USERS (
+    QUEUEID, 
+    USERID, 
+    ROLE, 
+    ALERTMAIN, 
+    ALERTPERSONAL, 
+    IsAutomated
 )
-SELECT
-    B.NEW_CIF_KEY,
-    APPL,
-    ISNULL(C.FinalAcctKey, 'SK_' + A.ACCT_KEY),
-    YYYYMM,
-    TTL,
-    CRTTL,
-    DRTTL,
-    CNT,
-    CRCNT,
-    DRCNT,
-    MIN,
-    MAX,
-    CRMIN,
-    DRMIN,
-    CRMAX,
-    DRMAX
-FROM dbo.LoadTrxn_Migrate_buffer A
-LEFT JOIN #TrxnAcctFinalMapping C
-    ON A.ACCT_KEY = C.SourceAcctKey
-INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B
-    ON A.CIF_KEY = B.SOURCE_CIF_KEY
-WHERE TrxnType = 'TTL MTHLY SMRY'
-AND NOT EXISTS
-(
-    SELECT 1
-    FROM dbo.TTL_MTHLY_ACCT_SMRY Z
-    WHERE Z.CIF_KEY = B.NEW_CIF_KEY
-      AND Z.YYYYMM = A.YYYYMM
-      AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, 'SK_' + A.ACCT_KEY)
-);
+SELECT 
+    QUEUEID, 
+    @NewUser, 
+    ROLE, 
+    ALERTMAIN, 
+    ALERTPERSONAL, 
+    'FALSE' -- 核心關鍵：設為 FALSE，確保排程 MERGE 時永不被自動刪除
+FROM dbo.WORKFLOW_MGMT_USERS
+WHERE USERID = @SampleUser
+  AND NOT EXISTS (
+      SELECT 1 FROM dbo.WORKFLOW_MGMT_USERS 
+      WHERE USERID = @NewUser 
+        AND QUEUEID = dbo.WORKFLOW_MGMT_USERS.QUEUEID 
+        AND ROLE = dbo.WORKFLOW_MGMT_USERS.ROLE
+  );
 
-SET @InsertCount = @@ROWCOUNT;
+-- 檢查新增筆數與內容
+SELECT * FROM dbo.WORKFLOW_MGMT_USERS WHERE USERID = @NewUser;
 
-PRINT 'TTL MTHLY SMRY Insert筆數 = ' + CAST(@InsertCount AS VARCHAR(20));
+-- 檢查無誤執行 COMMIT 存檔；若有異常反白執行 ROLLBACK 取消
+COMMIT TRAN;
+-- ROLLBACK TRAN;
 
-SELECT @InsertCount AS InsertCount;
+
+
+幫我修改一下
+
+因為現在的922798 不是新同事  他裡面可能已經有一些工作群組
+
+我要對照1091707 的工作群組 如果沒有的要寫入 
