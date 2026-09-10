@@ -1,10 +1,27 @@
-
     /*
-        ============================================================
-		tempdb..#tempDJBlacklistDetailsSCO
-		
- 
-        ============================================================
-    */
+        =============================================================================
+        [暫存表說明] tempdb..#tempDJBlacklistDetailsSCO
+        -----------------------------------------------------------------------------
+        用途說明：
+            存放經由道瓊 (Dow Jones) 篩選後之 SCO (Sanctions Control Ownership) 
+            制裁控制權/股權名單的明細整合資料，作為後續 MERGE 同步至目標表 
+            (OFAC_SPEC, GROUPID = 27) 的來源工作暫存表 (Staging Table)。
 
-註解說明幫我寫一下 
+        主要處理邏輯：
+            1. 關聯制裁參考資訊 (SanctionListReference) 作為 Address 欄位寫入。
+            2. 比對目標主表已存在之實體，沿用既有編號 (Num / ent_num)。
+            3. 若為新增名單 (Num IS NULL)，依主表最大編號循序指派全新 ent_num。
+
+        欄位定義：
+            - Num          : 目標主表之實體唯一流水號 (對應 OFAC_SPEC.ent_num)
+            - EntNum       : 道瓊資料庫原始實體編號 (EntityId / 對應 OFAC_SPEC.remark)
+            - SdnName      : 受制裁實體或個人全名 (對應 OFAC_SPEC.spec_name)
+            - UpdatedDate  : 資料最後更新日期 (YYYYMMDD)
+            - Address      : 制裁清單參考資訊 (長度 >= 400 時會轉為特定導向文字)
+            - City         : 城市名稱 (對應 OFAC_SPEC.STATE)
+            - Country      : 國別代碼/名稱 (對應 OFAC_SPEC.COUNTRY)
+            - IdentType    : 身分證件類型代碼 (對應 OFAC_SPEC.IDENT)
+            - IdentNumber  : 身分證件號碼 (對應 OFAC_SPEC.IDNUM)
+            - DOB          : 出生年月日 (YYYYMMDD 或 YYYY)
+        =============================================================================
+    */
