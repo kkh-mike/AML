@@ -1,27 +1,68 @@
-    /*
-        =============================================================================
-        [暫存表說明] tempdb..#tempDJBlacklistDetailsSCO
-        -----------------------------------------------------------------------------
-        用途說明：
-            存放經由道瓊 (Dow Jones) 篩選後之 SCO (Sanctions Control Ownership) 
-            制裁控制權/股權名單的明細整合資料，作為後續 MERGE 同步至目標表 
-            (OFAC_SPEC, GROUPID = 27) 的來源工作暫存表 (Staging Table)。
+要預先找出即將被寫入或異動的資料，主要有兩種方式：
+方法一：直接用 LEFT JOIN / NOT EXISTS 模擬（最推薦、不影響資料）
+針對不同動作（新增、更新、邏輯刪除），直接執行對應的查詢：
+ * 1. 找出「即將新增」的名單（對應 WHEN NOT MATCHED BY TARGET）
+SELECT S.*
+FROM #tempDJBlacklistDetailsSCO S
+WHERE NOT EXISTS (
+    SELECT 1 
+    FROM BSADBSG..OFAC_SPEC T 
+    WHERE T.GROUPID = 27
+      AND T.spec_name = S.SdnName 
+      AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+);
 
-        主要處理邏輯：
-            1. 關聯制裁參考資訊 (SanctionListReference) 作為 Address 欄位寫入。
-            2. 比對目標主表已存在之實體，沿用既有編號 (Num / ent_num)。
-            3. 若為新增名單 (Num IS NULL)，依主表最大編號循序指派全新 ent_num。
+ * 2. 找出「即將更新」的名單（對應 WHEN MATCHED）
+SELECT 
+    S.EntNum,
+    S.SdnName,
+    T.updated_date AS Old_UpdatedDate,
+    S.UpdatedDate  AS New_UpdatedDate,
+    T.DInd         AS Old_DInd,
+    'N'            AS New_DInd
+FROM #tempDJBlacklistDetailsSCO S
+INNER JOIN BSADBSG..OFAC_SPEC T
+    ON T.spec_name = S.SdnName 
+   AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+   AND T.GROUPID = 27
+WHERE T.DInd = 'Y' 
+   OR S.UpdatedDate <> T.updated_date;
 
-        欄位定義：
-            - Num          : 目標主表之實體唯一流水號 (對應 OFAC_SPEC.ent_num)
-            - EntNum       : 道瓊資料庫原始實體編號 (EntityId / 對應 OFAC_SPEC.remark)
-            - SdnName      : 受制裁實體或個人全名 (對應 OFAC_SPEC.spec_name)
-            - UpdatedDate  : 資料最後更新日期 (YYYYMMDD)
-            - Address      : 制裁清單參考資訊 (長度 >= 400 時會轉為特定導向文字)
-            - City         : 城市名稱 (對應 OFAC_SPEC.STATE)
-            - Country      : 國別代碼/名稱 (對應 OFAC_SPEC.COUNTRY)
-            - IdentType    : 身分證件類型代碼 (對應 OFAC_SPEC.IDENT)
-            - IdentNumber  : 身分證件號碼 (對應 OFAC_SPEC.IDNUM)
-            - DOB          : 出生年月日 (YYYYMMDD 或 YYYY)
-        =============================================================================
-    */
+ * 3. 找出「即將被標記刪除」的既有名單（對應 WHEN NOT MATCHED BY SOURCE）
+SELECT T.ent_num, T.spec_name, T.remark, T.updated_date
+FROM BSADBSG..OFAC_SPEC T
+WHERE T.GROUPID = 27
+  AND T.DInd = 'N'
+  AND NOT EXISTS (
+      SELECT 1 
+      FROM #tempDJBlacklistDetailsSCO S
+      WHERE T.spec_name = S.SdnName 
+        AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+  );
+
+方法二：利用 Transaction + ROLLBACK 預演 MERGE
+如果想精準看見原 MERGE 的 OUTPUT 完整欄位，可以在測試時包裹 Transaction 並強制回滾：
+BEGIN TRANSACTION;
+
+    ;WITH TargetTable AS (
+        SELECT * FROM BSADBSG..OFAC_SPEC WHERE GROUPID = 27
+    )
+    MERGE TargetTable AS T
+    USING (SELECT * FROM #tempDJBlacklistDetailsSCO) AS S
+    ON T.spec_name = S.SdnName AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+    WHEN NOT MATCHED BY TARGET THEN
+        INSERT (...) VALUES (...)
+    WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN
+        UPDATE SET T.DInd = 'Y'
+    WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN
+        UPDATE SET T.DInd = 'N'
+    -- 只輸出預覽，不寫入 LOG 表
+    OUTPUT 
+        $action AS ActionType,
+        COALESCE(Inserted.ent_num, Deleted.ent_num) AS ent_num,
+        COALESCE(Inserted.spec_name, Deleted.spec_name) AS spec_name,
+        COALESCE(Inserted.remark, Deleted.remark) AS remark;
+
+-- 預覽完畢直接復原，完全不更動實體資料
+ROLLBACK TRANSACTION;
+
