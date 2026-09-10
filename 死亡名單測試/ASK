@@ -1,26 +1,12 @@
-直接執行這段語法，把那唯一漏掉的 1 筆抓出來，並診斷原因：
-SELECT 
-    A.EntityId,
-    A.FullName,
-    A.Deceased,
-    (SELECT COUNT(1) FROM BSADB.dbo.DJ_List_Data_A L WHERE L.EntNum = A.EntityId AND L.NamePropertyBitCode & 1 > 0) AS [是否有PrimaryName],
-    (SELECT DInd FROM BSADBJP..OFAC_SPEC T WHERE T.GROUPID = 5 AND T.remark = CAST(A.EntityId AS VARCHAR(100))) AS [目標表狀態DInd]
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-WHERE B.SanctionListReference LIKE '%Japanese Finance%'
-  AND NOT EXISTS (
-      -- 排除掉目標表中「有效(DInd='N')」的資料
-      SELECT 1 
-      FROM BSADBJP..OFAC_SPEC T 
-      WHERE T.GROUPID = 5 
-        AND T.DInd = 'N'
-        AND T.remark = CAST(A.EntityId AS VARCHAR(100))
-  );
+原因非常清楚，就是這筆資料：683933（State Organization for Irrigation Projects）。
+它沒寫進去是因為兩邊的條件它都沒符合：
+ * 它是一間「機構/組織」：所以 Deceased 是 NULL（組織不會死亡），死亡名單邏輯抓不到它。
+ * 它在 DJ_List_Data_A 沒有 Primary Name：是否有PrimaryName = 0，所以第一段 NamePropertyBitCode & 1 > 0 也漏掉了它。
+30 秒確認它的名字到底被存成什麼？
+直接執行這段短語法，看它在名單裡到底用了什麼代碼：
+SELECT EntNum, SdnName, NamePropertyBitCode
+FROM BSADB.dbo.DJ_List_Data_A
+WHERE EntNum = 683933;
 
-原因判定（對照查出的欄位）
- * 情況 1：目標表狀態 DInd = 'Y'
-   這筆過去曾被寫入過，但後來在某次同步時被軟刪除（判定為無效）了。
- * 情況 2：是否有PrimaryName = 0 且 Deceased = 0
-   原程式第一段只抓主名 NamePropertyBitCode & 1 > 0，第二段只抓死亡 Deceased = 1。如果這個人不是死亡狀態，又沒有設 Primary Name（例如只有別名），兩段邏輯都會剛好漏掉他。
- * 情況 3：姓名包含特殊字元導致寫入失敗
-   如果查出來有 EntityId 與 FullName，但目標表完全沒有這筆記錄（DInd 顯示 NULL），代表是在新增階段因長度或型態問題被跳過。
+> 如果查出來有資料，但 NamePropertyBitCode 不是 1（例如是 2 代表別名），就說明第一段篩選條件設太嚴，把這類機構給濾掉了。
+> 
