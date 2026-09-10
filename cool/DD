@@ -1,162 +1,148 @@
+直接將組態檔（Config）中對應的參數帶入，即可獨立在 SSMS 執行並精確計時：
+SET NOCOUNT ON;
 
-	<add key="File_Prefix" value="AML_"/>
-		
-		<add key="Delimeter" value="," />
-		<add key="OutputTargetDirectory" value="D:\AML_Source\20251114_新光資轉\EXE\"/>
-		<add key="BackupFolder" value="D:\AML_Source\20251114_新光資轉\EXE\Backup" />
-		<add key="SourceFileHeaderOn" value="Y"/>
-		<add key="Timeout" value="172800"/>
+-- 1. 依據你的 Config 設定對應變數
+DECLARE @ModuleName NVARCHAR(50) = 'TRXN';
+DECLARE @AcctMappingTable NVARCHAR(128) = 'XREF';
+DECLARE @AcctMappingSourceColumn NVARCHAR(128) = 'EXTN_REF_NO';
+DECLARE @AcctMappingTargetColumn NVARCHAR(128) = 'INTN_REF_NO';
+DECLARE @Prefix NVARCHAR(50) = 'SK_';
+DECLARE @sql NVARCHAR(MAX);
 
-		<add key="FilterCustomer" value="N"/>
-		<add key="FilterCustomerTableName" value="BANCS_SK_CUST_INFO"/>
-		<add key="FilterCustomerColumnName" value="CUST_NO"/>
-		<add key="CIF_Mapping" value="Y"/>
-		<add key="CIF_MappingTable" value="BANCS_SK_CUST_INFO"/>
-		<add key="CIF_MappingSourceColumn" value="SK_CUST_ID"/>
-		<add key="CIF_MappingTargetColumn" value="TS_CUST_ID"/>
-		<add key="CIF_MappingFlagColumn" value="CUST_RE_NO_FLG"/>
+-- 計時專用變數
+DECLARE @t_start DATETIME2 = SYSDATETIME();
+DECLARE @t_mapping_done DATETIME2;
+DECLARE @t_insert_done DATETIME2;
 
+-- 2. 開啟交易（測試結束自動 ROLLBACK，不污染正式資料）
+BEGIN TRANSACTION;
 
-		<add key="Acct_Mapping" value="Y"/>
-		<add key="Acct_MappingTable" value="XREF"/>
-		<add key="Acct_MappingSourceColumn" value="EXTN_REF_NO"/>
-		<add key="Acct_MappingTargetColumn" value="INTN_REF_NO"/>
-		<add key="Acct_MappingPrefix" value="SK_"/>
-		<add key="Acct_MappingFlagColumn" value=""/>
+-- =======================================================
+-- 階段 A: 產生暫存 Mapping 表 (#TrxnAcctFinalMapping)
+-- =======================================================
+IF OBJECT_ID('tempdb..#TrxnAcctFinalMapping') IS NOT NULL
+    DROP TABLE #TrxnAcctFinalMapping;
 
+CREATE TABLE #TrxnAcctFinalMapping
+(
+    SourceAcctKey NVARCHAR(100),
+    FinalAcctKey NVARCHAR(100)
+);
 
-		<add key="TrxnFromPeriod" value="202401"/>
-		<add key="TrxnToPeriod" value="202606"/>				
+IF ISNULL(@AcctMappingTable, '') <> ''
+BEGIN
+    SET @sql = '
+    WITH MappedAccounts AS (
+        SELECT
+            A.ACCT_KEY AS SourceAcctKey,
+            COALESCE(M.' + QUOTENAME(@AcctMappingTargetColumn) + ', 
+                     ''' + ISNULL(@Prefix, '') + ''' + A.ACCT_KEY) AS FinalAcctKey,
+            ROW_NUMBER() OVER (PARTITION BY A.ACCT_KEY ORDER BY (SELECT 1)) as rn
+        FROM dbo.LoadTrxn_Migrate_buffer A
+        LEFT JOIN ' + QUOTENAME(@AcctMappingTable) + ' M
+            ON M.' + QUOTENAME(@AcctMappingSourceColumn) + ' = (
+                CASE 
+                    WHEN LEN(A.ACCT_KEY) < 25 
+                    THEN RIGHT(REPLICATE(''0'', 25) + A.ACCT_KEY, 25) 
+                    ELSE A.ACCT_KEY 
+                END)
+    )
+    INSERT INTO #TrxnAcctFinalMapping (SourceAcctKey, FinalAcctKey)
+    SELECT
+        SourceAcctKey,
+        FinalAcctKey
+    FROM MappedAccounts
+    WHERE rn = 1 
+      AND ISNULL(SourceAcctKey, '''') <> '''';';
 
+    EXEC sp_executesql @sql;
+END
+ELSE
+BEGIN
+    WITH PrefixedAccounts AS (
+        SELECT   
+            ACCT_KEY AS SourceAcctKey,
+            ISNULL(@Prefix, '') + ACCT_KEY AS FinalAcctKey,
+            ROW_NUMBER() OVER (PARTITION BY ACCT_KEY ORDER BY (SELECT 1)) AS rn
+        FROM dbo.LoadTrxn_Migrate_buffer
+    )
+    INSERT INTO #TrxnAcctFinalMapping (SourceAcctKey, FinalAcctKey)
+    SELECT SourceAcctKey, FinalAcctKey
+    FROM PrefixedAccounts
+    WHERE rn = 1 
+      AND ISNULL(SourceAcctKey, '') <> '';                        
+END
 
+CREATE CLUSTERED INDEX IX_SourceAcctKey ON #TrxnAcctFinalMapping(SourceAcctKey);
 
-因為我的 LoadTrxn_Migrate_buffer 已經寫入了
-我現在想要單獨測這段可以?
+SET @t_mapping_done = SYSDATETIME();
 
-  IF @ModuleName = 'TRXN'
-                        BEGIN
-                                                
-						--CREATE CLUSTERED INDEX IX_LoadTrxn_CIF 
-						--ON dbo.LoadTrxn_Migrate_buffer (CIF_KEY);
-						
-						--CREATE INDEX IX_LoadTrxn_YYYYMM
-						--ON dbo.LoadTrxn_Migrate_buffer (YYYYMM);	
-						
-						--CREATE INDEX IX_LoadTrxn_ACCT_KEY 
-						--ON dbo.LoadTrxn_Migrate_buffer (ACCT_KEY);	
-						
-                        IF OBJECT_ID('tempdb..#TrxnAcctFinalMapping') IS NOT NULL
-                            DROP TABLE #TrxnAcctFinalMapping;
+-- =======================================================
+-- 階段 B: 寫入目標彙總表 (TTL_MTHLY_ACCT_SMRY)
+-- =======================================================
+INSERT INTO dbo.TTL_MTHLY_ACCT_SMRY
+(
+    CIF_KEY,
+    APPL,
+    ACCT_KEY,
+    YYYYMM,
+    TTL,
+    CRTTL,
+    DRTTL,
+    CNT,
+    CRCNT,
+    DRCNT,
+    MIN,
+    MAX,
+    CRMIN,
+    DRMIN,
+    CRMAX,
+    DRMAX
+)
+SELECT  
+    B.NEW_CIF_KEY,
+    A.APPL,
+    ISNULL(C.FinalAcctKey, ISNULL(@Prefix, '') + A.ACCT_KEY),
+    A.YYYYMM,
+    A.TTL,
+    A.CRTTL,
+    A.DRTTL,
+    A.CNT,
+    A.CRCNT,
+    A.DRCNT,
+    A.MIN,
+    A.MAX,
+    A.CRMIN,
+    A.DRMIN,
+    A.CRMAX,
+    A.DRMAX
+FROM dbo.LoadTrxn_Migrate_buffer A
+LEFT JOIN #TrxnAcctFinalMapping C 
+    ON A.ACCT_KEY = C.SourceAcctKey
+INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B 
+    ON A.CIF_KEY = B.SOURCE_CIF_KEY
+WHERE A.TrxnType = 'TTL MTHLY SMRY'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM dbo.TTL_MTHLY_ACCT_SMRY Z
+      WHERE Z.CIF_KEY = B.NEW_CIF_KEY
+        AND Z.YYYYMM = A.YYYYMM 
+        AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix, '') + A.ACCT_KEY)
+  );
 
-                        CREATE TABLE #TrxnAcctFinalMapping
-                            (
-                              SourceAcctKey NVARCHAR(100) ,
-                              FinalAcctKey NVARCHAR(100)
-                            );
-                        
-                        IF ISNULL(@AcctMappingTable, '') <> ''
-						BEGIN
-							SET @sql = '
-							WITH MappedAccounts AS (
-								SELECT
-									A.ACCT_KEY AS SourceAcctKey,
-									-- If a match exists in M, use it. Otherwise, apply the prefix.
-									COALESCE(M.' + QUOTENAME(@AcctMappingTargetColumn) + ', 
-											 ''' + ISNULL(@Prefix, '') + ''' + A.ACCT_KEY) AS FinalAcctKey,
-									ROW_NUMBER() OVER (PARTITION BY A.ACCT_KEY ORDER BY (SELECT 1)) as rn
-								FROM dbo.LoadTrxn_Migrate_buffer A
-								LEFT JOIN ' + QUOTENAME(@AcctMappingTable) + ' M
-									ON M.' + QUOTENAME(@AcctMappingSourceColumn) + ' = (
-										CASE 
-											WHEN LEN(A.ACCT_KEY) < 25 
-											THEN RIGHT(REPLICATE(''0'', 25) + A.ACCT_KEY, 25) 
-											ELSE A.ACCT_KEY 
-										END)
-							)
-							INSERT INTO #TrxnAcctFinalMapping (SourceAcctKey, FinalAcctKey)
-							SELECT
-								SourceAcctKey,
-								FinalAcctKey
-							FROM MappedAccounts
-							WHERE rn = 1 
-							AND ISNULL(SourceAcctKey, '''') <> '''';';
+DECLARE @InsertedCount INT = @@ROWCOUNT;
+SET @t_insert_done = SYSDATETIME();
 
-							EXEC sp_executesql @sql;
-						END
-						ELSE
-						BEGIN
-                                WITH    PrefixedAccounts
-                                          AS ( SELECT   ACCT_KEY AS SourceAcctKey ,
-                                                        ISNULL(@Prefix, '')
-                                                        + ACCT_KEY AS FinalAcctKey ,
-                                                        ROW_NUMBER() OVER ( PARTITION BY ACCT_KEY ORDER BY ( SELECT
-                                                              1
-                                                              ) ) AS rn
-                                               FROM     dbo.LoadTrxn_Migrate_buffer
-                                             )
-                                    INSERT  INTO #TrxnAcctFinalMapping
-                                            ( SourceAcctKey ,
-                                              FinalAcctKey
-                                            )
-                                            SELECT  SourceAcctKey ,
-                                                    FinalAcctKey
-                                            FROM    PrefixedAccounts
-                                            WHERE   rn = 1 -- Keep only the first unique account
-                                                    AND ISNULL(SourceAcctKey,
-                                                              '') <> '';                        
-						END
-						CREATE CLUSTERED INDEX IX_SourceAcctKey ON #TrxnAcctFinalMapping(SourceAcctKey);
-     
+-- 3. 測試完成直接回滾（如果要正式保留請改為 COMMIT TRANSACTION）
+ROLLBACK TRANSACTION;
 
+-- 4. 統計耗時報表
+SELECT 
+    @InsertedCount AS [預計寫入筆數],
+    DATEDIFF(SECOND, @t_start, @t_mapping_done) AS [Mapping耗時(秒)],
+    DATEDIFF(SECOND, @t_mapping_done, @t_insert_done) AS [純Insert耗時(秒)],
+    DATEDIFF(SECOND, @t_start, @t_insert_done) AS [總耗時(秒)];
 
-          -- TTL MTHLY SMRY
-                            INSERT  INTO dbo.TTL_MTHLY_ACCT_SMRY
-                                    ( CIF_KEY ,
-                                      APPL ,
-                                      ACCT_KEY ,
-                                      YYYYMM ,
-                                      TTL ,
-                                      CRTTL ,
-                                      DRTTL ,
-                                      CNT ,
-                                      CRCNT ,
-                                      DRCNT ,
-                                      MIN ,
-                                      MAX ,
-                                      CRMIN ,
-                                      DRMIN ,
-                                      CRMAX ,
-                                      DRMAX
-                                    )
-                                    SELECT  B.NEW_CIF_KEY ,
-                                            APPL ,
-                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
-                                            YYYYMM ,
-                                            TTL ,
-                                            CRTTL ,
-                                            DRTTL ,
-                                            CNT ,
-                                            CRCNT ,
-                                            DRCNT ,
-                                            MIN ,
-                                            MAX ,
-                                            CRMIN ,
-                                            DRMIN ,
-                                            CRMAX ,
-                                            DRMAX
-                                    FROM    dbo.LoadTrxn_Migrate_buffer A
-											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
-                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
-                                    WHERE   TrxnType = 'TTL MTHLY SMRY'
-                                            AND NOT EXISTS ( SELECT
-                                                              1
-                                                             FROM
-                                                              dbo.TTL_MTHLY_ACCT_SMRY Z
-                                                             WHERE
-                                                              Z.CIF_KEY = B.NEW_CIF_KEY
-                                                              AND Z.YYYYMM = A.YYYYMM 
-                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
-              
-
-
-因為我只想要看他寫入的時間
+測試效能排查重點：
+ * NOT EXISTS 瓶頸： 若 dbo.TTL_MTHLY_ACCT_SMRY 原本已存在大量歷史資料，NOT EXISTS 查詢條件 (CIF_KEY, YYYYMM, ACCT_KEY) 若在該表上缺乏複合索引（Composite Index），會對目標表進行多次 Index Scan / Table Scan。
+ * 來源表索引影響： dbo.LoadTrxn_Migrate_buffer 先前註解掉的 CREATE INDEX，會影響 WHERE TrxnType = 'TTL MTHLY SMRY' 以及與 CIF_Migrate_Mapping_TEMP 的 Join 效能。若執行時間遠超預期，取消註解那幾組索引可大幅降低 I/O 成本。
