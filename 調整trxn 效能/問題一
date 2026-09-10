@@ -1,0 +1,89 @@
+這是一份用直白、好懂的方式整理的今天排查與優化全紀錄：
+
+---
+
+### 一、 為什麼改了 `AND C.SourceAcctKey IS NULL` 會查不到資料（0 筆）？
+
+* **原因出在暫存表的塞法**：
+在產製暫存表 `#TrxnAcctFinalMapping` 時，邏輯是拿 `LoadTrxn_Migrate_buffer` 當作母體，只要帳號不是空白，就算在 `XREF` 找不到，也會自動補上 `'SK_' + 帳號` 塞進暫存表。
+* **結果**：
+來源 Buffer 裡面的每一個有效帳號，**100% 都已經在暫存表裡了**。
+* **為什麼查不到**：
+`A LEFT JOIN #TrxnAcctFinalMapping C` 每一筆都成功配對，`C.SourceAcctKey` 永遠裝著原本的帳號，**永遠不會是 NULL**。一旦條件寫死 `C.SourceAcctKey IS NULL`（找漏掉沒進暫存表的帳號），自然就 1 筆都撈不到。
+
+---
+
+### 二、 為什麼原本的語法可以查到 10,000 筆？
+
+因為原本的條件是在過濾**正式目標表**，不是在過濾暫存表：
+
+```sql
+AND NOT EXISTS (
+    SELECT 1 
+    FROM dbo.TTL_MTHLY_ACCT_SMRY Z 
+    WHERE ...
+)
+
+```
+
+* **白話解釋**：這是「防重複寫入」機制。如果目標表 `Z` 裡面還沒有這筆資料，才允許寫入。
+* **為什麼有值**：因為這 10,000 筆是本次批次要新轉入的資料，正式表 `Z` 裡面本來就還沒有，所以檢查通過，10,000 筆全部順利被撈出來準備寫入。
+
+---
+
+### 三、 為什麼條件要改成 `AND Z.ACCT_KEY = C.FinalAcctKey`？
+
+原本的寫法：
+
+```sql
+-- 原本寫法（慢）
+AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY)
+
+```
+
+* **問題點（破壞 SARGable）**：
+條件右邊包了 `ISNULL()` 還有字串相加運算。資料庫每比對一筆資料，就要重新算一次字串，這會**廢掉目標表 `Z` 的索引目錄**，導致資料庫只能「整張表從頭翻到尾（全表掃描）」，資料量大時會非常卡。
+* **改寫後（快）**：
+```sql
+-- 改寫後（快）
+AND Z.ACCT_KEY = C.FinalAcctKey
+
+```
+
+
+因為前面暫存表已經把該補 `SK_` 的帳號都算好放進 `FinalAcctKey` 了，比對時直接「**乾淨欄位 = 乾淨欄位**」，資料庫就能直接秒翻目錄（走索引尋找），速度才會提上來。
+
+---
+
+### 四、 原本預存程序的索引（Index）到底有沒有建？
+
+* **`#TrxnAcctFinalMapping`（暫存表）**：
+**有建立**！在原本 SP 的 `@ModuleName = 'TRXN'` 區塊，產完暫存表後有一行 `CREATE CLUSTERED INDEX IX_SourceAcctKey ON #TrxnAcctFinalMapping(SourceAcctKey);`，因此關聯時是有叢集索引支援的。
+* **`LoadTrxn_Migrate_buffer`**：
+SP 開頭的 Index 語法被 `--` 註解掉了，目前沒有動態建。
+* **`CIF_Migrate_Mapping_TEMP`**：
+只有 `CREATE TABLE`，全程沒有建索引。
+* **`dbo.TTL_MTHLY_ACCT_SMRY`（目標實體表）**：
+改寫後的語法要發揮極限速度，需要這張表有包含 `(YYYYMM, CIF_KEY, ACCT_KEY)` 的複合索引支援。
+
+---
+
+### 五、 怎麼記錄這一段的寫入時間？
+
+若不更動目標表結構，最佳作法是**記錄耗時到 Log 表**：
+在 `INSERT` 前後加上計時變數與 `@@ROWCOUNT`，直接寫入原本就有的 `dbo.Migrator_LOG`：
+
+```sql
+DECLARE @StartTime DATETIME = GETDATE();
+
+-- 執行 INSERT ...
+
+-- 寫入 Log（包含轉入筆數、花費秒數）
+INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG)
+SELECT 
+    CONVERT(VARCHAR, dbo.ConvertToBankLocalTime(GETUTCDATE()), 109),
+    'TTL MTHLY SMRY inserted ' + CAST(@@ROWCOUNT AS VARCHAR(10)) 
+    + ' rows. Duration: ' + CAST(DATEDIFF(SECOND, @StartTime, GETDATE()) AS VARCHAR(10)) + 's',
+    'N';
+
+```
