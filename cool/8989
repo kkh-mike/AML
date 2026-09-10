@@ -1,42 +1,84 @@
-/*
-拷貝別人的權限（差集補齊）
-*/
-BEGIN TRAN;
 
-DECLARE @TargetUser NVARCHAR(60) = '922798';   -- 目標同仁工號（已存在舊權限）
-DECLARE @SampleUser NVARCHAR(60) = '1091707';  -- 範本同仁工號
+ ;WITH TempAddress AS (
+  SELECT A.EntityId, A.Address, A.City, A.AddressCountry, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId'
+  FROM BSADB.dbo.DJ_Address A WITH(NOLOCK) 
+  WHERE A.Deleted = 0  AND EXISTS(SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
+ ), TempIdent AS(
+  SELECT EntityId, CASE WHEN ISNULL(IdentificationType,'') = '' THEN NULL ELSE @OtherIdentMthCode END 'IdentificationType', IdentificationNumber, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId' 
+  FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH(NOLOCK) WHERE A.Deleted = 0 AND EXISTS(SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
+ ), TempDOB AS (
+  SELECT EntityId, InfoDay, InfoMonth, InfoYear, ROW_NUMBER() OVER(PARTITION BY A.EntityId ORDER BY A.Id) 'RowId' 
+  FROM BSADB.dbo.DJ_DateTypeInfo A WITH(NOLOCK) WHERE A.DateType = 'Date of Birth' AND A.Deleted = 0 AND EXISTS(SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
+ )
+ INSERT INTO #tempDJBlacklistDetails ( EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB )
+ SELECT A.EntNum, A.SdnName, A.UpdatedDate, B.Address, LEFT(B.City,100), LEFT(B.AddressCountry,100),
+  C.IdentificationType, LEFT(C.IdentificationNumber,44) , 
+  CASE WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL THEN D.InfoYear ELSE CONVERT(VARCHAR(8),dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) END
+ FROM #tempDJBlacklist A 
+  LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1 
+  LEFT JOIN TempIdent C ON A.EntNum = C.EntityId AND C.RowId = 1 
+  LEFT JOIN TempDOB D ON A.EntNum = D.EntityId AND D.RowId = 1 
+------------------
 
-INSERT INTO dbo.WORKFLOW_MGMT_USERS (
-    QUEUEID, 
-    USERID, 
-    ROLE, 
-    ALERTMAIN, 
-    ALERTPERSONAL, 
-    IsAutomated
-)
-SELECT 
-    src.QUEUEID, 
-    @TargetUser, 
-    src.ROLE, 
-    src.ALERTMAIN, 
-    src.ALERTPERSONAL, 
-    'FALSE' -- 設為 FALSE，確保排程 MERGE 時不被自動刪除
-FROM dbo.WORKFLOW_MGMT_USERS AS src
-WHERE src.USERID = @SampleUser
-  AND NOT EXISTS (
-      -- 檢查目標同仁是否已有相同的 QUEUEID 與 ROLE
-      SELECT 1 
-      FROM dbo.WORKFLOW_MGMT_USERS AS chk
-      WHERE chk.USERID = @TargetUser 
-        AND chk.QUEUEID = src.QUEUEID 
-        AND chk.ROLE = src.ROLE
-  );
+上面跟
+這段
+有依樣?
 
--- 檢查最終該員擁有的所有工作群組權限
-SELECT * 
-FROM dbo.WORKFLOW_MGMT_USERS 
-WHERE USERID = @TargetUser;
 
--- 檢查無誤執行 COMMIT 存檔；若有異常反白執行 ROLLBACK 取消
-COMMIT TRAN;
--- ROLLBACK TRAN;
+
+    ;WITH TempAddress AS
+    (
+        SELECT 
+            A.EntityId, 
+            A.Address, 
+            A.City, 
+            A.AddressCountry,
+            ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
+        FROM BSADB.dbo.DJ_Address A WITH (NOLOCK)
+        WHERE A.Deleted = 0
+          AND EXISTS (SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
+    ),
+    TempIdent AS
+    (
+        SELECT 
+            A.EntityId,
+            CASE WHEN ISNULL(A.IdentificationType, '') = '' THEN NULL ELSE @OtherIdentMthCode END AS IdentificationType,
+            A.IdentificationNumber,
+            ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
+        FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH (NOLOCK)
+        WHERE A.Deleted = 0
+          AND EXISTS (SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
+    ),
+    TempDOB AS
+    (
+        SELECT 
+            A.EntityId, 
+            A.InfoDay, 
+            A.InfoMonth, 
+            A.InfoYear,
+            ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
+        FROM BSADB.dbo.DJ_DateTypeInfo A WITH (NOLOCK)
+        WHERE A.DateType = 'Date of Birth'
+          AND A.Deleted = 0
+          AND EXISTS (SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
+    )
+    INSERT INTO #tempDJBlacklistDetails
+        (EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB)
+    SELECT 
+        A.EntNum,
+        A.SdnName,
+        A.UpdatedDate,
+        B.Address,
+        LEFT(B.City, 100),
+        LEFT(B.AddressCountry, 100),
+        C.IdentificationType,
+        LEFT(C.IdentificationNumber, 44),
+        CASE 
+            WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL 
+            THEN D.InfoYear 
+            ELSE CONVERT(VARCHAR(8), dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) 
+        END
+    FROM #tempDJBlacklist A
+    LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1
+    LEFT JOIN TempIdent   C ON A.EntNum = C.EntityId AND C.RowId = 1
+    LEFT JOIN TempDOB     D ON A.EntNum = D.EntityId AND D.RowId = 1;
