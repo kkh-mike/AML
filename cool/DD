@@ -1,23 +1,21 @@
-select * from bsadb..DJ_ListUpdate_Statistics 
-where Stage in ('RAW','Feedlog') and action = 1 and EntityType = 'MainName'
+# Dow Jones (DJ) 黑名單匯入檢核與月批維運 SOP
 
-/*
-檢查月檔與feedlog檔筆數
-相同 => 很棒
-不同 => 看前一個月的 raw 資料筆數，兩個月相同則是拿到前一個月的月檔資料，請翠婷重抓檔。
+## 1. 核心概述與監控目的
+`bsadb..DJ_ListUpdate_Statistics` 為 Dow Jones（道瓊黑名單）匯入與 ETL 批次處理的核心對帳監控表，主要目的如下：
+* **批次資料完整性查核**：比對名單從收檔（`RAW`）到進庫處理（`Feedlog`）的筆數（Count）是否一致，防範漏抓或轉換遺失。
+* **資料更新類型識別**：
+  * **全量匯入 (Full Load)**：通常為每月初執行的月檔，筆數達數百萬筆。
+  * **增量更新 (Delta / Daily)**：每日例行更新，筆數通常在數十至數百筆之間。
+* **排程健康狀態追蹤**：透過 `LastUpdatedDate_UTC` 確認批次最後執行時間與運作狀態。
 
-先備份1號的feedlog檔案，重跑月批需要重新放此檢核檔
-*/
+---
 
-/*
+## 2. 檢核 SQL 語法
 
-這是一張 Dow Jones（道瓊黑名單）名單匯入的批次對帳與監控表。
-核心重點：
- * 查核批次有沒有漏抓：比對名單從收檔（RAW）到進庫處理（Feedlog）的筆數（COUNT）是否一致。
- * 看更新類型：數百萬筆是全量匯入（Full Load），幾十到幾百筆是每日增量更新（Delta）。
- * 追蹤最後執行時間：透過 LastUpdatedDate_UTC 確認排程是否正常運作。
-
- */
-
-
-幫我整理一下 順便給我一個檔案名稱
+```sql
+SELECT * 
+FROM bsadb..DJ_ListUpdate_Statistics 
+WHERE Stage IN ('RAW', 'Feedlog') 
+  AND action = 1 
+  AND EntityType = 'MainName'
+ORDER BY LastUpdatedDate_UTC DESC;
