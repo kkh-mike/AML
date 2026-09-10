@@ -1,0 +1,109 @@
+要驗證已經寫入 BSADBJP..OFAC_SPEC（GROUPID = 6）的資料，是否確實來自 Dow Jones (DJ) 資料庫、確實為死亡名單（Deceased = 1），且符合所有寫入規則，可以直接透過關聯查詢對齊邏輯。
+1. 完整驗證查詢 SQL
+在寫入邏輯中：
+ * T.remark 存放來源的 EntityId
+ * T.spec_name 存放 FullName
+ * 死亡名單判斷條件為：DJ_Entity.Deceased = 1 且具備 'Japanese Finance' 制裁名單標記
+執行以下驗證語法：
+SELECT 
+    T.ent_num,
+    T.spec_name          AS [OFAC_SPEC姓名],
+    E.FullName           AS [DJ原始姓名],
+    T.remark             AS [OFAC_SPEC_EntityId],
+    E.EntityId           AS [DJ_EntityId],
+    E.Deceased           AS [是否死亡(1=是)],
+    R.SanctionListReference AS [命中制裁名單],
+    T.updated_date       AS [OFAC更新日期],
+    CONVERT(VARCHAR, E.UpdatedDate_UTC, 112) AS [DJ轉UTC更新日],
+    T.DInd               AS [有效註記(N為有效)],
+    T.SOURCE             AS [來源標記],
+    T.creDate            AS [寫入時間]
+FROM BSADBJP..OFAC_SPEC T
+-- 關聯 DJ 主檔（remark 存的是 EntityId）
+JOIN BSADB.dbo.DJ_Entity E 
+    ON CAST(E.EntityId AS VARCHAR(100)) = T.remark
+-- 關聯 DJ 制裁清單
+JOIN BSADB.dbo.DJ_SanctionListReference R 
+    ON E.EntityId = R.EntityId
+WHERE T.GROUPID = 6
+  AND E.Deceased = 1
+  AND R.SanctionListReference LIKE '%Japanese Finance%';
+
+2. 查核結果的判斷重點
+| 查核項目 | 判定條件 | 說明 |
+|---|---|---|
+| 死亡屬性確認 | E.Deceased = 1 | 確認該 Entity 在 DJ 主檔確實註記為已身故。 |
+| 名單範圍確認 | R.SanctionListReference LIKE '%Japanese Finance%' | 確認命中日本金融制裁名單。 |
+| 姓名一致性 | T.spec_name = E.FullName | 確認寫入目標表的名稱與 DJ 死亡名單的姓名相符。 |
+| 有效狀態 | T.DInd = 'N' | 確認未被標記為軟刪除（若為 'Y' 代表已被標記失效）。 |
+| 來源註記 | T.SOURCE = 'MOF Sanction List (Decease) ' | 程式在寫入時所填入的死亡來源標記。 |
+3. 反向排查（檢查是否有「不符合規則卻被寫入」的異常資料）
+若要確認 GROUPID = 6 裡面有沒有被誤寫入、或不符合死亡名單條件的資料，可以執行下列異常稽核：
+SELECT 
+    T.ent_num,
+    T.spec_name,
+    T.remark,
+    T.SOURCE,
+    CASE 
+        WHEN E.EntityId IS NULL THEN 'DJ 找不到對應 EntityId'
+        WHEN ISNULL(E.Deceased, 0) <> 1 THEN '在 DJ 內不是死亡狀態 (Deceased <> 1)'
+        WHEN R.EntityId IS NULL THEN '沒有 Japanese Finance 制裁名單'
+        ELSE '正常符合'
+    END AS [異常原因]
+FROM BSADBJP..OFAC_SPEC T
+LEFT JOIN BSADB.dbo.DJ_Entity E 
+    ON CAST(E.EntityId AS VARCHAR(100)) = T.remark
+LEFT JOIN BSADB.dbo.DJ_SanctionListReference R 
+    ON E.EntityId = R.EntityId 
+   AND R.SanctionListReference LIKE '%Japanese Finance%'
+WHERE T.GROUPID = 6
+  AND (
+      E.EntityId IS NULL 
+      OR ISNULL(E.Deceased, 0) <> 1 
+      OR R.EntityId IS NULL
+  );
+
+> 若此查詢無回傳任何資料（0 筆），代表目前 GROUPID = 6 裡面的每一筆資料都完全符合 DJ 死亡日本金融制裁的篩選規則。
+> 
+
+
+
+
+---
+
+
+
+沒問題，直接把進度切成3 個小段落，每段只要 1～2 分鐘就能看完：
+第一段：30 秒速查（直接執行這段語法）
+把這段 SQL 貼進去執行，只要能查出資料，就代表它是 DJ 名單且狀態為死亡：
+SELECT 
+    T.ent_num,
+    T.spec_name          AS [OFAC姓名],
+    E.FullName           AS [DJ原始姓名],
+    E.Deceased           AS [是否死亡(1=是)],
+    R.SanctionListReference AS [制裁名單],
+    T.DInd               AS [狀態(N=正常有效)]
+FROM BSADBJP..OFAC_SPEC T
+JOIN BSADB.dbo.DJ_Entity E 
+    ON CAST(E.EntityId AS VARCHAR(100)) = T.remark
+JOIN BSADB.dbo.DJ_SanctionListReference R 
+    ON E.EntityId = R.EntityId
+WHERE T.GROUPID = 6
+  AND E.Deceased = 1
+  AND R.SanctionListReference LIKE '%Japanese Finance%';
+
+第二段：怎麼看查出來的結果？
+對照剛才查出來的欄位：
+ * E.Deceased 是否為 1：是 1 就確認他在 DJ 系統中是已身故名單。
+ * R.SanctionListReference：是否有包含 Japanese Finance。
+ * T.DInd 是否為 'N'：'N' 代表目前生效中（沒有被刪除註記）。
+第三段：反向確認（有沒有「不該寫入卻寫入」的？）
+如果想確認裡面有沒有混入活人或非名單的髒資料，執行這段：
+SELECT T.ent_num, T.spec_name, T.remark, E.Deceased
+FROM BSADBJP..OFAC_SPEC T
+LEFT JOIN BSADB.dbo.DJ_Entity E 
+    ON CAST(E.EntityId AS VARCHAR(100)) = T.remark
+WHERE T.GROUPID = 6
+  AND (E.Deceased <> 1 OR E.EntityId IS NULL);
+
+ * 結果是 0 筆：代表完全乾淨，裡面的資料通通符合死亡名單規定。
