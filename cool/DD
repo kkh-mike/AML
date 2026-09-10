@@ -1,4 +1,35 @@
 
+	<add key="File_Prefix" value="AML_"/>
+		
+		<add key="Delimeter" value="," />
+		<add key="OutputTargetDirectory" value="D:\AML_Source\20251114_新光資轉\EXE\"/>
+		<add key="BackupFolder" value="D:\AML_Source\20251114_新光資轉\EXE\Backup" />
+		<add key="SourceFileHeaderOn" value="Y"/>
+		<add key="Timeout" value="172800"/>
+
+		<add key="FilterCustomer" value="N"/>
+		<add key="FilterCustomerTableName" value="BANCS_SK_CUST_INFO"/>
+		<add key="FilterCustomerColumnName" value="CUST_NO"/>
+		<add key="CIF_Mapping" value="Y"/>
+		<add key="CIF_MappingTable" value="BANCS_SK_CUST_INFO"/>
+		<add key="CIF_MappingSourceColumn" value="SK_CUST_ID"/>
+		<add key="CIF_MappingTargetColumn" value="TS_CUST_ID"/>
+		<add key="CIF_MappingFlagColumn" value="CUST_RE_NO_FLG"/>
+
+
+		<add key="Acct_Mapping" value="Y"/>
+		<add key="Acct_MappingTable" value="XREF"/>
+		<add key="Acct_MappingSourceColumn" value="EXTN_REF_NO"/>
+		<add key="Acct_MappingTargetColumn" value="INTN_REF_NO"/>
+		<add key="Acct_MappingPrefix" value="SK_"/>
+		<add key="Acct_MappingFlagColumn" value=""/>
+
+
+		<add key="TrxnFromPeriod" value="202401"/>
+		<add key="TrxnToPeriod" value="202606"/>				
+
+
+
 因為我的 LoadTrxn_Migrate_buffer 已經寫入了
 我現在想要單獨測這段可以?
 
