@@ -1,56 +1,126 @@
-   -- TTL MTHLY SMRY
-                            INSERT  INTO dbo.TTL_MTHLY_ACCT_SMRY
-                                    ( CIF_KEY ,
-                                      APPL ,
-                                      ACCT_KEY ,
-                                      YYYYMM ,
-                                      TTL ,
-                                      CRTTL ,
-                                      DRTTL ,
-                                      CNT ,
-                                      CRCNT ,
-                                      DRCNT ,
-                                      MIN ,
-                                      MAX ,
-                                      CRMIN ,
-                                      DRMIN ,
-                                      CRMAX ,
-                                      DRMAX
-                                    )
-                                    SELECT  B.NEW_CIF_KEY ,
-                                            APPL ,
-                                            ISNULL(C.FinalAcctKey,ISNULL(@Prefix,'') + A.ACCT_KEY) ,
-                                            YYYYMM ,
-                                            TTL ,
-                                            CRTTL ,
-                                            DRTTL ,
-                                            CNT ,
-                                            CRCNT ,
-                                            DRCNT ,
-                                            MIN ,
-                                            MAX ,
-                                            CRMIN ,
-                                            DRMIN ,
-                                            CRMAX ,
-                                            DRMAX
-                                    FROM    dbo.LoadTrxn_Migrate_buffer A
-											LEFT JOIN #TrxnAcctFinalMapping C ON A.ACCT_KEY = C.SourceAcctKey
-                                            INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
-                                    WHERE   TrxnType = 'TTL MTHLY SMRY'
-                                            AND NOT EXISTS ( SELECT
-                                                              1
-                                                             FROM
-                                                              dbo.TTL_MTHLY_ACCT_SMRY Z
-                                                             WHERE
-                                                              Z.CIF_KEY = B.NEW_CIF_KEY
-                                                              AND Z.YYYYMM = A.YYYYMM 
-                                                              AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, ISNULL(@Prefix,'') + A.ACCT_KEY) );
+可以，最簡單就是在 INSERT 後面用 @@ROWCOUNT 取得這一次 INSERT 實際寫入的筆數，然後寫進 Migrator_LOG。
 
+你現在這段：
 
+INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG) 
+SELECT @Time, @ModuleName + ' migrate completed -------> ', 'N';
 
-                 INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG) 
+可以改成下面這樣。
 
+✅ 寫入 Log + CMD 顯示筆數
 
-如果我想要把INSERT  INTO dbo.TTL_MTHLY_ACCT_SMRY  寫入多少數量 寫到log 或顯示再跑完的cmd 要怎麼改
-                                SELECT @Time, @ModuleName + ' migrate completed -------> '  , 'N';
+-- TTL MTHLY SMRY
+INSERT INTO dbo.TTL_MTHLY_ACCT_SMRY
+(
+    CIF_KEY,
+    APPL,
+    ACCT_KEY,
+    YYYYMM,
+    TTL,
+    CRTTL,
+    DRTTL,
+    CNT,
+    CRCNT,
+    DRCNT,
+    MIN,
+    MAX,
+    CRMIN,
+    DRMIN,
+    CRMAX,
+    DRMAX
+)
+SELECT
+    B.NEW_CIF_KEY,
+    APPL,
+    ISNULL(C.FinalAcctKey, ISNULL(@Prefix, '') + A.ACCT_KEY),
+    YYYYMM,
+    TTL,
+    CRTTL,
+    DRTTL,
+    CNT,
+    CRCNT,
+    DRCNT,
+    MIN,
+    MAX,
+    CRMIN,
+    DRMIN,
+    CRMAX,
+    DRMAX
+FROM dbo.LoadTrxn_Migrate_buffer A
+LEFT JOIN #TrxnAcctFinalMapping C
+    ON A.ACCT_KEY = C.SourceAcctKey
+INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B
+    ON A.CIF_KEY = B.SOURCE_CIF_KEY
+WHERE TrxnType = 'TTL MTHLY SMRY'
+AND NOT EXISTS
+(
+    SELECT 1
+    FROM dbo.TTL_MTHLY_ACCT_SMRY Z
+    WHERE Z.CIF_KEY = B.NEW_CIF_KEY
+      AND Z.YYYYMM = A.YYYYMM
+      AND Z.ACCT_KEY =
+          ISNULL(C.FinalAcctKey, ISNULL(@Prefix, '') + A.ACCT_KEY)
+);
+-- 取得本次 INSERT 筆數
+DECLARE @InsertCount INT;
+SET @InsertCount = @@ROWCOUNT;
+-- 寫入 LOG
+INSERT INTO dbo.Migrator_LOG
+(
+    PROC_DATE,
+    MSG_LOG,
+    FLAG
+)
+SELECT
+    @Time,
+    @ModuleName + ' migrate completed. Inserted rows: '
+        + CAST(@InsertCount AS VARCHAR(20)),
+    'N';
+-- CMD / SSMS 顯示
+PRINT @ModuleName
+    + ' migrate completed. Inserted rows: '
+    + CAST(@InsertCount AS VARCHAR(20));
 
+跑完會看到：
+
+TTL MTHLY SMRY migrate completed. Inserted rows: 1234567
+
+Log 裡則會有：
+
+TTL MTHLY SMRY migrate completed. Inserted rows: 1234567
+
+⸻
+
+⚠️ 有一個重點
+
+@@ROWCOUNT 一定要緊接在 INSERT 後面取。
+
+也就是：
+
+INSERT ...
+SELECT ...
+SET @InsertCount = @@ROWCOUNT;
+
+不要先做其他 SQL，例如：
+
+INSERT ...
+SELECT ...
+SET @InsertCount = @@ROWCOUNT;
+
+因為中間的 SQL 可能會把 @@ROWCOUNT 改掉。
+
+⸻
+
+如果你的資料可能超過 21 億筆
+
+你這種 AML migration 資料量很大，我會建議直接用：
+
+DECLARE @InsertCount BIGINT;
+
+不過 SQL Server 的單次 INSERT 通常不會實際超過 INT，所以目前用 INT 也可以。
+
+另外，如果你是用 sqlcmd / CMD 執行 .sql，PRINT 有時候會等一段時間才把訊息吐出來。如果你希望 migration 跑很久時，可以即時看到：
+
+TTL MTHLY SMRY migrate completed. Inserted rows: 1234567
+
+可以改用 RAISERROR ... WITH NOWAIT，這對你這種跑大量 migration 的情境會更好。
