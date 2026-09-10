@@ -1,3 +1,27 @@
+
+看起來極高機率是全部都是新名單，但要確認兩個關鍵細節才算 100% 確定：
+ * 看第一個 Grid 的筆數：第一張圖上面那一格（INSERT 預覽）是有跑出資料的（左邊看得到序號 1~31 而且下面還有卷軸）。如果那一格的總筆數，剛好等於你 #tempDJBlacklistDetailsSID 的總筆數，那就代表這整批在目標表裡完全找不到，確實全部都是全新名單。
+ * 確認比對欄位沒有配錯：目前的比對條件是：
+   T.spec_name = S.IdentificationNumber AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+
+   只要確認系統在 GROUPID = 8 的規範裡，OFAC_SPEC.spec_name 放的真的是 IdentificationNumber（證券代號，如 RU000A105823），而不是實體名稱或人名，那麼這個比對結果就是完全正確的。
+驗證指令：
+執行這行快速比對兩邊筆數：
+SELECT 
+    (SELECT COUNT(*) FROM #tempDJBlacklistDetailsSID) AS Staging_Total_Count,
+    (SELECT COUNT(*) 
+     FROM #tempDJBlacklistDetailsSID S
+     WHERE NOT EXISTS (
+         SELECT 1 FROM BSADBSG..OFAC_SPEC T 
+         WHERE T.GROUPID = 8 
+           AND T.spec_name = S.IdentificationNumber 
+           AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+     )) AS New_Insert_Count;
+
+如果兩個數字一樣，就確定是全部新增（INSERT）。
+
+
+
 現在暫存表已經有資料了（這張是 SID 證券識別碼的暫存表 #tempDJBlacklistDetailsSID），接下來要看目的：
 情境一：只是要「預先查看」即將被寫入/變更的資料
 直接在同一個視窗執行比對查詢（不需要跑 MERGE，也不會改動實體表）：
