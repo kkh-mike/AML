@@ -1,88 +1,29 @@
-該 View 出現多達 52 筆重複/膨脹的結果，最常見的原因是 AML_RIGHTS_GROUP 群組展開（TYP='01'） 或 多個區塊（Main Case 與 UNION ALL）同時命中並產生笛卡爾積。
-請依序透過以下步驟與 SQL 進行排查：
-第一步：找出這 52 筆是從哪一個區塊產生的？
-請執行下方標註來源的 SQL，直接確認是 Main Case 還是哪一個 UNION ALL 區塊在膨脹：
--- 測試 1: 檢查主邏輯 (Main Case)
-SELECT 'Main_Case' AS SOURCE_BLOCK, COUNT(*) AS CNT
-FROM [TAS9-T].[TSAAS].[dbo].[TBL_CMPEMPAPP] A WITH(NOLOCK)
-LEFT JOIN [TAS9-T].[TSAAS].[dbo].[HREMPM_N] B WITH(NOLOCK) ON A.EMPCODE = B.EMP_ID
+從暫存表 #tempDJBlacklistDetailsSID 的欄位來看，裡面完全沒有放實體名稱（SdnName），只有 IdentificationNumber（ISIN 證券代碼，例如 RU000A105823）和 EntNum（1053059）。
+實體真正的名字通常存在以下兩個地方：
+ * 原始來源表（道瓊 DJ 表）：
+   名字原本是在 DJ_Entity 或 DJ_List_Data_A。如果想知道這組 EntNum 是誰，可以執行：
+   SELECT DISTINCT EntNum, SdnName 
+FROM DJ_List_Data_A 
+WHERE EntNum = 1053059;
+
+   或者：
+   SELECT EntityId, LastName, FirstName, OriginalScriptName
+FROM BSADB.dbo.DJ_Entity
+WHERE EntityId = 1053059;
+
+ * 目標表 OFAC_SPEC 中的定義差異：
+   * 在一般的黑名單（如主要的制裁名單或 SCO）中，spec_name 放的是受制裁人/公司名稱（SdnName）。
+   * 但在 SID（證券代碼 / Securities Identification）名單 的架構下，spec_name 本身就是直接放證券代號（即 IdentificationNumber），而母體公司代號則記錄在 remark（EntNum）。
+如果要一次檢視「證券代號 + 發行實體名稱」，可以用這段查詢關聯出來：
+SELECT 
+    S.EntNum,
+    D.SdnName AS EntityName,       -- 這就是對應的公司/實體名字
+    S.IdentificationNumber AS SID, -- 證券代號 (通常寫入 spec_name)
+    S.IdentificationType,
+    S.UpdatedDate
+FROM #tempDJBlacklistDetailsSID S
 LEFT JOIN (
-    SELECT DEPT_CD_FUNC, MIN(ACCT_DEPT_CD) AS ACCT_DEPT_CD 
-    FROM [TAS9-T].[TSAAS].[dbo].[HREMPM_N] WITH(NOLOCK) 
-    WHERE DEPT_CD_FUNC LIKE 'AFJ%' AND ISNULL(QUIT_DT, '') = '' AND ACCT_DEPT_CD NOT IN ('0999', '0068') 
-    GROUP BY DEPT_CD_FUNC
-) C ON B.DEPT_CD_FUNC = C.DEPT_CD_FUNC
-LEFT JOIN (
-    SELECT 'B10_852' AS OLD_PERMCODE, NULL AS NEW_PERMCODE UNION 
-    SELECT 'B10_852', 'B10_0900' UNION
-    SELECT 'B20_852', NULL UNION 
-    SELECT 'B20_852', 'B20_0900'
-) D ON D.OLD_PERMCODE = A.PERMCODE
-WHERE A.EMPCODE = '1128072'
-  AND A.COMP_CD IN ('TSIB', 'TO') AND A.APPCODE = 'AML' 
-  AND LEFT(A.PERMCODE, 2) NOT IN ('SG', 'AU') 
-  AND ISNULL(B.QUIT_DT, '') = ''
-  AND B.DEPT_CD_FUNC NOT LIKE 'ACVH%'
-  AND A.EMPCODE NOT IN (SELECT EMPCODE FROM BatchJobDB..AML_EMP_DEPT_MAP WHERE TYP IN ('01', '03'))
+    SELECT DISTINCT EntNum, SdnName 
+    FROM DJ_List_Data_A
+) D ON S.EntNum = D.EntNum;
 
-UNION ALL
--- 測試 2: TYP '01' (集中設定 - 群組展開)
-SELECT 'TYP_01_GROUP', COUNT(*)
-FROM [TAS9-T].[TSAAS].[dbo].[TBL_CMPEMPAPP] T 
-JOIN [TAS9-T].[TSAAS].[dbo].[HREMPM_N]      H ON T.EMPCODE = H.EMP_ID 
-JOIN BatchJobDB..AML_EMP_DEPT_MAP           M ON T.EMPCODE = M.EMPCODE AND M.TYP = '01'
-JOIN BatchJobDB..AML_RIGHTS_GROUP           N ON M.ACCT_DEPT_CD = N.GRP
-WHERE T.EMPCODE = '1128072' AND H.COMP_CD = 'TSIB' AND T.APPCODE = 'AML'
-
-UNION ALL
--- 測試 3: TYP '02' (兼任指派)
-SELECT 'TYP_02_PARTTIME', COUNT(*)
-FROM [TAS9-T].[TSAAS].[dbo].[TBL_CMPEMPAPP] T 
-JOIN [TAS9-T].[TSAAS].[dbo].[HREMPM_N]      H ON T.EMPCODE = H.EMP_ID 
-JOIN BatchJobDB..AML_EMP_DEPT_MAP           M ON T.EMPCODE = M.EMPCODE AND M.TYP = '02'
-WHERE T.EMPCODE = '1128072' AND H.COMP_CD = 'TSIB' AND T.APPCODE = 'AML'
-
-UNION ALL
--- 測試 4: TYP '03' (員編指定)
-SELECT 'TYP_03_EMP', COUNT(*)
-FROM [TAS9-T].[TSAAS].[dbo].[TBL_CMPEMPAPP] T 
-JOIN [TAS9-T].[TSAAS].[dbo].[HREMPM_N]      H ON T.EMPCODE = H.EMP_ID 
-JOIN BatchJobDB..AML_EMP_DEPT_MAP           M ON T.EMPCODE = M.EMPCODE AND M.TYP = '03'
-WHERE T.EMPCODE = '1128072' AND H.COMP_CD = 'TSIB' AND T.APPCODE = 'AML'
-
-UNION ALL
--- 測試 5: TYP '04' (字尾比對)
-SELECT 'TYP_04_PERM_SUFFIX', COUNT(*)
-FROM [TAS9-T].[TSAAS].[dbo].[TBL_CMPEMPAPP] T 
-JOIN [TAS9-T].[TSAAS].[dbo].[HREMPM_N]      H ON T.EMPCODE = H.EMP_ID 
-JOIN BatchJobDB..AML_EMP_DEPT_MAP           M ON RTRIM(T.PERMCODE) LIKE '%' + M.PERMCODE AND M.TYP = '04'
-WHERE T.EMPCODE = '1128072' AND H.COMP_CD = 'TSIB' AND T.APPCODE = 'AML';
-
-第二步：關鍵 Table 排查清單與常見病因
-1. BatchJobDB..AML_EMP_DEPT_MAP 與 BatchJobDB..AML_RIGHTS_GROUP
- * 檢查 SQL：
-   SELECT * FROM BatchJobDB..AML_EMP_DEPT_MAP WHERE EMPCODE = '1128072';
-
- * 常見原因（機率最高）：
-   * 若該員編在 AML_EMP_DEPT_MAP 的 TYP = '01'，對應到的 ACCT_DEPT_CD 其實是個群組代碼（GRP）。
-   * 執行 SELECT * FROM BatchJobDB..AML_RIGHTS_GROUP WHERE GRP = '該群組代碼'，很可能該群組底下本身就設定了 52 個分行，經由 JOIN 展開成 52 筆。
-2. [TAS9-T].[TSAAS].[dbo].[TBL_CMPEMPAPP]
- * 檢查 SQL：
-   SELECT * FROM [TAS9-T].[TSAAS].[dbo].[TBL_CMPEMPAPP] 
-WHERE EMPCODE = '1128072' AND APPCODE = 'AML';
-
- * 常見原因：
-   * 該員工在 AML 系統中是否被賦予了多個 PERMCODE？如果該員有 N 個權限碼，再乘上群組或對應設定，筆數就會成倍放大。
-3. BatchJobDB..AML_EMP_DEPT_MAP 的 TYP = '04'（字尾比對）
- * 檢查 SQL：
-   SELECT * FROM BatchJobDB..AML_EMP_DEPT_MAP WHERE TYP = '04';
-
- * 常見原因：
-   * TYP='04' 是用 LIKE '%' + M.PERMCODE 來 JOIN，若該表設定了過於寬鬆的字尾（例如只有單一英文字母或空白），會造成大量不必要的笛卡爾積配對。
-   * 主邏輯的排除清單漏洞：主邏輯只有 NOT IN (SELECT EMPCODE ... WHERE TYP IN ('01', '03'))，並未排除 TYP='02' 與 TYP='04'。如果該員有符合 TYP 02 或 04，主邏輯與 UNION 區塊會同時產出資料。
-4. [TAS9-T].[TSAAS].[dbo].[HREMPM_N]
- * 檢查 SQL：
-   SELECT * FROM [TAS9-T].[TSAAS].[dbo].[HREMPM_N] WHERE EMP_ID = '1128072';
-
- * 常見原因：
-   * 確認是否有重複的工號紀錄（例如歷史異動未過濾、兼任多重職務等）。
