@@ -1,12 +1,52 @@
-原因非常清楚，就是這筆資料：683933（State Organization for Irrigation Projects）。
-它沒寫進去是因為兩邊的條件它都沒符合：
- * 它是一間「機構/組織」：所以 Deceased 是 NULL（組織不會死亡），死亡名單邏輯抓不到它。
- * 它在 DJ_List_Data_A 沒有 Primary Name：是否有PrimaryName = 0，所以第一段 NamePropertyBitCode & 1 > 0 也漏掉了它。
-30 秒確認它的名字到底被存成什麼？
-直接執行這段短語法，看它在名單裡到底用了什麼代碼：
-SELECT EntNum, SdnName, NamePropertyBitCode
-FROM BSADB.dbo.DJ_List_Data_A
-WHERE EntNum = 683933;
 
-> 如果查出來有資料，但 NamePropertyBitCode 不是 1（例如是 2 代表別名），就說明第一段篩選條件設太嚴，把這類機構給濾掉了。
-> 
+
+  SELECT 
+    -- 1. DJ 來源端的死亡名單總數
+    (
+        SELECT COUNT(DISTINCT A.EntityId)
+        FROM BSADB.dbo.DJ_Entity A
+        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+        WHERE A.Deceased = 1
+          AND B.SanctionListReference LIKE '%Japanese Finance%'
+    ) AS [DJ死亡名單總數],
+
+    -- 2. 實際上真的有進到目標表的死亡名單數
+    (
+        SELECT COUNT(DISTINCT T.remark)
+        FROM BSADBJP..OFAC_SPEC T
+        JOIN BSADB.dbo.DJ_Entity A ON T.remark = CAST(A.EntityId AS VARCHAR(100))
+        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+        WHERE T.GROUPID = 5
+          AND T.DInd = 'N'
+          AND A.Deceased = 1
+          AND B.SanctionListReference LIKE '%Japanese Finance%'
+    ) AS [已在目標表中的死亡名單數],
+
+    -- 3. 兩者相減：若是 0 就代表「全部都在裡面，一個沒漏」
+    (
+        SELECT COUNT(DISTINCT A.EntityId)
+        FROM BSADB.dbo.DJ_Entity A
+        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+        WHERE A.Deceased = 1
+          AND B.SanctionListReference LIKE '%Japanese Finance%'
+    )
+    -
+    (
+        SELECT COUNT(DISTINCT T.remark)
+        FROM BSADBJP..OFAC_SPEC T
+        JOIN BSADB.dbo.DJ_Entity A ON T.remark = CAST(A.EntityId AS VARCHAR(100))
+        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+        WHERE T.GROUPID = 5
+          AND T.DInd = 'N'
+          AND A.Deceased = 1
+          AND B.SanctionListReference LIKE '%Japanese Finance%'
+    ) AS [差額_漏掉筆數];
+
+
+
+
+
+如果現在這個加上 A.Deceased = 1
+
+如果有差一筆
+要怎麼找出原因
