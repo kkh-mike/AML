@@ -1,8 +1,179 @@
-要預先找出即將被寫入或異動的資料，主要有兩種方式：
-方法一：直接用 LEFT JOIN / NOT EXISTS 模擬（最推薦、不影響資料）
-針對不同動作（新增、更新、邏輯刪除），直接執行對應的查詢：
- * 1. 找出「即將新增」的名單（對應 WHEN NOT MATCHED BY TARGET）
-SELECT S.*
+以下提供兩種不同情境下最完整的可執行腳本：
+方案 A：Dry Run 預演腳本（利用 Transaction + ROLLBACK，輸出完整欄位不留痕跡）
+這個腳本模擬實際 MERGE 的完整寫入行為與欄位對應，但最後執行 ROLLBACK，資料完全不會變更。
+BEGIN TRANSACTION;
+
+    -- 宣告預覽暫存表，結構對應 LOG 輸出
+    CREATE TABLE #PreviewResult (
+        ActionType          NVARCHAR(10),
+        ActionCD            VARCHAR(2),
+        ent_num             INT,
+        spec_name           NVARCHAR(350),
+        updated_date        VARCHAR(8),
+        remark              VARCHAR(100),
+        TaxID               VARCHAR(50),
+        IDENT               VARCHAR(2),
+        IDENTO              VARCHAR(50),
+        TaxIDCD             VARCHAR(10),
+        IDNUM               NVARCHAR(44),
+        IssBy               VARCHAR(50),
+        DInd                VARCHAR(1),
+        creUserID           VARCHAR(50),
+        UserID              VARCHAR(50),
+        ActionDT            DATETIME,
+        Address             NVARCHAR(400),
+        State               NVARCHAR(200),
+        Country             NVARCHAR(100),
+        GROUPID             VARCHAR(10),
+        SOURCE              VARCHAR(100),
+        EnterFlag           VARCHAR(10),
+        ApprovedBy          VARCHAR(50),
+        ApprovedDate        DATETIME,
+        DelUserID           VARCHAR(50),
+        DelDate             DATETIME,
+        ApproveDelUserID    VARCHAR(50),
+        ApproveDelDate      DATETIME,
+        ActionDT_UTC        DATETIME,
+        ApprovedDate_UTC    DATETIME,
+        DelDate_UTC         DATETIME,
+        ApproveDelDate_UTC  DATETIME,
+        DOB                 VARCHAR(8)
+    );
+
+    ;WITH TargetTable AS (
+        SELECT 
+            A.spec_name, A.updated_date, A.remark, A.TaxID, A.IDENT, A.IDENTO, A.TaxIDCD, A.IDNUM, A.issBy, 
+            A.DInd, A.creUserID, A.STATE, A.ADDRESS, A.COUNTRY, A.GROUPID, A.SOURCE, A.EnterFlag, 
+            A.ApprovedBy, A.ApprovedDate, A.DelUserID, A.DelDate, A.ApproveDelUserID, A.ApproveDelDate, A.creDate,
+            A.updated_date_UTC, A.ApprovedDate_UTC, A.DelDate_UTC, A.ApproveDelDate_UTC, A.creDate_UTC, 
+            A.ent_num, A.DOB
+        FROM BSADBSG..OFAC_SPEC A 
+        WHERE A.GROUPID = 27
+    )
+    MERGE TargetTable AS T
+    USING (
+        SELECT 
+            NUM, EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB 
+        FROM #tempDJBlacklistDetailsSCO
+    ) AS S
+    ON T.spec_name = S.SdnName 
+    AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+
+    WHEN NOT MATCHED BY TARGET THEN
+        INSERT (
+            spec_name, updated_date, remark, TaxID, IDENT, IDENTO, TaxIDCD, IDNUM, IssBy, DInd,
+            creUserID, STATE, ADDRESS, COUNTRY, GROUPID, SOURCE, EnterFlag, ApprovedBy, ApprovedDate, DelUserID,
+            DelDate, ApproveDelUserID, ApproveDelDate, creDate, updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, 
+            ApproveDelDate_UTC, creDate_UTC, ent_num, DOB
+        )
+        VALUES (
+            S.SdnName, S.UpdatedDate, S.EntNum, '', S.IdentType, S.IdentNumber, '', '', '', 'N', 
+            'System Admin', ISNULL(S.City, ''), S.Address, S.Country, '27', 'Sanctions Control Ownership', 'D', 
+            'System Admin', GETDATE(), NULL, NULL, NULL, NULL, GETDATE(), GETUTCDATE(), GETUTCDATE(), NULL, 
+            NULL, GETUTCDATE(), S.Num, S.DOB
+        )
+
+    WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN 
+        UPDATE SET 
+            T.DInd               = 'Y', 
+            T.DelUserID          = 'System Admin', 
+            T.DelDate            = GETDATE(), 
+            T.ApproveDelUserID   = 'System Admin', 
+            T.ApproveDelDate     = GETDATE(),
+            T.DelDate_UTC        = GETUTCDATE()
+
+    WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN 
+        UPDATE SET 
+            T.DInd               = 'N', 
+            T.updated_date       = S.UpdatedDate, 
+            T.DelUserID          = NULL, 
+            T.DelDate            = NULL, 
+            T.ApproveDelUserID   = NULL, 
+            T.ApproveDelDate     = NULL,
+            T.DelDate_UTC        = NULL, 
+            T.EnterFlag          = 'D', 
+            T.updated_date_UTC   = GETUTCDATE(),
+            T.ADDRESS            = S.ADDRESS, 
+            T.STATE              = ISNULL(S.City, ''), 
+            T.COUNTRY            = S.Country, 
+            T.IDENT              = S.IdentType, 
+            T.IDNUM              = S.IdentNumber, 
+            T.DOB                = S.DOB
+
+    OUTPUT 
+        $ACTION,
+        CASE 
+            WHEN $ACTION = 'INSERT' OR ($ACTION = 'UPDATE' AND Deleted.DInd = 'Y' AND Inserted.DInd = 'N') THEN '01' 
+            WHEN $ACTION = 'UPDATE' AND Inserted.DInd = 'Y' THEN '03' 
+            ELSE '02' 
+        END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.ent_num ELSE Deleted.ent_num END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.spec_name ELSE Deleted.spec_name END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.updated_date ELSE Deleted.updated_date END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.remark ELSE Deleted.remark END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.taxid ELSE Deleted.taxid END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.IDENT ELSE Deleted.IDENT END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.IDENTO ELSE Deleted.IDENTO END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.TaxIDCD ELSE Deleted.TaxIDCD END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.IDNUM ELSE Deleted.IDNUM END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.issby ELSE Deleted.issby END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.DInd ELSE Deleted.DInd END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.creUserID ELSE Deleted.creUserID END,
+        'System Admin',
+        GETUTCDATE(),        
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.ADDRESS ELSE Deleted.ADDRESS END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.STATE ELSE Deleted.STATE END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.COUNTRY ELSE Deleted.COUNTRY END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.GROUPID ELSE Deleted.GROUPID END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.SOURCE ELSE Deleted.SOURCE END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.EnterFlag ELSE Deleted.EnterFlag END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.ApprovedBy ELSE Deleted.ApprovedBy END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.ApprovedDate ELSE Deleted.ApprovedDate END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.DelUserID ELSE Deleted.DelUserID END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.DelDate ELSE Deleted.DelDate END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.ApproveDelUserID ELSE Deleted.ApproveDelUserID END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.ApproveDelDate ELSE Deleted.ApproveDelDate END,
+        GETUTCDATE(),
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.ApprovedDate_UTC ELSE Deleted.ApprovedDate_UTC END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.DelDate_UTC ELSE Deleted.DelDate_UTC END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.ApproveDelDate_UTC ELSE Deleted.ApproveDelDate_UTC END,
+        CASE WHEN $ACTION = 'INSERT' THEN Inserted.DOB ELSE Deleted.DOB END
+    INTO #PreviewResult;
+
+    -- 查詢預覽結果（依異動類別排序）
+    SELECT 
+        ActionType,
+        ActionCD,
+        ent_num,
+        spec_name,
+        remark,
+        updated_date,
+        DInd,
+        Address,
+        State,
+        Country
+    FROM #PreviewResult
+    ORDER BY ActionCD, ent_num;
+
+-- 強制還原，不對資料庫造成任何影響
+ROLLBACK TRANSACTION;
+
+DROP TABLE #PreviewResult;
+
+方案 B：純查詢腳本（不鎖表、不啟動交易，依類別分組）
+如果資料表體量較大，不希望觸發交易排它鎖，直接執行以下三組查詢即可各自導出名單：
+-- 1. 即將【新增】的名單 (Action 01 - INSERT)
+SELECT 
+    'INSERT' AS ActionType,
+    '01'     AS ActionCD,
+    S.Num    AS ent_num,
+    S.SdnName AS spec_name,
+    S.EntNum  AS remark,
+    S.UpdatedDate,
+    'N'      AS DInd,
+    S.Address,
+    S.City   AS State,
+    S.Country
 FROM #tempDJBlacklistDetailsSCO S
 WHERE NOT EXISTS (
     SELECT 1 
@@ -12,24 +183,41 @@ WHERE NOT EXISTS (
       AND T.remark = CAST(S.EntNum AS VARCHAR(100))
 );
 
- * 2. 找出「即將更新」的名單（對應 WHEN MATCHED）
+-- 2. 即將【更新/重新啟用】的名單 (Action 01 或 02 - UPDATE)
 SELECT 
-    S.EntNum,
-    S.SdnName,
+    'UPDATE' AS ActionType,
+    CASE WHEN T.DInd = 'Y' THEN '01' ELSE '02' END AS ActionCD,
+    T.ent_num,
+    S.SdnName AS spec_name,
+    S.EntNum  AS remark,
     T.updated_date AS Old_UpdatedDate,
     S.UpdatedDate  AS New_UpdatedDate,
     T.DInd         AS Old_DInd,
-    'N'            AS New_DInd
+    'N'            AS New_DInd,
+    S.Address,
+    S.City         AS State,
+    S.Country
 FROM #tempDJBlacklistDetailsSCO S
-INNER JOIN BSADBSG..OFAC_SPEC T
+INNER JOIN BSADBSG..OFAC_SPEC T 
     ON T.spec_name = S.SdnName 
    AND T.remark = CAST(S.EntNum AS VARCHAR(100))
    AND T.GROUPID = 27
 WHERE T.DInd = 'Y' 
    OR S.UpdatedDate <> T.updated_date;
 
- * 3. 找出「即將被標記刪除」的既有名單（對應 WHEN NOT MATCHED BY SOURCE）
-SELECT T.ent_num, T.spec_name, T.remark, T.updated_date
+-- 3. 即將【邏輯刪除】的名單 (Action 03 - 標記為 DInd = 'Y')
+SELECT 
+    'DELETE' AS ActionType,
+    '03'     AS ActionCD,
+    T.ent_num,
+    T.spec_name,
+    T.remark,
+    T.updated_date,
+    T.DInd   AS Current_DInd,
+    'Y'      AS New_DInd,
+    T.ADDRESS,
+    T.STATE,
+    T.COUNTRY
 FROM BSADBSG..OFAC_SPEC T
 WHERE T.GROUPID = 27
   AND T.DInd = 'N'
@@ -39,30 +227,4 @@ WHERE T.GROUPID = 27
       WHERE T.spec_name = S.SdnName 
         AND T.remark = CAST(S.EntNum AS VARCHAR(100))
   );
-
-方法二：利用 Transaction + ROLLBACK 預演 MERGE
-如果想精準看見原 MERGE 的 OUTPUT 完整欄位，可以在測試時包裹 Transaction 並強制回滾：
-BEGIN TRANSACTION;
-
-    ;WITH TargetTable AS (
-        SELECT * FROM BSADBSG..OFAC_SPEC WHERE GROUPID = 27
-    )
-    MERGE TargetTable AS T
-    USING (SELECT * FROM #tempDJBlacklistDetailsSCO) AS S
-    ON T.spec_name = S.SdnName AND T.remark = CAST(S.EntNum AS VARCHAR(100))
-    WHEN NOT MATCHED BY TARGET THEN
-        INSERT (...) VALUES (...)
-    WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN
-        UPDATE SET T.DInd = 'Y'
-    WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN
-        UPDATE SET T.DInd = 'N'
-    -- 只輸出預覽，不寫入 LOG 表
-    OUTPUT 
-        $action AS ActionType,
-        COALESCE(Inserted.ent_num, Deleted.ent_num) AS ent_num,
-        COALESCE(Inserted.spec_name, Deleted.spec_name) AS spec_name,
-        COALESCE(Inserted.remark, Deleted.remark) AS remark;
-
--- 預覽完畢直接復原，完全不更動實體資料
-ROLLBACK TRANSACTION;
 
