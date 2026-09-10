@@ -1,52 +1,19 @@
+直接執行這段短 SQL，把漏掉的那 1 個人抓出來看原因：
+SELECT 
+    A.EntityId,
+    A.FullName,
+    A.Deceased,
+    T.DInd AS [目標表狀態],
+    T.spec_name AS [目標表姓名]
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+LEFT JOIN BSADBJP..OFAC_SPEC T 
+    ON T.remark = CAST(A.EntityId AS VARCHAR(100)) 
+   AND T.GROUPID = 5
+WHERE A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND (T.remark IS NULL OR T.DInd <> 'N');
 
-
-  SELECT 
-    -- 1. DJ 來源端的死亡名單總數
-    (
-        SELECT COUNT(DISTINCT A.EntityId)
-        FROM BSADB.dbo.DJ_Entity A
-        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE A.Deceased = 1
-          AND B.SanctionListReference LIKE '%Japanese Finance%'
-    ) AS [DJ死亡名單總數],
-
-    -- 2. 實際上真的有進到目標表的死亡名單數
-    (
-        SELECT COUNT(DISTINCT T.remark)
-        FROM BSADBJP..OFAC_SPEC T
-        JOIN BSADB.dbo.DJ_Entity A ON T.remark = CAST(A.EntityId AS VARCHAR(100))
-        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE T.GROUPID = 5
-          AND T.DInd = 'N'
-          AND A.Deceased = 1
-          AND B.SanctionListReference LIKE '%Japanese Finance%'
-    ) AS [已在目標表中的死亡名單數],
-
-    -- 3. 兩者相減：若是 0 就代表「全部都在裡面，一個沒漏」
-    (
-        SELECT COUNT(DISTINCT A.EntityId)
-        FROM BSADB.dbo.DJ_Entity A
-        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE A.Deceased = 1
-          AND B.SanctionListReference LIKE '%Japanese Finance%'
-    )
-    -
-    (
-        SELECT COUNT(DISTINCT T.remark)
-        FROM BSADBJP..OFAC_SPEC T
-        JOIN BSADB.dbo.DJ_Entity A ON T.remark = CAST(A.EntityId AS VARCHAR(100))
-        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE T.GROUPID = 5
-          AND T.DInd = 'N'
-          AND A.Deceased = 1
-          AND B.SanctionListReference LIKE '%Japanese Finance%'
-    ) AS [差額_漏掉筆數];
-
-
-
-
-
-如果現在這個加上 A.Deceased = 1
-
-如果有差一筆
-要怎麼找出原因
+原因判斷
+ * 目標表狀態 = 'Y'：這筆曾寫入過，但被系統軟刪除（判定為無效）。
+ * 目標表狀態 是 NULL：代表這筆從未成功寫入過（可能在寫入時因姓名為空、或被其他條件濾掉）。
