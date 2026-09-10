@@ -1,53 +1,26 @@
-	
+直接執行這段語法，把那唯一漏掉的 1 筆抓出來，並診斷原因：
+SELECT 
+    A.EntityId,
+    A.FullName,
+    A.Deceased,
+    (SELECT COUNT(1) FROM BSADB.dbo.DJ_List_Data_A L WHERE L.EntNum = A.EntityId AND L.NamePropertyBitCode & 1 > 0) AS [是否有PrimaryName],
+    (SELECT DInd FROM BSADBJP..OFAC_SPEC T WHERE T.GROUPID = 5 AND T.remark = CAST(A.EntityId AS VARCHAR(100))) AS [目標表狀態DInd]
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+WHERE B.SanctionListReference LIKE '%Japanese Finance%'
+  AND NOT EXISTS (
+      -- 排除掉目標表中「有效(DInd='N')」的資料
+      SELECT 1 
+      FROM BSADBJP..OFAC_SPEC T 
+      WHERE T.GROUPID = 5 
+        AND T.DInd = 'N'
+        AND T.remark = CAST(A.EntityId AS VARCHAR(100))
+  );
 
-  SELECT 
-    -- 1. DJ 來源端的死亡名單總數
-    (
-        SELECT COUNT(DISTINCT A.EntityId)
-        FROM BSADB.dbo.DJ_Entity A
-        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE  B.SanctionListReference LIKE '%Japanese Finance%'
-    ) AS [DJ死亡名單總數],
-
-    -- 2. 實際上真的有進到目標表的死亡名單數
-    (
-        SELECT COUNT(DISTINCT T.remark)
-        FROM BSADBJP..OFAC_SPEC T
-        JOIN BSADB.dbo.DJ_Entity A ON T.remark = CAST(A.EntityId AS VARCHAR(100))
-        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE T.GROUPID = 5
-          AND T.DInd = 'N'
-          AND B.SanctionListReference LIKE '%Japanese Finance%'
-    ) AS [已在目標表中的死亡名單數],
-
-    -- 3. 兩者相減：若是 0 就代表「全部都在裡面，一個沒漏」
-    (
-        SELECT COUNT(DISTINCT A.EntityId)
-        FROM BSADB.dbo.DJ_Entity A
-        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE  B.SanctionListReference LIKE '%Japanese Finance%'
-    )
-    -
-    (
-        SELECT COUNT(DISTINCT T.remark)
-        FROM BSADBJP..OFAC_SPEC T
-        JOIN BSADB.dbo.DJ_Entity A ON T.remark = CAST(A.EntityId AS VARCHAR(100))
-        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE T.GROUPID = 5
-          AND T.DInd = 'N'
-          AND B.SanctionListReference LIKE '%Japanese Finance%'
-    ) AS [差額_漏掉筆數];
-
-
-如果我現在這樣
-
-DJ死亡名單總數	已在目標表中的死亡名單數	差額_漏掉筆數
-3673	3672	1
-
-
-差1
-
-我要怎麼找出原因
-
-
-
+原因判定（對照查出的欄位）
+ * 情況 1：目標表狀態 DInd = 'Y'
+   這筆過去曾被寫入過，但後來在某次同步時被軟刪除（判定為無效）了。
+ * 情況 2：是否有PrimaryName = 0 且 Deceased = 0
+   原程式第一段只抓主名 NamePropertyBitCode & 1 > 0，第二段只抓死亡 Deceased = 1。如果這個人不是死亡狀態，又沒有設 Primary Name（例如只有別名），兩段邏輯都會剛好漏掉他。
+ * 情況 3：姓名包含特殊字元導致寫入失敗
+   如果查出來有 EntityId 與 FullName，但目標表完全沒有這筆記錄（DInd 顯示 NULL），代表是在新增階段因長度或型態問題被跳過。
