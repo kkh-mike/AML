@@ -1,8 +1,28 @@
+這段腳本的核心用途是**「排程執行前的『影響評估模擬器（Dry Run / 預覽）』」與「特定個案比對紀錄」**。
+它在不真正改動資料庫的前提下，讓你在執行 MERGE 前先算出：哪些資料會被 新增 (INSERT)、重新上架 (UPDATE)、更新 (UPDATE) 或 維持不變，下方則是你在追蹤特定歷史個案時留下的探查語法。
+為方便交接與後續維運，已將整段腳本整理並加上清晰註解如下：
+/*
+================================================================================
+【交接維運文件】Dow Jones 日本金融制裁同步：事前預覽模擬與個案排查工具
+================================================================================
+主要用途：
+  1. 上半部【模擬預覽 (Dry Run)】：
+     在執行正式 MERGE 前先跑這段，預先檢視「預計 INSERT / UPDATE / 不異動」的筆數與明細，
+     確認存活本名與死亡名單的觸發邏輯是否符合預期（注意：此腳本目標群組設定為 GROUPID = 11）。
+  2. 下半部【特定個案除錯指令】：
+     針對特定 EntityId、姓名或 ent_num 進行跨表狀態排查。
+================================================================================
+*/
+
+-- =============================================================================
+-- 第一部分：同步預覽模擬器（Dry Run）
+-- =============================================================================
+
 DECLARE @OtherIdentMthCode VARCHAR(2);
 SELECT @OtherIdentMthCode = IDENTCODE FROM dbo.IDENTMTHD_DIM WHERE OTHIND = 'Y';
 
 ;WITH RawBlacklistJP AS (
-    -- 條件 A：存活本名
+    -- 條件 A：存活本名（具備 Primary Name 且命中日本金融制裁）
     SELECT 
         A.EntNum, 
         A.SdnName, 
@@ -18,7 +38,7 @@ SELECT @OtherIdentMthCode = IDENTCODE FROM dbo.IDENTMTHD_DIM WHERE OTHIND = 'Y';
 
     UNION ALL
 
-    -- 條件 B：已故掃描（本次新增）
+    -- 條件 B：死亡名單掃描（Deceased = 1 且命中制裁，排除條件 A 已涵蓋者）
     SELECT 
         A.EntityId AS EntNum, 
         A.FullName AS SdnName, 
@@ -41,6 +61,7 @@ SELECT @OtherIdentMthCode = IDENTCODE FROM dbo.IDENTMTHD_DIM WHERE OTHIND = 'Y';
     GROUP BY A.EntityId, A.FullName
 )
 SELECT 
+    -- 模擬 MERGE 的判斷邏輯，預測動作
     CASE 
         WHEN T.remark IS NULL THEN '預計 INSERT (全新新增)'
         WHEN T.DInd = 'Y' THEN '預計 UPDATE (重新上架)'
@@ -49,7 +70,7 @@ SELECT
     END AS [Expected_Action],
     A.[Trigger_Reason]                  AS [觸發寫入原因],
     A.[Cond_Is_Deceased_Scan]           AS [條件:死亡掃描(Y/N)],
-    A.[Cond_Is_Primary_Name]             AS [條件:存活本名(Y/N)],
+    A.[Cond_Is_Primary_Name]            AS [條件:存活本名(Y/N)],
     'Y'                                 AS [條件:含Japanese Finance標籤],
     A.EntNum                            AS [remark(EntityId)],
     A.SdnName                           AS [spec_name(姓名)],
@@ -57,21 +78,43 @@ SELECT
     T.DInd                              AS [目前Target表DInd],
     T.ent_num                           AS [既有ent_num]
 FROM RawBlacklistJP A
+-- 注意：此處 GROUPID 需依環境確認（例如日本端主表是 5、6 還是 11）
 LEFT JOIN BSADBJP..OFAC_SPEC T WITH (NOLOCK) 
        ON T.GROUPID = 11 
       AND T.spec_name = A.SdnName 
       AND T.remark = CAST(A.EntNum AS VARCHAR(100))
 ORDER BY A.[Cond_Is_Deceased_Scan] DESC, [Expected_Action] DESC, A.EntNum;
 
-ent_num
-679685
 
-SELECT * FROM OFAC_SPEC WHERE spec_name = 'Al-Tikriti, Barzan Ibrahim Hassan'
+-- =============================================================================
+-- 第二部分：特定案例追蹤（歷史測試／除錯專區）
+-- 備註：以下為先前排查特定實體 (EntityId/remark: 330405) 時所使用的追蹤語法
+-- =============================================================================
 
-SELECT * FROM OFAC_SPEC WHERE remark = '330405'
-SELECT * FROM OFAC_SPEC WHERE ent_num = '330405'
+-- 案例實體：Al-Tikriti, Barzan Ibrahim Hassan (EntityId / remark: 330405)
+-- 1. 依姓名查詢在目標表 (OFAC_SPEC) 中的紀錄
+SELECT * 
+FROM BSADBJP..OFAC_SPEC 
+WHERE spec_name = 'Al-Tikriti, Barzan Ibrahim Hassan';
 
-SELECT * FROM BSADB.dbo.OFAC_GLSpec WHERE remark = '330405'
+-- 2. 依 remark (即來源 DJ EntityId) 查詢目標表
+SELECT * 
+FROM BSADBJP..OFAC_SPEC 
+WHERE remark = '330405';
 
+-- 3. 依目標表流水號 (ent_num) 查詢（若流水號剛好與 EntityId 重疊時核對用）
+SELECT * 
+FROM BSADBJP..OFAC_SPEC 
+WHERE ent_num = 330405;
 
-這是我之前寫的不知道幹嘛用的 你也幫我整理一下
+-- 4. 比對全行總清單 (OFAC_GLSpec) 中是否存在相同實體
+SELECT * 
+FROM BSADB.dbo.OFAC_GLSpec 
+WHERE remark = '330405';
+
+交接時需要提醒接手同仁的 2 個關鍵點
+ * GROUPID 設定核對：模擬器中使用的是 GROUPID = 11，而前面排查腳本用的是 5 或 6。使用前務必確認當前環境要比對的群組代碼是哪一個。
+ * Expected_Action 判定依據：
+   * 全新新增：目標表找不到此 EntityId 與姓名組合。
+   * 重新上架：過去被軟刪除（DInd = 'Y'），此次重新符合資格需要被洗回 'N'。
+   * 日期更新：資料已存在且有效，但 DJ 來源端有更新日期。
