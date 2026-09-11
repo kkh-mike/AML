@@ -1,3 +1,24 @@
+這代表兩張表的 CIF_KEY 清單完全吻合。
+查詢結果顯示 0 筆資料（空白），說明了兩件事：
+ * 沒有只存在於 TEST01 的 Key：原始表沒有少任何一筆 Key。
+ * 沒有只存在於原始表的 Key：TEST01 沒有少任何一筆 Key。
+後續確認步驟
+Key 一致只代表「戶號／主鍵相同」，不保證裡面的其他欄位數值完全一樣，也不排除可能有重複 Key（Duplicate Keys）的情況：
+ * 檢查是否有重複筆數：先確認兩張表的總筆數是否相同：
+   SELECT 'TEST' AS TBL, COUNT(1) AS CNT FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST
+UNION ALL
+SELECT 'TEST01', COUNT(1) FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST01;
+
+ * 檢查欄位值是否被改動：執行差集比對，確認是否整列完全相同（回傳 0 筆即代表整張表完全一模一樣）：
+   (SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST EXCEPT SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST01)
+UNION ALL
+(SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST01 EXCEPT SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST);
+
+
+
+
+
+
 SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST      -- 原始
 SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST01
 SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST02
