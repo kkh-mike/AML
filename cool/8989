@@ -1,1 +1,93 @@
-這段查詢是用來匯出內部人工維護（散戶自建與整批匯入）且目前仍有效的洗錢防制關注名單，產出包含基本身分、國別與審核紀錄的標準介面格式資料。
+
+
+
+-- MＸ
+SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw 
+order by CreatedDate DESC
+
+--14486
+  SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw WHERE bankNo = 'HK'AND CompletedDate >= '20260601'  AND CompletedDate < '20260701' 
+
+
+-- Cdtr  收款人
+-- CdtrAgt 收款人銀行
+-- FinInstnId 銀行識別資訊
+
+--107
+--Document/FIToFICstmrCdtTrf/CdtTrfTxInf/Cdtr/Nm 6565
+--Document/FIToFICstmrCdtTrf/CdtTrfTxInf/CdtrAgt/FinInstnId/Nm 6276
+--Document/FIToFICstmrCdtTrf/CdtTrfTxInf/Dbtr/Nm 6178
+--Document/FIToFICstmrCdtTrf/CdtTrfTxInf/Dbtr/PstlAdr/AdrLine 4536
+
+SELECT  MessageItemPath ,count(*) FROM SwiftMX_DetectionResult b
+join MESSAGEDATABASE..SwiftMX_Raw a  on b.CaseId = a.id
+where a.bankNo = 'HK' AND a.CompletedDate >= '20260601'  AND a.CompletedDate < '20260701' 
+ Group By  MessageItemPath order by 2 desc
+
+
+
+
+
+
+ SELECT SdnName , count(*) FROM SwiftMX_DetectionResult b
+join MESSAGEDATABASE..SwiftMX_Raw a  on b.CaseId = a.id
+where a.bankNo = 'HK' AND a.CompletedDate >= '20260601'  AND a.CompletedDate < '20260701' 
+AND b.MessageItemPath in
+(
+'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/Cdtr/Nm'
+)
+group by SdnName order by 2 desc
+
+
+
+
+
+
+SELECT RawMessage,SdnName,*  FROM SwiftMX_DetectionResult b
+join MESSAGEDATABASE..SwiftMX_Raw a  on b.CaseId = a.id
+where a.bankNo = 'HK' AND a.CompletedDate >= '20260601'  AND a.CompletedDate < '20260701' 
+AND b.MessageItemPath in
+(
+'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/Cdtr/Nm'
+) AND SdnName in
+(
+'Technology',  --<Nm> HOTLLIES TECHNOLOGY LIMITED </Nm>  ,  <Pac:Nm> BOGE NETWORK TECHNOLOGY LIMITED </Pac:Nm>  ,  
+'Pure',    --<Nm> WATER PURE INC </Nm>  ,  <Nm> Pure Stellans LP </Nm>  ,  
+'Hong Le'  -- <Nm> YUANTA SECURITIES (HONG KONG) COMPANY LIMITED </Nm>  ,  <Nm> TAISHIN INTERNATIONAL BANK CO., LTD HONG KONG BRANCH </Nm>  ,  
+)
+
+
+
+
+
+
+
+ SELECT SdnName , count(*) FROM SwiftMX_DetectionResult b
+join MESSAGEDATABASE..SwiftMX_Raw a  on b.CaseId = a.id
+where a.bankNo = 'HK' AND a.CompletedDate >= '20260601'  AND a.CompletedDate < '20260701' 
+AND b.MessageItemPath in
+(
+'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/CdtrAgt/FinInstnId/Nm'
+)
+group by SdnName order by 2 desc
+
+
+
+
+
+
+SELECT RawMessage,SdnName,*  FROM SwiftMX_DetectionResult b
+join MESSAGEDATABASE..SwiftMX_Raw a  on b.CaseId = a.id
+where a.bankNo = 'HK' AND a.CompletedDate >= '20260601'  AND a.CompletedDate < '20260701' 
+AND b.MessageItemPath in
+(
+'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/CdtrAgt/FinInstnId/Nm'
+) AND SdnName in
+(
+ 'Shanghai',   --<Nm> HONGKONG AND SHANGHAI BANKING GORPORATION LIMITED </Nm>  ,   <Nm> THE CALL HK OFFICES AND HEAD OFFICE </Nm>  ,  
+ 'MR Bank',   --<Nm> CHINA CONSTRUCTION BANK</Nm>  
+ 'AT MR Bank'  --<Nm> DEUTSCHE BANK AG</Nm>   ,  <Nm> TAISHIN INTERNATIONAL BANK CO., LTD HONG KONG BRANCH</Nm>   
+)
+
+幫我整理這些在幹嘛
+我要整理筆記
