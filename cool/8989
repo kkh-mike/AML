@@ -1,209 +1,77 @@
-這是一份整理好的維運與交接腳本，依情境劃分為 數量核對（整體驗證）、異常排查（抓出漏寫名單） 與 單一客戶客服查詢（客訴排查） 三個模組，可直接存成 .sql 檔供交接使用。
-/*
-================================================================================
-【交接維運文件】Dow Jones 日本金融制裁名單 (GROUPID = 5) 資料核對與排查 SOP
-================================================================================
-適用場景：
-  1. 日常排程跑完後，驗證目標表資料筆數是否正確。
-  2. 發現筆數對不齊時，抓出是哪一筆實體漏寫並分析原因。
-  3. 業務/法遵反應「某人名為何沒在黑名單內」時的客訴診斷。
-================================================================================
-*/
+DECLARE @OtherIdentMthCode VARCHAR(2);
+SELECT @OtherIdentMthCode = IDENTCODE FROM dbo.IDENTMTHD_DIM WHERE OTHIND = 'Y';
 
+;WITH RawBlacklistJP AS (
+    -- 條件 A：存活本名
+    SELECT 
+        A.EntNum, 
+        A.SdnName, 
+        MAX(A.UpdatedDate) AS UpdatedDate,
+        'Y' AS [Cond_Is_Primary_Name],
+        'N' AS [Cond_Is_Deceased_Scan],
+        '本名符合 (BitCode & 1 > 0)' AS [Trigger_Reason]
+    FROM BSADB.dbo.DJ_List_Data_A A WITH (NOLOCK)
+    JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) ON A.EntNum = B.EntityId
+    WHERE A.NamePropertyBitCode & 1 > 0
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+    GROUP BY A.EntNum, A.SdnName
 
--- =============================================================================
--- 模組一：總量比對（每日排程執行後確認用）
--- 目的：比對 DJ 來源端 與 目標表 (GROUPID = 5) 筆數是否完全一致
--- =============================================================================
+    UNION ALL
 
---------------------------------------------------------------------------------
--- 1-1. 【死亡名單專用】核對身故制裁名單筆數
--- 判定標準：[差額_漏掉筆數] 必須為 0
---------------------------------------------------------------------------------
+    -- 條件 B：已故掃描（本次新增）
+    SELECT 
+        A.EntityId AS EntNum, 
+        A.FullName AS SdnName, 
+        MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate,
+        'N' AS [Cond_Is_Primary_Name],
+        'Y' AS [Cond_Is_Deceased_Scan],
+        '死亡名單掃描 (Deceased = 1)' AS [Trigger_Reason]
+    FROM BSADB.dbo.DJ_Entity A WITH (NOLOCK)
+    JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) ON A.EntityId = B.EntityId
+    WHERE A.Deceased = 1
+      AND B.SanctionListReference LIKE '%Japanese Finance%'
+      AND NOT EXISTS (
+          SELECT 1 
+          FROM BSADB.dbo.DJ_List_Data_A X WITH (NOLOCK)
+          JOIN BSADB.dbo.DJ_SanctionListReference Y WITH (NOLOCK) ON X.EntNum = Y.EntityId
+          WHERE X.EntNum = A.EntityId 
+            AND X.NamePropertyBitCode & 1 > 0
+            AND Y.SanctionListReference LIKE '%Japanese Finance%'
+      )
+    GROUP BY A.EntityId, A.FullName
+)
 SELECT 
-    -- DJ 來源端的死亡名單總數
-    (
-        SELECT COUNT(DISTINCT A.EntityId)
-        FROM BSADB.dbo.DJ_Entity A
-        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE A.Deceased = 1
-          AND B.SanctionListReference LIKE '%Japanese Finance%'
-    ) AS [DJ死亡名單總數],
+    CASE 
+        WHEN T.remark IS NULL THEN '預計 INSERT (全新新增)'
+        WHEN T.DInd = 'Y' THEN '預計 UPDATE (重新上架)'
+        WHEN A.UpdatedDate <> T.updated_date THEN '預計 UPDATE (日期更新)'
+        ELSE '資料一致 (不異動)'
+    END AS [Expected_Action],
+    A.[Trigger_Reason]                  AS [觸發寫入原因],
+    A.[Cond_Is_Deceased_Scan]           AS [條件:死亡掃描(Y/N)],
+    A.[Cond_Is_Primary_Name]             AS [條件:存活本名(Y/N)],
+    'Y'                                 AS [條件:含Japanese Finance標籤],
+    A.EntNum                            AS [remark(EntityId)],
+    A.SdnName                           AS [spec_name(姓名)],
+    A.UpdatedDate                       AS [updated_date],
+    T.DInd                              AS [目前Target表DInd],
+    T.ent_num                           AS [既有ent_num]
+FROM RawBlacklistJP A
+LEFT JOIN BSADBJP..OFAC_SPEC T WITH (NOLOCK) 
+       ON T.GROUPID = 11 
+      AND T.spec_name = A.SdnName 
+      AND T.remark = CAST(A.EntNum AS VARCHAR(100))
+ORDER BY A.[Cond_Is_Deceased_Scan] DESC, [Expected_Action] DESC, A.EntNum;
 
-    -- 目標表中已寫入且有效的死亡名單數
-    (
-        SELECT COUNT(DISTINCT T.remark)
-        FROM BSADBJP..OFAC_SPEC T
-        JOIN BSADB.dbo.DJ_Entity A ON T.remark = CAST(A.EntityId AS VARCHAR(100))
-        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE T.GROUPID = 5
-          AND T.DInd = 'N'
-          AND A.Deceased = 1
-          AND B.SanctionListReference LIKE '%Japanese Finance%'
-    ) AS [目標表_有效死亡名單數],
+ent_num
+679685
 
-    -- 兩者差額（為 0 代表全數寫入正常）
-    (
-        SELECT COUNT(DISTINCT A.EntityId)
-        FROM BSADB.dbo.DJ_Entity A
-        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE A.Deceased = 1
-          AND B.SanctionListReference LIKE '%Japanese Finance%'
-    )
-    -
-    (
-        SELECT COUNT(DISTINCT T.remark)
-        FROM BSADBJP..OFAC_SPEC T
-        JOIN BSADB.dbo.DJ_Entity A ON T.remark = CAST(A.EntityId AS VARCHAR(100))
-        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE T.GROUPID = 5
-          AND T.DInd = 'N'
-          AND A.Deceased = 1
-          AND B.SanctionListReference LIKE '%Japanese Finance%'
-    ) AS [差額_漏掉筆數];
+SELECT * FROM OFAC_SPEC WHERE spec_name = 'Al-Tikriti, Barzan Ibrahim Hassan'
+
+SELECT * FROM OFAC_SPEC WHERE remark = '330405'
+SELECT * FROM OFAC_SPEC WHERE ent_num = '330405'
+
+SELECT * FROM BSADB.dbo.OFAC_GLSpec WHERE remark = '330405'
 
 
---------------------------------------------------------------------------------
--- 1-2. 【全量名單】核對所有 Japanese Finance 名單筆數
--- 判定標準：若 [差額_漏掉筆數] > 0，請進行模組二排查
---------------------------------------------------------------------------------
-SELECT 
-    -- DJ 來源端所有 Japanese Finance 實體數
-    (
-        SELECT COUNT(DISTINCT A.EntityId)
-        FROM BSADB.dbo.DJ_Entity A
-        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE B.SanctionListReference LIKE '%Japanese Finance%'
-    ) AS [DJ全量名單總數],
-
-    -- 目標表中已寫入且有效的實體數
-    (
-        SELECT COUNT(DISTINCT T.remark)
-        FROM BSADBJP..OFAC_SPEC T
-        JOIN BSADB.dbo.DJ_Entity A ON T.remark = CAST(A.EntityId AS VARCHAR(100))
-        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE T.GROUPID = 5
-          AND T.DInd = 'N'
-          AND B.SanctionListReference LIKE '%Japanese Finance%'
-    ) AS [目標表_有效總數],
-
-    -- 兩者差額
-    (
-        SELECT COUNT(DISTINCT A.EntityId)
-        FROM BSADB.dbo.DJ_Entity A
-        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE B.SanctionListReference LIKE '%Japanese Finance%'
-    )
-    -
-    (
-        SELECT COUNT(DISTINCT T.remark)
-        FROM BSADBJP..OFAC_SPEC T
-        JOIN BSADB.dbo.DJ_Entity A ON T.remark = CAST(A.EntityId AS VARCHAR(100))
-        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-        WHERE T.GROUPID = 5
-          AND T.DInd = 'N'
-          AND B.SanctionListReference LIKE '%Japanese Finance%'
-    ) AS [差額_漏掉筆數];
-
-
-
--- =============================================================================
--- 模組二：差額排查（當模組一有差額時使用）
--- 目的：找出到底是哪幾筆沒寫進去，以及未寫入的原因分析
--- =============================================================================
-
---------------------------------------------------------------------------------
--- 2-1. 【死亡名單】抓出漏寫的死亡名單實體
---------------------------------------------------------------------------------
-SELECT 
-    A.EntityId,
-    A.FullName,
-    A.Deceased,
-    T.DInd AS [目標表狀態], -- NULL=從未寫入, Y=曾寫入但被軟刪除
-    T.spec_name AS [目標表姓名]
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-LEFT JOIN BSADBJP..OFAC_SPEC T 
-    ON T.remark = CAST(A.EntityId AS VARCHAR(100)) 
-   AND T.GROUPID = 5
-WHERE A.Deceased = 1
-  AND B.SanctionListReference LIKE '%Japanese Finance%'
-  AND (T.remark IS NULL OR T.DInd <> 'N');
-
-
---------------------------------------------------------------------------------
--- 2-2. 【全量名單】抓出漏寫的實體並診斷原因
--- 診斷邏輯：
---   1. 目標表狀態DInd = 'Y' -> 曾寫入過，但被後續同步軟刪除。
---   2. Deceased IS NULL 且 是否有PrimaryName = 0 -> 該筆為「組織/機構」，非自然人且無Primary Name，兩段同步皆未涵蓋。
---------------------------------------------------------------------------------
-SELECT 
-    A.EntityId,
-    A.FullName,
-    A.Deceased,
-    (
-        SELECT COUNT(1) 
-        FROM BSADB.dbo.DJ_List_Data_A L 
-        WHERE L.EntNum = A.EntityId 
-          AND L.NamePropertyBitCode & 1 > 0
-    ) AS [是否有PrimaryName],
-    (
-        SELECT T.DInd 
-        FROM BSADBJP..OFAC_SPEC T 
-        WHERE T.GROUPID = 5 
-          AND T.remark = CAST(A.EntityId AS VARCHAR(100))
-    ) AS [目標表狀態DInd]
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-WHERE B.SanctionListReference LIKE '%Japanese Finance%'
-  AND NOT EXISTS (
-      -- 排除掉目標表中已存在且有效 (DInd='N') 的資料
-      SELECT 1 
-      FROM BSADBJP..OFAC_SPEC T 
-      WHERE T.GROUPID = 5 
-        AND T.DInd = 'N'
-        AND T.remark = CAST(A.EntityId AS VARCHAR(100))
-  );
-
-
-
--- =============================================================================
--- 模組三：單一對象客服排查（業務/法遵問特定人名時使用）
--- 目的：輸入人名，立刻查出「為何此人不在名單內」並提供回覆依據
--- =============================================================================
-
-DECLARE @SearchName NVARCHAR(350) = 'Martins Manaia, Jorge Henrique'; -- 在此貼入 User 給的名稱
-
-SELECT 
-    E.EntityId,
-    E.FullName,
-    E.Deceased AS [是否死亡(1=是)],
-    R.SanctionListReference AS [命中制裁清單],
-    L.NamePropertyBitCode AS [姓名類型BitCode],
-    T.DInd AS [目標表狀態(N有效/Y刪除/NULL未寫入)]
-FROM BSADB.dbo.DJ_Entity E
-LEFT JOIN BSADB.dbo.DJ_SanctionListReference R 
-    ON E.EntityId = R.EntityId 
-   AND R.SanctionListReference LIKE '%Japanese Finance%'
-LEFT JOIN BSADB.dbo.DJ_List_Data_A L 
-    ON E.EntityId = L.EntNum 
-   AND L.SdnName = E.FullName
-LEFT JOIN BSADBJP..OFAC_SPEC T 
-    ON T.remark = CAST(E.EntityId AS VARCHAR(100)) 
-   AND T.GROUPID = 5
-WHERE E.FullName LIKE '%' + @SearchName + '%';
-
-/*
---------------------------------------------------------------------------------
-【模組三 查詢結果回覆指引】：
- 1. 查無任何資料：
-    -> 回覆：DJ 來源庫無此紀錄（請確認拼字是否正確）。
- 2. [命中制裁清單] 為 NULL：
-    -> 回覆：該名單未被列入日本金融制裁（Japanese Finance）範疇。
- 3. [目標表狀態] 為 'Y'：
-    -> 回覆：此筆資料先前已建置，但在後續名單異動中已被標記為無效（軟刪除）。
- 4. [是否死亡] <> 1 且 [姓名類型BitCode & 1 = 0]：
-    -> 回覆：該員非身故名單，且在 DJ 名單中非主要名稱（Primary Name），不符合現行匯入規則。
---------------------------------------------------------------------------------
-*/
-
+這是我之前寫的不知道幹嘛用的 你也幫我整理一下
