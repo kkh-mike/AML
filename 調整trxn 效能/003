@@ -1,77 +1,12 @@
-
-
--- 3. 原本的寫入語法 (帶入參數後)
-DECLARE @StartTime DATETIME = GETDATE();
-DECLARE @InsertedCount INT = 0;
-
--- 執行寫入
-INSERT INTO BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST01
-(
-    CIF_KEY, APPL, ACCT_KEY, YYYYMM, TTL, CRTTL, DRTTL,
-    CNT, CRCNT, DRCNT, MIN, MAX, CRMIN, DRMIN, CRMAX, DRMAX
-)
-SELECT  
-    B.NEW_CIF_KEY,
-    A.APPL,
-    ISNULL(C.FinalAcctKey, 'SK_' + A.ACCT_KEY),
-    A.YYYYMM,
-    A.TTL, A.CRTTL, A.DRTTL, A.CNT, A.CRCNT, A.DRCNT,
-    A.MIN, A.MAX, A.CRMIN, A.DRMIN, A.CRMAX, A.DRMAX
-FROM dbo.LoadTrxn_Migrate_buffer A
-LEFT JOIN #TrxnAcctFinalMapping C 
-    ON A.ACCT_KEY = C.SourceAcctKey
-INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B 
-    ON A.CIF_KEY = B.SOURCE_CIF_KEY
 WHERE A.TrxnType = 'TTL MTHLY SMRY'
   AND NOT EXISTS (
       SELECT 1
       FROM dbo.TTL_MTHLY_ACCT_SMRY Z
-      WHERE Z.CIF_KEY = B.NEW_CIF_KEY
-        AND Z.YYYYMM = A.YYYYMM 
-        AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, 'SK_' + A.ACCT_KEY)
-  );
-
--- 取得寫入筆數
-SET @InsertedCount = @@ROWCOUNT;
-
--- 記錄執行時間與筆數到 Log
-INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG)
-SELECT 
-    CONVERT(VARCHAR, dbo.ConvertToBankLocalTime(GETUTCDATE()), 109),
-    'before TTL MTHLY SMRY inserted ' + CAST(@InsertedCount AS VARCHAR(10)) 
-    + ' rows. Duration: ' + CAST(DATEDIFF(SECOND, @StartTime, GETDATE()) AS VARCHAR(10)) + 's',
-    'N';
-
-
-
-問一下
-因為現在
--- 執行寫入
-INSERT INTO BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST01
-(
-    CIF_KEY, APPL, ACCT_KEY, YYYYMM, TTL, CRTTL, DRTTL,
-    CNT, CRCNT, DRCNT, MIN, MAX, CRMIN, DRMIN, CRMAX, DRMAX
-)
-SELECT  
-    B.NEW_CIF_KEY,
-    A.APPL,
-    ISNULL(C.FinalAcctKey, 'SK_' + A.ACCT_KEY),
-    A.YYYYMM,
-    A.TTL, A.CRTTL, A.DRTTL, A.CNT, A.CRCNT, A.DRCNT,
-    A.MIN, A.MAX, A.CRMIN, A.DRMIN, A.CRMAX, A.DRMAX
-FROM dbo.LoadTrxn_Migrate_buffer A
-LEFT JOIN #TrxnAcctFinalMapping C 
-    ON A.ACCT_KEY = C.SourceAcctKey
-INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B 
-    ON A.CIF_KEY = B.SOURCE_CIF_KEY
-WHERE A.TrxnType = 'TTL MTHLY SMRY'
-  AND NOT EXISTS (
-      SELECT 1
-      FROM dbo.TTL_MTHLY_ACCT_SMRY Z
-      WHERE Z.CIF_KEY = B.NEW_CIF_KEY
-        AND Z.YYYYMM = A.YYYYMM 
-        AND Z.ACCT_KEY = ISNULL(C.FinalAcctKey, 'SK_' + A.ACCT_KEY)
-  );
-
-
-跑比較久 怎樣可以讓他快
+      WHERE Z.YYYYMM = A.YYYYMM
+        AND Z.CIF_KEY = B.NEW_CIF_KEY
+        AND Z.APPL = A.APPL
+        AND (
+            (C.FinalAcctKey IS NOT NULL AND Z.ACCT_KEY = C.FinalAcctKey)
+            OR (C.FinalAcctKey IS NULL AND Z.ACCT_KEY = 'SK_' + A.ACCT_KEY)
+        )
+  )
