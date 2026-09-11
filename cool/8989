@@ -1,30 +1,9 @@
--- 1. 將舊有待複審紀錄狀態改為 'L' (Locked/Legacy/Inactive)
-UPDATE  A
-SET     A.Status = 'L' ,
-        A.LastUpdatedBy = @UserId ,
-        A.LastUpdatedDt = @Date ,
-        A.LastupdatedUTCDt = @DateUTC ,
-        A.ReviewDescription = 'Data Migration'
-FROM    dbo.EDD_ReviewSchedule A
-        INNER JOIN #AffectedNextReview B ON B.CIF_KEY = A.CIFKey
-WHERE   A.Status = 'P';
 
--- 2. 插入最新且最早複審日期的排程記錄 (取 MIN(ReviewDt) 避免同一 CIF 重複寫入多筆 'P')
-INSERT INTO dbo.EDD_ReviewSchedule
-        ( CIFKey ,
-          ReviewDt ,
-          Status ,
-          CreatedBy ,
-          CreatedDt ,
-          CreatedUTCDt ,
-          ReviewDescription
-        )
-SELECT  CIF_KEY ,
-        MIN(ReviewDt) AS ReviewDt ,
-        'P' ,
-        @UserId ,
-        @Date ,
-        @DateUTC ,
-        'Data Migration'
-FROM    #AffectedNextReview
-GROUP BY CIF_KEY;
+我要把
+SELECT HIGHRISK,customerno,* FROM BSA_SUB_CUST_FACT WHERE customerno = '97139661'   
+他的HIGHRISK 
+更新的跟
+
+SELECT HIGHRISK,customerno,*  FROM BSA_SUB_CUST_FACT_BAK_20260720 WHERE customerno = '97139661'   
+
+他的一樣
