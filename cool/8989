@@ -1,3 +1,118 @@
+---------
+這份筆記將原始 SQL 依照查詢目的、關聯架構與逐行語法解析進行拆解整理，方便日後查閱與維護。
+功能定位
+ * 核心目的：產出銀行/金融端 AML（反洗錢）或名單掃描系統中，由內部人工維護（畫面單筆輸入或檔案整批匯入）的有效名單報表。
+ * 排除項目：排除已被邏輯刪除的名單，以及系統外部自動介接的道瓊（Dow Jones）黑名單。
+資料表架構（Table Schema & Role）
+| 代號 | 資料表名稱 | 類型 | 角色說明 |
+|---|---|---|---|
+| A | BSADB..OFAC_GLSPEC | 事實表 / 主表 | 存放名單主體資料（姓名、證號、地址、審核紀錄等）。 |
+| b | bsadbtw..OFAC_GLSpec_Source_Dim | 維度表（字典檔） | 定義名單來源型態（K: 畫面散戶 / U: 整批檔案 / D: DJ 自動名單）。 |
+| c | COUNTRY_DIM | 維度表（字典檔） | 提供標準 2 碼 ISO 國家代碼與國家英文全名對照。 |
+SQL 程式碼逐段解析筆記
+USE BSADBTW;
+
+SELECT 
+    a.enterflag, 
+    -- 1. 串接來源英中文：例如 "Input from screen散戶名單"
+    b.DESCR + DESCR_zh_TW '內部名單群組名稱',
+    
+    -- 2. 案件與基本資料
+    a.ent_num '名單資料編號',
+    convert(char(8), creDate, 112) '建立日期', -- 格式轉換為 YYYYMMDD
+    a.spec_name '姓名/名稱',
+    
+    -- 3. 固定標記欄位（依匯出標準介面需求寫死為 'N'）
+    'N' '黑名單',
+    'N' PEP,          -- 政治重要人物 (Politically Exposed Persons)
+    'N' '負面新聞',
+    
+    -- 4. 身分證號與地理資訊
+    TaxIDCD '稅號代碼',
+    a.TaxID '稅號/統一編號',
+    a.IDNUM '證件號碼',
+    a.IssBy '發照地',
+    a.ADDRESS '地址',
+    a.STATE '州',
+    c.ISO_CountryDescription '國家', -- 關聯 c 表取得的國家英文全名
+    a.DOB '出生日期',
+    '' GoodsCodes_1,               -- 預留貨品代碼（空值）
+    
+    -- 5. 稽核與簽核紀錄（使用 isnull 避免 NULL 破壞報表排版）
+    a.creUserID '建立人',
+    isnull(a.ApprovedBy, '') '核准人',
+    isnull(a.ApprovedDate, '') '核准日期',
+    isnull(a.remark, '') '備註'
+
+FROM BSADB..OFAC_GLSPEC A
+
+-- [關聯 b 表]：利用 SOURCE_KEY 對應名單來源類別
+INNER JOIN bsadbtw..OFAC_GLSpec_Source_Dim b 
+    ON a.EnterFlag = b.SOURCE_KEY
+
+-- [關聯 c 表]：利用 2 碼國別代碼換取完整國名；使用 LEFT JOIN 避免國別未填時資料被吃掉
+LEFT JOIN COUNTRY_DIM c 
+    ON a.COUNTRY = c.ISO_2_CountryCode
+
+WHERE 
+    -- 排除已註銷/邏輯刪除的資料 (Delete Indicator = 'N')
+    A.DInd = 'N' 
+    -- 排除 D (DJ Blacklist 自動名單)，僅保留 K (散戶) 與 U (整批) 等內部名單
+    AND a.EnterFlag <> 'D'
+
+-- 依據名單群組編號及資料序號依序排序
+ORDER BY A.GROUPID, a.ent_num;
+
+重點備忘與注意事項
+ * LEFT JOIN 的必要性：主表 a.COUNTRY 可能為空值或未標準化，使用 LEFT JOIN 可確保即使國別無法對應，主名單資料依然能正常輸出。
+ * DInd 欄位慣例：資料庫中典型的軟刪除（Soft Delete）標記，查詢時務必帶入 DInd = 'N'。
+ * 硬編碼欄位用途：黑名單、PEP、負面新聞 全部寫死為 'N'，通常表示此份名單被歸類為「特定關注名單（Spec）」，而非外部既定的 PEP 或高風險制裁名單。
+
+
+
+----
+
+USE BSADBTW;
+
+SELECT 
+    a.enterflag, 
+    b.DESCR + DESCR_zh_TW '內部名單群組名稱',      -- [重點] 串接中英來源：如 "Input from screen散戶名單"
+    a.ent_num '名單資料編號',
+    convert(char(8),creDate,112) '建立日期',       -- [重點] 轉成 YYYYMMDD 格式
+    a.spec_name '姓名/名稱',
+    'N' '黑名單',                                  -- [重點] 下游介面欄位，固定寫死 'N'
+    'N'  PEP,                                     -- [重點] 政治重要人物，固定寫死 'N'
+    'N' '負面新聞',                                -- [重點] 負面新聞，固定寫死 'N'
+    TaxIDCD '稅號代碼',
+    a.TaxID '稅號/統一編號',
+    a.IDNUM '證件號碼',
+    a.IssBy '發照地',
+    a.ADDRESS '地址',
+    a.STATE '州',
+    c.ISO_CountryDescription '國家',              -- [重點] 關聯 C 表取得標準英文國名
+    a.DOB '出生日期',
+    '' GoodsCodes_1,                              -- [重點] 空欄位補位
+    a.creUserID '建立人',
+    isnull(a.ApprovedBy,'') '核准人',              -- [重點] 防呆：NULL 轉空字串
+    isnull(a.ApprovedDate,'') '核准日期',
+    isnull(a.remark,'') '備註'
+
+FROM BSADB..OFAC_GLSPEC A                         -- 【Table A 主表】：名單核心資料庫（AML/OFAC 關注名單）
+
+INNER JOIN bsadbtw..OFAC_GLSpec_Source_Dim b      -- 【Table b 維度表】：來源代碼表（K=畫面散戶 / U=整批匯入 / D=道瓊自動）
+    ON a.EnterFlag = b.SOURCE_KEY
+
+LEFT JOIN COUNTRY_DIM c                           -- 【Table c 維度表】：國家字典檔（用 LEFT 防止無國別資料被濾除）
+    ON a.COUNTRY = c.ISO_2_CountryCode
+
+WHERE 
+    A.DInd='N'                                    -- [重點] 排除邏輯刪除（只抓有效名單）
+    AND a.EnterFlag <> 'D'                        -- [核心] 排除外部自動名單（只抓人工建檔的 K 與 U）
+
+ORDER BY A.GROUPID, a.ent_num;
+
+
+
 查詢目的
 匯出內部人工維護（手動建立/檔案整批匯入）且仍有效的洗錢防制關注名單，排除外部自動串接的制裁黑名單。
 資料表角色
