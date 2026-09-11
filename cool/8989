@@ -1,9 +1,6 @@
-
-我要把
-SELECT HIGHRISK,customerno,* FROM BSA_SUB_CUST_FACT WHERE customerno = '97139661'   
-他的HIGHRISK 
-更新的跟
-
-SELECT HIGHRISK,customerno,*  FROM BSA_SUB_CUST_FACT_BAK_20260720 WHERE customerno = '97139661'   
-
-他的一樣
+UPDATE target
+SET target.HIGHRISK = bak.HIGHRISK
+FROM BSA_SUB_CUST_FACT target
+INNER JOIN BSA_SUB_CUST_FACT_BAK_20260720 bak
+    ON target.customerno = bak.customerno
+WHERE target.customerno = '97139661';
