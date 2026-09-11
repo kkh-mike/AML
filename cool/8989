@@ -1,3 +1,6 @@
+
+select * from PO_DefaultData where CtrlKey = 'IncludeDeletedWorkgroupForSelection'
+
  * 法規/內部稽核：查核人員手動建檔的名單是否都有「建立人」與「主管核准」紀錄。
  * 定期名單檢核：法遵定期盤點行內自建的黑名單是否依然有效、需不需要移除。
  * 資料拋轉介接：將行內自建名單轉成固定格式，餵給開戶或交易掃描系統使用。
