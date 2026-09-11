@@ -1,30 +1,30 @@
- UPDATE  A
-                                SET     A.Status = 'L' ,
-                                        A.LastUpdatedBy = @UserId ,
-                                        A.LastUpdatedDt = @Date ,
-                                        A.LastupdatedUTCDt = @DateUTC ,
-                                        A.ReviewDescription = 'Data Migration' --ask what remark they wanted to mark as
-                                FROM    dbo.EDD_ReviewSchedule A
-                                        INNER JOIN #AffectedNextReview B ON B.CIF_KEY = A.CIFKey
-                                WHERE   A.Status = 'P';
+-- 1. 將舊有待複審紀錄狀態改為 'L' (Locked/Legacy/Inactive)
+UPDATE  A
+SET     A.Status = 'L' ,
+        A.LastUpdatedBy = @UserId ,
+        A.LastUpdatedDt = @Date ,
+        A.LastupdatedUTCDt = @DateUTC ,
+        A.ReviewDescription = 'Data Migration'
+FROM    dbo.EDD_ReviewSchedule A
+        INNER JOIN #AffectedNextReview B ON B.CIF_KEY = A.CIFKey
+WHERE   A.Status = 'P';
 
-                                INSERT  INTO dbo.EDD_ReviewSchedule
-                                        ( CIFKey ,
-                                          ReviewDt ,
-                                          Status ,
-                                          CreatedBy ,
-                                          CreatedDt ,
-                                          CreatedUTCDt ,
-                                          ReviewDescription
-                                        )
-                                        SELECT  CIF_KEY ,
-                                                ReviewDt ,
-                                                'P' ,
-                                                @UserId ,
-                                                @Date ,
-                                                @DateUTC ,
-                                                'Data Migration' --ask what remark they wanted to mark as
-                                        FROM    #AffectedNextReview;     
-
-
-還有這裡
+-- 2. 插入最新且最早複審日期的排程記錄 (取 MIN(ReviewDt) 避免同一 CIF 重複寫入多筆 'P')
+INSERT INTO dbo.EDD_ReviewSchedule
+        ( CIFKey ,
+          ReviewDt ,
+          Status ,
+          CreatedBy ,
+          CreatedDt ,
+          CreatedUTCDt ,
+          ReviewDescription
+        )
+SELECT  CIF_KEY ,
+        MIN(ReviewDt) AS ReviewDt ,
+        'P' ,
+        @UserId ,
+        @Date ,
+        @DateUTC ,
+        'Data Migration'
+FROM    #AffectedNextReview
+GROUP BY CIF_KEY;
