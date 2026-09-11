@@ -1,0 +1,102 @@
+監控系統（如 Zabbix、PRTG、Nagios、Datadog 或自建監控 Agent）的核心需求與一般人工執行的腳本不同，通常需要：
+ * 標準 Exit Code（0 = OK, 1 = Warning, 2 = Critical）
+ * 標準輸出（Stdout）：單行摘要或結構化 JSON，方便 Agent 捕捉，避免格式化排版字串。
+ * 無副作用與快速返回：避免 Write-Host，改用乾淨的字串或 JSON。
+方案一：相容 Nagios / Zabbix / PRTG 的 Exit Code 模式
+適合由監控 Agent 定期呼叫（例如每 5 分鐘執行一次），依據錯誤筆數回傳警報代碼：
+# Monitor-EventLog.ps1
+[CmdletBinding()]
+param (
+    [int]$Minutes = 5,
+    [string[]]$LogNames = @("System", "Application"),
+    [int]$WarningThreshold = 1,
+    [int]$CriticalThreshold = 5
+)
+
+$startTime = (Get-Date).AddMinutes(-$Minutes)
+$filter = @{
+    LogName   = $LogNames
+    Level     = 1, 2          # 1: Critical, 2: Error
+    StartTime = $startTime
+}
+
+try {
+    $events = Get-WinEvent -FilterHashtable $filter -ErrorAction Stop
+    $count = $events.Count
+
+    # 取最新的錯誤來源作為摘要
+    $latest = $events[0]
+    $summary = "Found $count errors in last $Minutes mins. Latest: [ID:$($latest.Id)] $($latest.ProviderName)"
+
+    if ($count -ge $CriticalThreshold) {
+        Write-Output "CRITICAL: $summary"
+        exit 2
+    } elseif ($count -ge $WarningThreshold) {
+        Write-Output "WARNING: $summary"
+        exit 1
+    } else {
+        Write-Output "OK: No critical errors found."
+        exit 0
+    }
+}
+catch [System.Exception] {
+    if ($_.Exception.Message -like "*No events were found*") {
+        Write-Output "OK: 0 errors in last $Minutes mins."
+        exit 0
+    } else {
+        Write-Output "UNKNOWN: Query failed - $($_.Exception.Message)"
+        exit 3
+    }
+}
+
+方案二：回傳結構化 JSON（適合 HTTP API、Prometheus 或進階收集器）
+若監控架構是以收集 Metrics 或透過 Webhook/Log Stash 傳遞資料：
+# Monitor-EventLog-Json.ps1
+param (
+    [int]$Minutes = 5,
+    [string[]]$LogNames = @("System", "Application")
+)
+
+$startTime = (Get-Date).AddMinutes(-$Minutes)
+$filter = @{
+    LogName   = $LogNames
+    Level     = 1, 2
+    StartTime = $startTime
+}
+
+$result = [PSCustomObject]@{
+    Status      = "OK"
+    ErrorCount  = 0
+    CheckWindow = "$Minutes minutes"
+    Timestamp   = (Get-Date).ToString("o")
+    Errors      = @()
+}
+
+try {
+    $events = Get-WinEvent -FilterHashtable $filter -ErrorAction Stop
+    $result.Status = if ($events.Count -gt 5) { "Critical" } else { "Warning" }
+    $result.ErrorCount = $events.Count
+    $result.Errors = $events | Select-Object -First 10 | ForEach-Object {
+        @{
+            TimeCreated  = $_.TimeCreated.ToString("o")
+            LogName      = $_.LogName
+            ProviderName = $_.ProviderName
+            Id           = $_.Id
+            Message      = ($_.Message -replace "[\r\n]+", " ").Trim()
+        }
+    }
+}
+catch [System.Exception] {
+    # 查無事件保持 Status = "OK", ErrorCount = 0
+    if ($_.Exception.Message -notlike "*No events were found*") {
+        $result.Status = "Unknown"
+        $result.ErrorCount = -1
+    }
+}
+
+$result | ConvertTo-Json -Depth 3 -Compress
+
+上線監控時的 3 個實務考量
+ * 時間間隔重疊或遺漏：如果監控間隔是 5 分鐘，建議設定 $Minutes = 6 留 1 分鐘緩衝，或是改用 Windows Event Log 的 Bookmark（書籤機制） 紀錄上次讀取的事件指標，避免漏單。
+ * 無害錯誤白名單：部分 Windows 內建服務（如 DCOM 10016、Windows Update 背景重試）常有常態性錯誤，建議在 $events 撈出後以 Where-Object { $_.Id -notin $WhitelistIds } 排除。
+ * 執行權限：監控 Agent 執行的服務帳戶需具備讀取 Security 或 System 日誌的權限（通常為 Event Log Readers 群組成員）。
