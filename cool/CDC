@@ -1,10 +1,6 @@
-Dear 千芊
-
-日本金融制裁名單同步已建置完成，
-只要DJ 名單中符合 Japanese Finance，不論是主要制裁名單或標記為死亡，皆已納入排程並寫入自建名單 MOF Sanction List (Decease)。
-
-前確認的 KHALIL AHMED HAQQANI 與 MULLAH NOORDIN TORABI，經查目前未收錄在 DJ 資料來源中，因此本次不會被寫入。
-
-
-
-怎麼寫比較好
+Dear 千芊,
+日本金融制裁名單同步已建置完成，重點如下：
+ * 名單同步：DJ 名單中符合 Japanese Finance 者，包含主要制裁名單與標記死亡（含 BL / PEP / NN），皆已納入排程並寫入自建名單 MOF Sanction List (Decease)（同步帶入名稱、地址、國別與證號等資訊）。
+ * 特定名單確認：KHALIL AHMED HAQQANI 與 MULLAH NOORDIN TORABI 經查不在 DJ 名單內，本次不會寫入。
+Best regards,
+Mike
