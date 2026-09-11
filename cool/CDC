@@ -1,36 +1,10 @@
-從這兩張 Patriot Officer 系統的畫面比對，可以看出不一致的原因來自兩個不同層面：
-1. 現有工作群組列表：缺少分行關聯設定
- * 圖一（正常環境）： 上方表格顯示 0011 SWIFT MX 對應的分行是 「南京東路分行」。
- * 圖二（重建環境）： 下方只看到勾選了 0011 (0011)，但「現有工作群組」上方清單可能根本還沒抓到，或是關聯表沒有建立。
- * 原因分析：
-   工作群組 (WORKFLOW_MGMT_QUEUE) 與分行 (Branch) 的關聯通常不是單靠主檔裡記錄，而是有一張多對多的關聯表（例如 WORKFLOW_MGMT_QUEUE_BRANCH 或類似命名）。當初匯入 CSV 時，只有寫入 WORKFLOW_MGMT_QUEUE 主表，沒有同步將對應的分行關聯資料補入關聯表。
-2. 下拉選單的分行清單不同：分行字典檔環境不一致
- * 圖一清單： 包含 0000 (NEW BRANCH - 0000)、0001A (通路營運事業處...)、0002 (敦南分行)、0002A (敦南分行_法金)。
- * 圖二清單： 缺少了 0000、0001A、0002A，直接從 0001 (營業部) 跳到 0002 (0002)（且括弧內只有代碼沒有中文名稱）。
- * 原因分析：
-   系統選單中的「分行」資料來源是全行組織/分行主檔。圖二的環境使用的是較舊或不完整的測試分行檔，中文名稱也沒有維護（顯示為 0002 (0002) 而非 0002 (敦南分行)）。
-如何排查與解決？
-第一步：找出分行主檔與關聯表名稱
-請在 SSMS 執行以下語法，找出目前環境中存放分行資料與工作群組關聯的資料表：
-USE [BSADBTW]
-GO
+Dear 千芊
 
--- 1. 搜尋所有與 BRANCH 或 QUEUE 關聯相關的資料表
-SELECT TABLE_SCHEMA, TABLE_NAME 
-FROM INFORMATION_SCHEMA.TABLES 
-WHERE TABLE_NAME LIKE '%BRANCH%' 
-   OR TABLE_NAME LIKE '%QUEUE%'
-ORDER BY TABLE_NAME;
+日本金融制裁名單同步已建置完成，
+只要DJ 名單中符合 Japanese Finance，不論是主要制裁名單或標記為死亡，皆已納入排程並寫入自建名單 MOF Sanction List (Decease)。
 
-第二步：比對分行主檔
-常見的分行表可能為 dbo.BRANCH、dbo.BRANCH_INFO 或跨庫的 GCMAINDB..Branch。查出表名後，下指令比對兩個環境的資料：
--- 檢查分行主檔筆數與內容（以常見表名為例，請替換成第一步查到的表）
-SELECT * FROM dbo.BRANCH ORDER BY BRANCH_NO;
+前確認的 KHALIL AHMED HAQQANI 與 MULLAH NOORDIN TORABI，經查目前未收錄在 DJ 資料來源中，因此本次不會被寫入。
 
-如果圖二環境缺少 0000、0001A 等代碼，需要從圖一環境將該分行主表資料同步過來。
-第三步：補齊工作群組與分行的關聯
-工作群組設定時，畫面勾選分行存檔後，會寫入一張關聯表（常見如 WORKFLOW_MGMT_QUEUE_BRANCH）。你可以先看這張表在舊環境是怎麼記的：
--- 查詢現有的工作群組與分行關聯
-SELECT * FROM WORKFLOW_MGMT_QUEUE_BRANCH WHERE QUEUEID = 17961;
 
-只要將這張關聯表的資料補齊，重新整理畫面後，0011 SWIFT MX 就會正常顯示對應的分行名稱。
+
+怎麼寫比較好
