@@ -1,34 +1,10 @@
-Dear 千芊,
-已提供英文版 AML 系統 CIP 及 SAR 情境資料如附件，請查收：
- * CIP條件範本維度表.csv
- * SAR情境維度表.csv
-（兩份檔案均包含英文及中文對照）
-如有任何問題再請隨時告訴我，謝謝！
-貫軒
+
+select QueryId ,  DESCR, DESCR_zh_TW    from CIP_TEMPLATE_DIM 
+ORDER BY QueryId
+
+select  QueryId , Syntax,  Syntax_zh_TW from SAR_ScenarioTemplates
+ORDER BY QueryId
 
 
-
-
-
-select * from CIP_TEMPLATE_DIM
-select * from SAR_ScenarioTemplates
-
-
-select * from PO_DefaultData where CtrlKey = 'IncludeDeletedWorkgroupForSelection'
-
- * 法規/內部稽核：查核人員手動建檔的名單是否都有「建立人」與「主管核准」紀錄。
- * 定期名單檢核：法遵定期盤點行內自建的黑名單是否依然有效、需不需要移除。
- * 資料拋轉介接：將行內自建名單轉成固定格式，餵給開戶或交易掃描系統使用。
- * 系統轉換比對：AML 系統升級或換廠商時，確認行內自建名單沒有漏搬。
-
-依用途選一個最適合的命名格式（建議日期用西元年月）：
- * 稽核/報表產出
-   AML_InternalList_AuditReport_202609.csv
-   (或中文：內部關注名單_稽核抽查清冊_202609.xlsx)
- * 定期名單盤點/維護
-   AML_SpecList_Review_202609.xlsx
-   (或中文：AML自建名單盤點清單_202609.xlsx)
- * 拋轉下游系統介接檔
-   AML_INTERNALLIST_EXPORT_20260911.dat（或 .csv）
- * 系統移轉/資料比對
-   BSADBTW_OFAC_GLSPEC_Internal_20260911.csv
+幫我整理 並且註解這些table 是幹嘛
+然後我的檔案要取什麼
