@@ -1,3 +1,16 @@
+現在會變成：
+
+LoadTrxn_Migrate_buffer 裡符合 TTL MTHLY SMRY 的資料，全部 INSERT。
+
+不再檢查：
+
+* CIF_KEY 是否已存在
+* YYYYMM 是否已存在
+* ACCT_KEY 是否已存在
+
+
+
+
 -- 3. 原本的寫入語法 (帶入參數後)
 DECLARE @StartTime DATETIME = GETDATE();
 DECLARE @InsertedCount INT = 0;
