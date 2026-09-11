@@ -8,3 +8,51 @@ ORDER BY QueryId
 
 幫我整理 並且註解這些table 是幹嘛
 然後我的檔案要取什麼
+
+
+這裡幫你把這兩段 SQL 整理排版好，附上詳細的資料表與欄位註解，並提供查核／正式回信最清楚的檔案命名建議：
+一、整理後帶註解的 SQL
+/* ==========================================================================
+ * 1. CIP 規則條件描述範本維度表
+ * 說明：
+ *   存放反洗錢（AML）中客戶審查 / 身分識別（KYC / CIP）各項檢核條件的文字範本。
+ *   主要用於系統介面呈現、規則設定及報表產出時的多語系對照。
+ * ========================================================================== */
+SELECT 
+    QueryId,        -- 條件規則唯一識別碼（Rule / Condition Query ID）
+    DESCR,          -- 英文規則描述範本（English Description，含前端排版 HTML tag）
+    DESCR_zh_TW     -- 繁體中文規則描述範本（Traditional Chinese Description）
+FROM 
+    CIP_TEMPLATE_DIM
+ORDER BY 
+    QueryId;
+
+
+/* ==========================================================================
+ * 2. SAR 可疑交易情境規則範本表
+ * 說明：
+ *   存放可疑交易申報（SAR）與交易監控情境（Scenario）的警示觸發語法範本。
+ *   內容包含帶參數變數（如 {Parameter1}、{Parameter2}）的語句，
+ *   在系統觸發警示時會動態代入交易金額、天數、頻率等實際數值。
+ * ========================================================================== */
+SELECT 
+    QueryId,        -- 情境規則識別碼（Scenario Query ID）
+    Syntax,         -- 英文情境語法範本（English Scenario Syntax，含參數變數）
+    Syntax_zh_TW    -- 繁體中文情境語法範本（Traditional Chinese Scenario Syntax）
+FROM 
+    SAR_ScenarioTemplates
+ORDER BY 
+    QueryId;
+
+二、檔案命名建議
+因為對方是要拿去應對**「海外分行查核」**，稽核或查核人員通常需要一眼看出業務模組、內容屬性與語系，建議以下兩種命名方式：
+方案 A：中文檔名（清晰直覺，如信中已掛的名稱）
+ * AML_CIP條件範本維度表_中英對照.csv
+ * AML_SAR情境範本維度表_中英對照.csv
+方案 B：中英雙語 / 國際查核標準命名（最推薦給查核或稽核單位）
+ * AML_CIP_Template_Dim_CIP條件範本表.csv
+ * AML_SAR_ScenarioTemplates_SAR情境範本表.csv
+> 附註說明：如果查核方全為外籍稽核員，也可以直接命名為：
+>  * AML_CIP_Template_Dimension.csv
+>  * AML_SAR_Scenario_Templates.csv
+> 
