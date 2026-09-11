@@ -1,34 +1,38 @@
 SELECT 
     T.ent_num,
     T.spec_name,
-    T.remark                      AS [DJ_EntityId],
-    E.Deceased                    AS [是否死亡(1=是)],
-    R.SanctionListReference       AS [命中制裁名單],
-    T.updated_date                AS [OFAC更新日期],
+    T.remark                                AS [DJ_EntityId],
+    E.Deceased                              AS [是否死亡(1=是)],
+    R.SanctionLists                         AS [命中制裁名單],
+    T.updated_date                          AS [OFAC更新日期],
     CONVERT(VARCHAR, E.UpdatedDate_UTC, 112) AS [DJ轉UTC更新日],
-    T.DInd                        AS [有效註記(N為有效)],
-    I.IdentificationType          AS [DJ證件類型名稱],
-    T.IDENT                       AS [系統證件代碼],
-    T.IDENTO                      AS [證件號碼],
-    T.STATE                       AS [城市],
-    T.ADDRESS                     AS [地址],
-    T.COUNTRY                     AS [國家],
-    T.DOB                         AS [出生日期],
+    T.DInd                                  AS [有效註記(N為有效)],
+    I.IdentificationType                    AS [DJ證件類型名稱],
+    T.IDENT                                 AS [系統證件代碼],
+    T.IDENTO                                AS [證件號碼],
+    T.STATE                                 AS [城市],
+    T.ADDRESS                               AS [地址],
+    T.COUNTRY                               AS [國家],
+    T.DOB                                   AS [出生日期],
     T.GROUPID
 FROM BSADBJP..OFAC_SPEC T WITH (NOLOCK)
--- 串接 DJ 實體主檔 (remark 存的是 EntityId)
+-- 串接 DJ 實體主檔
 LEFT JOIN BSADB.dbo.DJ_Entity E WITH (NOLOCK) 
        ON TRY_CAST(T.remark AS INT) = E.EntityId
--- 串接制裁名單參考
-LEFT JOIN BSADB.dbo.DJ_SanctionListReference R WITH (NOLOCK) 
-       ON E.EntityId = R.EntityId 
-      AND R.SanctionListReference LIKE '%Japanese Finance%'
--- 串接證件詳細資訊 (取第一筆避免資料重疊放大)
+-- 整合命中制裁名單 (避免一對多造成重複列)
+LEFT JOIN (
+    SELECT EntityId, 
+           STRING_AGG(SanctionListReference, ' ; ') AS SanctionLists
+    FROM BSADB.dbo.DJ_SanctionListReference WITH (NOLOCK)
+    WHERE SanctionListReference LIKE '%Japanese Finance%'
+    GROUP BY EntityId
+) R ON E.EntityId = R.EntityId
+-- 串接證件 (取第 1 筆)
 LEFT JOIN (
     SELECT EntityId, IdentificationType, IdentificationNumber,
            ROW_NUMBER() OVER (PARTITION BY EntityId ORDER BY Id) AS RowId
     FROM BSADB.dbo.DJ_IdentificationTypeInfo WITH (NOLOCK)
     WHERE Deleted = 0
 ) I ON E.EntityId = I.EntityId AND I.RowId = 1
-WHERE T.GROUPID IN ('5', '6')
+WHERE T.GROUPID = '5'
 ORDER BY T.ent_num;
