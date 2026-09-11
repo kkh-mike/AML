@@ -1,13 +1,14 @@
+
+
+/*
 直接看結果回覆 User 原因：
  查無任何資料：DJ 來源庫根本沒有這個人（拼字錯誤或不在名單內）。
  ⁠命中制裁清單⁠ 是 NULL：他不屬於 ⁠Japanese Finance⁠ 制裁名單。
  ⁠目標表狀態 = 'Y'⁠：曾經寫入過，但後續比對時被標記刪除（軟刪除）。
  ⁠是否死亡⁠ 不是 1 且 ⁠姓名類型BitCode & 1 = 0⁠：他既不是身故名單（非死亡），在主檔也不是主要名稱（Primary Name），因此兩道寫入規則都沒抓到他。
+*/
+DECLARE @SearchName NVARCHAR(350) = 'Martins Manaia, Jorge Henrique';   --User給的姓名
 
-
-
-
-DECLARE @SearchName NVARCHAR(350) = 'User給的姓名';
 
 SELECT 
     E.EntityId,
@@ -24,3 +25,138 @@ LEFT JOIN BSADB.dbo.DJ_List_Data_A L
 LEFT JOIN BSADBJP..OFAC_SPEC T 
     ON T.remark = CAST(E.EntityId AS VARCHAR(100)) AND T.GROUPID = 5
 WHERE E.FullName LIKE '%' + @SearchName + '%';
+
+--------------------------------------------------------------------------------
+/*
+DJ 死亡名單 要跟 自建群組名單數量一致
+*/
+
+  SELECT 
+    -- 1. DJ 來源端的死亡名單總數
+    (
+        SELECT COUNT(DISTINCT A.EntityId)
+        FROM BSADB.dbo.DJ_Entity A
+        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+        WHERE A.Deceased = 1
+          AND B.SanctionListReference LIKE '%Japanese Finance%'
+    ) AS [DJ死亡名單總數],
+
+    -- 2. 實際上真的有進到目標表的死亡名單數
+    (
+        SELECT COUNT(DISTINCT T.remark)
+        FROM BSADBJP..OFAC_SPEC T
+        JOIN BSADB.dbo.DJ_Entity A ON T.remark = CAST(A.EntityId AS VARCHAR(100))
+        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+        WHERE T.GROUPID = 5
+          AND T.DInd = 'N'
+          AND A.Deceased = 1
+          AND B.SanctionListReference LIKE '%Japanese Finance%'
+    ) AS [已在目標表中的死亡名單數],
+
+    -- 3. 兩者相減：若是 0 就代表「全部都在裡面，一個沒漏」
+    (
+        SELECT COUNT(DISTINCT A.EntityId)
+        FROM BSADB.dbo.DJ_Entity A
+        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+        WHERE A.Deceased = 1
+          AND B.SanctionListReference LIKE '%Japanese Finance%'
+    )
+    -
+    (
+        SELECT COUNT(DISTINCT T.remark)
+        FROM BSADBJP..OFAC_SPEC T
+        JOIN BSADB.dbo.DJ_Entity A ON T.remark = CAST(A.EntityId AS VARCHAR(100))
+        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+        WHERE T.GROUPID = 5
+          AND T.DInd = 'N'
+          AND A.Deceased = 1
+          AND B.SanctionListReference LIKE '%Japanese Finance%'
+    ) AS [差額_漏掉筆數];
+
+
+
+
+		--直接執行這段短 SQL，把漏掉的那 1 個人抓出來看原因：
+SELECT 
+    A.EntityId,
+    A.FullName,
+    A.Deceased,
+    T.DInd AS [目標表狀態],
+    T.spec_name AS [目標表姓名]
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+LEFT JOIN BSADBJP..OFAC_SPEC T 
+    ON T.remark = CAST(A.EntityId AS VARCHAR(100)) 
+   AND T.GROUPID = 5
+WHERE A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND (T.remark IS NULL OR T.DInd <> 'N');
+
+	
+
+	
+
+  SELECT 
+    -- 1. DJ 來源端的死亡名單總數
+    (
+        SELECT COUNT(DISTINCT A.EntityId)
+        FROM BSADB.dbo.DJ_Entity A
+        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+        WHERE  B.SanctionListReference LIKE '%Japanese Finance%'
+    ) AS [DJ死亡名單總數],
+
+    -- 2. 實際上真的有進到目標表的死亡名單數
+    (
+        SELECT COUNT(DISTINCT T.remark)
+        FROM BSADBJP..OFAC_SPEC T
+        JOIN BSADB.dbo.DJ_Entity A ON T.remark = CAST(A.EntityId AS VARCHAR(100))
+        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+        WHERE T.GROUPID = 5
+          AND T.DInd = 'N'
+          AND B.SanctionListReference LIKE '%Japanese Finance%'
+    ) AS [已在目標表中的死亡名單數],
+
+    -- 3. 兩者相減：若是 0 就代表「全部都在裡面，一個沒漏」
+    (
+        SELECT COUNT(DISTINCT A.EntityId)
+        FROM BSADB.dbo.DJ_Entity A
+        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+        WHERE  B.SanctionListReference LIKE '%Japanese Finance%'
+    )
+    -
+    (
+        SELECT COUNT(DISTINCT T.remark)
+        FROM BSADBJP..OFAC_SPEC T
+        JOIN BSADB.dbo.DJ_Entity A ON T.remark = CAST(A.EntityId AS VARCHAR(100))
+        JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+        WHERE T.GROUPID = 5
+          AND T.DInd = 'N'
+          AND B.SanctionListReference LIKE '%Japanese Finance%'
+    ) AS [差額_漏掉筆數];
+
+
+
+
+
+		SELECT 
+    A.EntityId,
+    A.FullName,
+    A.Deceased,
+    (SELECT COUNT(1) FROM BSADB.dbo.DJ_List_Data_A L WHERE L.EntNum = A.EntityId AND L.NamePropertyBitCode & 1 > 0) AS [是否有PrimaryName],
+    (SELECT DInd FROM BSADBJP..OFAC_SPEC T WHERE T.GROUPID = 5 AND T.remark = CAST(A.EntityId AS VARCHAR(100))) AS [目標表狀態DInd]
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+WHERE B.SanctionListReference LIKE '%Japanese Finance%'
+  AND NOT EXISTS (
+      -- 排除掉目標表中「有效(DInd='N')」的資料
+      SELECT 1 
+      FROM BSADBJP..OFAC_SPEC T 
+      WHERE T.GROUPID = 5 
+        AND T.DInd = 'N'
+        AND T.remark = CAST(A.EntityId AS VARCHAR(100))
+  );
+
+
+
+
+幫我整理並且註記 我要交接用的讓人家知道以後要怎麼用
