@@ -1,105 +1,18 @@
-                 BEGIN
-                        IF OBJECT_ID(N'tempdb..#AffectedCif', 'U') IS NOT NULL
-                            DROP TABLE #AffectedCif;
-
-                        CREATE TABLE #AffectedCif
-                            (
-                                CIF_KEY UNIQUEIDENTIFIER ,
-                                IsComplexStructure_Before CHAR(1) NULL ,
-                                IsComplexStructure_After CHAR(1) NULL ,
-                                IsBearerShares_Before CHAR(1) NULL ,
-                                IsBearerShares_After CHAR(1) NULL ,
-                                PEPBitwiseCode_Before INT NULL ,
-                                PEPBitwiseCode_After INT NULL ,
-                                Warn_Restrict_Account_Before CHAR(1) NULL ,
-                                Warn_Restrict_Account_After CHAR(1) NULL ,
-                                SDST2400001_Before NVARCHAR(MAX) NULL ,
-                                SDST2400001_After NVARCHAR(MAX) NULL
-                            );
-
-        -- CIPT1300004, CIPT1700061 - IsComplexStructure, Warn_Restrict_Account, RiskLevel, RiskScore
-                        ;WITH AggNP AS (
-                            SELECT
-                                M.NEW_CIF_KEY,                                                                    
-                                CASE MAX(CASE S.HIGHRISK WHEN 'H' THEN 3 WHEN 'M' THEN 2 WHEN 'L' THEN 1 ELSE 0 END)
-                                    WHEN 3 THEN 'H' WHEN 2 THEN 'M' WHEN 1 THEN 'L' ELSE NULL
-                                END AS HIGHRISK,                                        
-                                MAX(CASE S.HIGHRISK
-                                        WHEN 'H' THEN S.RiskScore
-                                        WHEN 'M' THEN S.RiskScore
-                                        WHEN 'L' THEN S.RiskScore
-                                        ELSE NULL END) AS RiskScore,
-                                MAX(CAST(S.IsSARFiled AS INT)) AS IsSARFiled,
-                                CASE WHEN MAX(CAST(S.IsComplexStructure AS INT)) = 1 THEN 1
-                                        WHEN MAX(CAST(S.IsComplexStructure AS INT)) IS NULL THEN NULL
-                                        ELSE 0 END AS IsComplexStructure,
-                                CASE WHEN MAX(CAST(S.Warn_Restrict_Account AS INT)) = 1 THEN 'Y'
-                                        WHEN MAX(CAST(S.Warn_Restrict_Account AS INT)) IS NULL THEN NULL
-                                        ELSE 'N' END AS Warn_Restrict_Account
-                            FROM dbo.CIF_Migrate_Mapping_TEMP M
-                            JOIN dbo.Cust_NP_Migrate_buffer   S ON S.CIF_KEY = M.SOURCE_CIF_KEY
-                            GROUP BY M.NEW_CIF_KEY
-                        )
-                        UPDATE  T
-                        SET     T.IsSARFiled = CASE
-                            WHEN T.IsSARFiled = 1 OR A.IsSARFiled = 1 THEN 1
-                            WHEN T.IsSARFiled IS NULL AND A.IsSARFiled IS NULL THEN NULL
-                            ELSE 0
-                        END ,
-                -- HighRisk → highest wins
-                                T.HIGHRISK = CASE
-                                        WHEN CASE A.HIGHRISK
-                                                WHEN 'L' THEN 1
-                                                WHEN 'M' THEN 2
-                                                WHEN 'H' THEN 3
-                                                ELSE 0
-                                            END > CASE T.HIGHRISK
-                                                    WHEN 'L' THEN 1
-                                                    WHEN 'M' THEN 2
-                                                    WHEN 'H' THEN 3
-                                                    ELSE 0
-                                                END
-                                        THEN A.HIGHRISK
-                                        ELSE T.HIGHRISK
-                                    END ,
-                -- RiskScore → follow chosen HighRisk
-                                T.RiskScore = CASE
-                                    WHEN CASE A.HIGHRISK WHEN 'L' THEN 1 WHEN 'M' THEN 2 WHEN 'H' THEN 3 ELSE 0 END
-                                        > CASE T.HIGHRISK WHEN 'L' THEN 1 WHEN 'M' THEN 2 WHEN 'H' THEN 3 ELSE 0 END
-                                    THEN A.RiskScore   
-                                    WHEN CASE A.HIGHRISK WHEN 'L' THEN 1 WHEN 'M' THEN 2 WHEN 'H' THEN 3 ELSE 0 END
-                                        = CASE T.HIGHRISK WHEN 'L' THEN 1 WHEN 'M' THEN 2 WHEN 'H' THEN 3 ELSE 0 END
-                                    THEN CASE WHEN ISNULL(A.RiskScore, 0) > ISNULL(T.RiskScore, 0) 
-                                                THEN A.RiskScore
-                                                ELSE T.RiskScore
-                                            END
-                                    ELSE T.RiskScore   
-                                END ,
-                -- IsComplexStructure → fill if NULL
-                                T.IsComplexStructure = CASE
-                                                            WHEN T.IsComplexStructure = 1 OR A.IsComplexStructure = 1 THEN 1
-                                                            WHEN T.IsComplexStructure IS NULL AND A.IsComplexStructure IS NULL THEN NULL
-                                                            ELSE 0
-                                                        END ,
-                                T.Warn_Restrict_Account = CASE
-                                                                WHEN T.Warn_Restrict_Account = 'Y' OR A.Warn_Restrict_Account = 'Y' THEN 'Y'
-                                                                WHEN T.Warn_Restrict_Account IS NULL AND A.Warn_Restrict_Account IS NULL THEN NULL
-                                                                ELSE 'N'
-                                                            END
-                        OUTPUT  Inserted.CIF_KEY ,
-                                Deleted.IsComplexStructure ,
-                                Inserted.IsComplexStructure ,
-                                Deleted.Warn_Restrict_Account ,
-                                Inserted.Warn_Restrict_Account
-                                INTO #AffectedCif ( CIF_KEY,
-                                                    IsComplexStructure_Before,
-                                                    IsComplexStructure_After,
-                                                    Warn_Restrict_Account_Before,
-                                                    Warn_Restrict_Account_After )
-                        FROM    dbo.BSA_SUB_CUST_FACT T
-                                JOIN    AggNP A ON T.CIF_KEY = A.NEW_CIF_KEY;
-                                
-
-
-
-先跟我說這段的邏輯
+這段 SQL 的核心邏輯只有一句話：將匯入來源的客戶風險資料，以「從嚴、取最高風險」的原則，合併回現有主檔，並把異動前後的狀態留存備查。
+拆解成三個具體步驟：
+1. 來源端彙總（CTE: AggNP）
+因為多個舊 CIF 可能合併成同一個新 CIF（多對一），所以先以 NEW_CIF_KEY 進行分組（GROUP BY），決定來源端的代表值：
+ * 風險等級（HIGHRISK）： 轉換權重（H=3, M=2, L=1），取最高者。
+ * 風險分數（RiskScore）： 取得具有最高風險等級那筆資料的分數。
+ * 可疑交易（IsSARFiled）/ 複雜股權（IsComplexStructure）： 來源只要有任一筆是 1，結果就視為 1。
+ * 限制帳戶（Warn_Restrict_Account）： 來源只要有任一筆是 1，結果就視為 'Y'。
+2. 更新主檔（UPDATE dbo.BSA_SUB_CUST_FACT）
+將現有主檔（T）與來源彙整結果（A）比對更新：
+ * 旗標欄位（IsSARFiled、IsComplexStructure、Warn_Restrict_Account）：
+   採用 聯集（OR）邏輯。主檔原本有、或是新來源有，更新後一律為 1 或 'Y'（從嚴控管，絕不降規；雙方皆為 NULL 才維持 NULL）。
+ * 風險等級（HIGHRISK）：
+   比較新舊兩邊的等級，只升不降（若來源風險高於目前主檔，則覆蓋升級）。
+ * 風險分數（RiskScore）：
+   跟隨風險等級決定。若來源等級較高，直接採用來源分數；若兩邊等級平手，則取分數較高者。
+3. 軌跡留存（OUTPUT INTO #AffectedCif）
+更新完成的當下，利用 SQL 的 OUTPUT 機制，將被異動 CIF 的複雜架構與限制帳戶欄位在「更新前（Deleted）」與「更新後（Inserted）」的數值，直接寫入 #AffectedCif 暫存表，供後續稽核與比對。
