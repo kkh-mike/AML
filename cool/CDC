@@ -1,94 +1,17 @@
-這代表兩張表的 CIF_KEY 清單完全吻合。
-查詢結果顯示 0 筆資料（空白），說明了兩件事：
- * 沒有只存在於 TEST01 的 Key：原始表沒有少任何一筆 Key。
- * 沒有只存在於原始表的 Key：TEST01 沒有少任何一筆 Key。
-後續確認步驟
-Key 一致只代表「戶號／主鍵相同」，不保證裡面的其他欄位數值完全一樣，也不排除可能有重複 Key（Duplicate Keys）的情況：
- * 檢查是否有重複筆數：先確認兩張表的總筆數是否相同：
-   SELECT 'TEST' AS TBL, COUNT(1) AS CNT FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST
-UNION ALL
-SELECT 'TEST01', COUNT(1) FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST01;
+PS C:\Users\1141923> D:\1141923\2026\ONGOING\EVENTLOG\Test-MonitorWorkflow.ps1
+因為這個系統上已停用指令碼執行，所以無法載入 D:\1141923\2026\ONGOING\EVENTLOG\Test-MonitorWorkflow.ps
+1 檔案。如需詳細資訊，請參閱 about_Execution_Policies，網址為 https:/go.microsoft.com/fwlink/?Li
+nkID=135170。
+    + CategoryInfo          : SecurityError: (:) [], ParentContainsErrorRecord 
+   Exception
+    + FullyQualifiedErrorId : UnauthorizedAccess
 
- * 檢查欄位值是否被改動：執行差集比對，確認是否整列完全相同（回傳 0 筆即代表整張表完全一模一樣）：
-   (SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST EXCEPT SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST01)
-UNION ALL
-(SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST01 EXCEPT SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST);
+PS C:\Users\1141923> D:\1141923\2026\ONGOING\EVENTLOG\Test-MonitorWorkflow.ps1
+因為這個系統上已停用指令碼執行，所以無法載入 D:\1141923\2026\ONGOING\EVENTLOG\Test-MonitorWorkflow.ps
+1 檔案。如需詳細資訊，請參閱 about_Execution_Policies，網址為 https:/go.microsoft.com/fwlink/?Li
+nkID=135170。
+    + CategoryInfo          : SecurityError: (:) [], ParentContainsErrorRecord 
+   Exception
+    + FullyQualifiedErrorId : UnauthorizedAccess
 
-
-
-
-
-
-SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST      -- 原始
-SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST01
-SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST02
-SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST03
-SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST04
-
-
-要怎麼知道哪一個跟原始的資料一模一樣
-
-他們都有CIF_KEY 欄位
-
-怎麼找出一樣的資料table
-
-然怎麼找出如果不一樣差異在哪
-
-要比對多張資料表是否與原始表一模一樣，最有效率的作法是先用 EXCEPT 或 CHECKSUM 雜湊 快速找出完全吻合的表；接著針對有差異的表，透過 FULL OUTER JOIN 逐一抓出差異欄位與缺失的 Key。
-快速找出哪一張表與原始表「完全一模一樣」
-最嚴謹且不需逐一比對欄位的方法是雙向 EXCEPT。若兩張表完全相同，雙向差集都應為 0 筆，且總筆數相同：
--- 以 TEST01 為例：若回傳筆數為 0，代表 TEST01 與原始表內容完全相同
-(
-    SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST
-    EXCEPT
-    SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST01
-)
-UNION ALL
-(
-    SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST01
-    EXCEPT
-    SELECT * FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST
-);
-
-> 小技巧：若資料量極大（數百萬筆以上），可先用全表 HASH 比對快速過濾。例如：
-> SELECT 'TEST' AS TableName, COUNT(1) AS RowCnt, CHECKSUM_AGG(BINARY_CHECKSUM(*)) AS HashVal FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST
-> UNION ALL
-> SELECT 'TEST01', COUNT(1), CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST01
-> UNION ALL
-> SELECT 'TEST02', COUNT(1), CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST02
-> UNION ALL
-> SELECT 'TEST03', COUNT(1), CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST03
-> UNION ALL
-> SELECT 'TEST04', COUNT(1), CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST04;
-> 
-> RowCnt 與 HashVal 與原始表完全相同的，就是高度吻合的表。
-> 
-找出哪裡不一樣（以 TEST01 為例）
-1. 找出缺少或多出的 CIF_KEY
-SELECT 
-    COALESCE(A.CIF_KEY, B.CIF_KEY) AS CIF_KEY,
-    CASE 
-        WHEN A.CIF_KEY IS NULL THEN '僅存在於 TEST01 (原始表缺少)'
-        WHEN B.CIF_KEY IS NULL THEN '僅存在於 原始表 (TEST01 缺少)'
-    END AS Diff_Status
-FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST A
-FULL OUTER JOIN BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST01 B
-    ON A.CIF_KEY = B.CIF_KEY
-WHERE A.CIF_KEY IS NULL OR B.CIF_KEY IS NULL;
-
-2. 找出兩邊都有，但「欄位值不同」的資料
-使用 BINARY_CHECKSUM 或逐欄比對（需考慮 NULL 值）：
-SELECT 
-    A.CIF_KEY,
-    -- 標註整筆是否有異動
-    CASE WHEN BINARY_CHECKSUM(A.*) <> BINARY_CHECKSUM(B.*) THEN '內容有差異' ELSE '相同' END AS Row_Status,
-    -- 具體欄位對照（依實際欄位名稱替換）
-    A.COL_1 AS Org_COL_1, B.COL_1 AS New_COL_1,
-    A.COL_2 AS Org_COL_2, B.COL_2 AS New_COL_2
-FROM BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST A
-INNER JOIN BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST01 B
-    ON A.CIF_KEY = B.CIF_KEY
-WHERE BINARY_CHECKSUM(A.*) <> BINARY_CHECKSUM(B.*);
-
-若欄位較多且想自動印出「到底是哪個欄位不同」，可改用動態 SQL 串接 CASE WHEN A.Col <> B.Col THEN 'Col,' ELSE '' END，或利用 SQL Server 的 sys.columns 產生逐欄比對語法。
-
+PS C:\Users\1141923> 
