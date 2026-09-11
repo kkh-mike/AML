@@ -1,0 +1,127 @@
+這裡為你打包成兩隻腳本：一隻是監控主腳本，另一隻是一鍵自動模擬測試腳本，最後附上端到端的操作流程。
+1. 監控主腳本：Monitor-EventLog.ps1
+此腳本符合監控系統標準規範（輸出單行資訊，並透過 exit 回傳標準狀態碼：0=OK、1=WARNING、2=CRITICAL、3=UNKNOWN）。
+# Monitor-EventLog.ps1
+[CmdletBinding()]
+param (
+    [int]$Minutes = 5,
+    [string[]]$LogNames = @("Application", "System"),
+    [int]$WarningThreshold = 1,
+    [int]$CriticalThreshold = 5
+)
+
+$startTime = (Get-Date).AddMinutes(-$Minutes)
+$filter = @{
+    LogName   = $LogNames
+    Level     = 1, 2          # 1: Critical, 2: Error
+    StartTime = $startTime
+}
+
+try {
+    # 查詢事件日誌
+    $events = Get-WinEvent -FilterHashtable $filter -ErrorAction Stop
+    $count = $events.Count
+
+    # 取最新的一筆錯誤作為通知摘要
+    $latest = $events[0]
+    $summary = "Found $count errors in last $Minutes mins. Latest: [ID:$($latest.Id)] $($latest.ProviderName)"
+
+    if ($count -ge $CriticalThreshold) {
+        Write-Output "CRITICAL: $summary"
+        exit 2
+    } elseif ($count -ge $WarningThreshold) {
+        Write-Output "WARNING: $summary"
+        exit 1
+    } else {
+        Write-Output "OK: 0 errors found."
+        exit 0
+    }
+}
+catch [System.Exception] {
+    # 若查無任何符合事件，Get-WinEvent 會拋出例外，需視為正常 OK
+    if ($_.Exception.Message -like "*No events were found*" -or $_.Exception.Message -like "*找不到任何事件*") {
+        Write-Output "OK: 0 errors in last $Minutes mins."
+        exit 0
+    } else {
+        Write-Output "UNKNOWN: Query error - $($_.Exception.Message)"
+        exit 3
+    }
+}
+
+2. 模擬測試腳本：Test-MonitorWorkflow.ps1
+此腳本會自動完成：註冊來源 \to 測試 OK \to 注入 1 筆測 WARNING \to 注入 5 筆測 CRITICAL \to 清理環境。
+# Test-MonitorWorkflow.ps1
+# 注意：必須以「系統管理員身分」執行此測試腳本
+
+$ErrorActionPreference = "Stop"
+$scriptPath = Join-Path $PSScriptRoot "Monitor-EventLog.ps1"
+$testSource = "MonitorSimulationTest"
+
+if (-not (Test-Path $scriptPath)) {
+    Write-Error "找不到監控腳本：$scriptPath，請確保兩隻腳本放在同一個目錄下。"
+    exit 1
+}
+
+Write-Host "=== 開始自動化監控與模擬測試 ===" -ForegroundColor Cyan
+
+# 步驟 1: 註冊測試事件來源
+if (-not [System.Diagnostics.EventLog]::SourceExists($testSource)) {
+    New-EventLog -LogName Application -Source $testSource
+    Write-Host "[1/5] 已建立測試來源：$testSource" -ForegroundColor Green
+}
+
+# 步驟 2: 測試情境 - 基準狀態 (預期 Exit Code: 0)
+Write-Host "`n[2/5] 測試情境 1：無新增錯誤 (基準測試)..." -ForegroundColor Yellow
+$proc = Start-Process powershell -ArgumentList "-NoProfile -File `"$scriptPath`" -Minutes 1" -PassThru -Wait
+Write-Host "  -> 腳本回傳 ExitCode: $($proc.ExitCode) (預期為 0)" -ForegroundColor ($proc.ExitCode -eq 0 ? "Green" : "Red")
+
+# 步驟 3: 測試情境 - 注入 1 筆錯誤 (預期 Exit Code: 1)
+Write-Host "`n[3/5] 測試情境 2：寫入 1 筆錯誤 (模擬 WARNING)..." -ForegroundColor Yellow
+Write-EventLog -LogName Application -Source $testSource -EntryType Error -EventId 9001 -Message "【監控測試】單筆錯誤事件"
+Start-Sleep -Seconds 1
+
+$proc = Start-Process powershell -ArgumentList "-NoProfile -File `"$scriptPath`" -Minutes 1" -PassThru -Wait
+Write-Host "  -> 腳本回傳 ExitCode: $($proc.ExitCode) (預期為 1)" -ForegroundColor ($proc.ExitCode -eq 1 ? "Green" : "Red")
+
+# 步驟 4: 測試情境 - 注入 5 筆錯誤 (預期 Exit Code: 2)
+Write-Host "`n[4/5] 測試情境 3：累計寫入多筆錯誤 (模擬 CRITICAL)..." -ForegroundColor Yellow
+1..5 | ForEach-Object {
+    Write-EventLog -LogName Application -Source $testSource -EntryType Error -EventId (9100 + $_) -Message "【監控測試】大量錯誤觸發第 $_ 筆"
+}
+Start-Sleep -Seconds 1
+
+$proc = Start-Process powershell -ArgumentList "-NoProfile -File `"$scriptPath`" -Minutes 1" -PassThru -Wait
+Write-Host "  -> 腳本回傳 ExitCode: $($proc.ExitCode) (預期為 2)" -ForegroundColor ($proc.ExitCode -eq 2 ? "Green" : "Red")
+
+# 步驟 5: 清理環境
+Write-Host "`n[5/5] 清理測試環境..." -ForegroundColor Yellow
+if ([System.Diagnostics.EventLog]::SourceExists($testSource)) {
+    Remove-EventLog -Source $testSource
+    Write-Host "  -> 已移除測試來源：$testSource" -ForegroundColor Green
+}
+
+Write-Host "`n=== 測試流程完成 ===" -ForegroundColor Cyan
+
+3. 操作流程
+ 1. 存放程式碼檔案
+   建立放置腳本的資料夾
+   在目標主機上建立一個目錄（例如 C:\Monitoring），將上述兩段程式碼分別存檔為：
+   * C:\Monitoring\Monitor-EventLog.ps1
+   * C:\Monitoring\Test-MonitorWorkflow.ps1
+ 2. 以系統管理員身分開啟 PowerShell
+   需具備建立 Event Source 與寫入權限
+   按下 Win + X，選擇「終端機 (系統管理員)」或「PowerShell (系統管理員)」。
+ 3. 執行一鍵測試
+   執行自動化模擬與驗證
+   切換至該目錄並執行測試腳本：
+   cd C:\Monitoring
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\Test-MonitorWorkflow.ps1
+
+   檢查畫面上情境 1、2、3 是否分別精準對應 ExitCode 0、1、2。
+ 4. 配置進監控 Agent
+   串接 Zabbix / Nagios / PRTG
+   測試通過後，即可將 Monitor-EventLog.ps1 加入監控設定中：
+   * 執行指令： powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Monitoring\Monitor-EventLog.ps1 -Minutes 5
+   * 排程週期： 建議設為 5 分鐘執行一次。
+   * 警報判定： 監控系統讀取 Process 返回碼判斷狀態（0 恢復正常、1 警示、2 重大警報）。
