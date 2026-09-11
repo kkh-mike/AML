@@ -1,3 +1,16 @@
+依據剛才確認的實際資料欄位與畫面，整理好直接發給 User 的重點版本：
+Hi [User名稱]，
+日本金融制裁名單同步已建置完成，重點說明如下：
+ * 名單涵蓋範圍：只要符合 Japanese Finance，不論是主要制裁名單或標記為死亡（Deceased = 1，包含 BL / PEP / NN），皆已納入排程並寫入自建名單 MOF Sanction List (Decease)。
+ * 資料欄位寫入細節：
+   * 名稱與編號：寫入名稱（spec_name，含原文及英文名），並將 DJ Entity ID 保留在備註（remark）。
+   * 證號資訊：若 DJ 有資料，會自動帶入自建證件類型代碼（IDENT = 4）與對應證號（IDENTO，如 IFSR、SDGT 或護照/稅號）。
+   * 地址與地區：自動帶入最新一筆地址（ADDRESS）、城市（STATE）及國家（COUNTRY）。
+   * 狀態與日期：有效註記預設為有效（DInd = N），發布機構為 JP，若有出生日期則自動轉為西元年月日（DOB）。
+ * 特定名單確認：先前確認的 KHALIL AHMED HAQQANI 與 MULLAH NOORDIN TORABI，經查目前未收錄在 DJ 資料來源中，因此本次不會被寫入。
+
+
+
 SELECT 
     T.ent_num,
     T.spec_name,
