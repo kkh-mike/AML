@@ -1,58 +1,67 @@
+/*
 
-select QueryId ,  DESCR, DESCR_zh_TW    from CIP_TEMPLATE_DIM 
-ORDER BY QueryId
+查詢目的
+匯出內部人工維護（手動建立/檔案整批匯入）且仍有效的洗錢防制關注名單，排除外部自動串接的制裁黑名單。
+資料表角色
+ * OFAC_GLSPEC (A)：名單主檔（人名、統編、身分證、地址、審核紀錄）。
+ * OFAC_GLSpec_Source_Dim (b)：來源字典表（K = 畫面散戶、U = 整批匯入、D = 道瓊外部自動名單）。
+ * COUNTRY_DIM (c)：國家字典表（將 ISO 2 碼代碼轉為英文全名）。
+Code 關鍵邏輯備忘
+ * b.DESCR + DESCR_zh_TW：拼出「英文+中文」來源名稱（如：Input from screen散戶名單）。
+ * 'N' 黑名單 / PEP / 負面新聞：配合下游介面格式寫死為 N（代表此清單為特殊自建名單，非這三類標準標籤）。
+ * convert(char(8), creDate, 112)：建立日期轉為 YYYYMMDD。
+ * LEFT JOIN COUNTRY_DIM：避免主檔國家代碼為空值或填錯時整筆資料消失。
+ * WHERE A.DInd = 'N'：排除已被軟刪除（Delete Indicator）的無效資料。
+ * WHERE a.EnterFlag <> 'D'：核心條件，排除 D（道瓊自動名單），只保留人工維護名單。
 
-select  QueryId , Syntax,  Syntax_zh_TW from SAR_ScenarioTemplates
-ORDER BY QueryId
+*/
 
 
-幫我整理 並且註解這些table 是幹嘛
-然後我的檔案要取什麼
 
-
-這裡幫你把這兩段 SQL 整理排版好，附上詳細的資料表與欄位註解，並提供查核／正式回信最清楚的檔案命名建議：
-一、整理後帶註解的 SQL
-/* ==========================================================================
- * 1. CIP 規則條件描述範本維度表
- * 說明：
- *   存放反洗錢（AML）中客戶審查 / 身分識別（KYC / CIP）各項檢核條件的文字範本。
- *   主要用於系統介面呈現、規則設定及報表產出時的多語系對照。
- * ========================================================================== */
 SELECT 
-    QueryId,        -- 條件規則唯一識別碼（Rule / Condition Query ID）
-    DESCR,          -- 英文規則描述範本（English Description，含前端排版 HTML tag）
-    DESCR_zh_TW     -- 繁體中文規則描述範本（Traditional Chinese Description）
-FROM 
-    CIP_TEMPLATE_DIM
-ORDER BY 
-    QueryId;
+    a.enterflag, 
+    -- 1. 串接來源英中文：例如 "Input from screen散戶名單"
+    b.DESCR + DESCR_zh_TW '內部名單群組名稱',
+    
+    -- 2. 案件與基本資料
+    a.ent_num '名單資料編號',
+    convert(char(8), creDate, 112) '建立日期', -- 格式轉換為 YYYYMMDD
+    a.spec_name '姓名/名稱',
+    
+    -- 3. 固定標記欄位（依匯出標準介面需求寫死為 'N'）
+    'N' '黑名單',
+    'N' PEP,          -- 政治重要人物 (Politically Exposed Persons)
+    'N' '負面新聞',
+    
+    -- 4. 身分證號與地理資訊
+    TaxIDCD '稅號代碼',
+    a.TaxID '稅號/統一編號',
+    a.IDNUM '證件號碼',
+    a.IssBy '發照地',
+    a.ADDRESS '地址',
+    a.STATE '州',
+    c.ISO_CountryDescription '國家', -- 關聯 c 表取得的國家英文全名
+    a.DOB '出生日期',
+    '' GoodsCodes_1,               -- 預留貨品代碼（空值）
+    
+    -- 5. 稽核與簽核紀錄（使用 isnull 避免 NULL 破壞報表排版）
+    a.creUserID '建立人',
+    isnull(a.ApprovedBy, '') '核准人',
+    isnull(a.ApprovedDate, '') '核准日期',
+    isnull(a.remark, '') '備註'
+
+FROM BSADB..OFAC_GLSPEC A
+INNER JOIN bsadbtw..OFAC_GLSpec_Source_Dim b   ON a.EnterFlag = b.SOURCE_KEY -- [關聯 b 表]：利用 SOURCE_KEY 對應名單來源類別
+LEFT JOIN COUNTRY_DIM c     ON a.COUNTRY = c.ISO_2_CountryCode                -- [關聯 c 表]：利用 2 碼國別代碼換取完整國名；使用 LEFT JOIN 避免國別未填時資料被吃掉
+
+WHERE 
+    -- 排除已註銷/邏輯刪除的資料 (Delete Indicator = 'N')
+    A.DInd = 'N' 
+    -- 排除 D (DJ Blacklist 自動名單)，僅保留 K (散戶) 與 U (整批) 等內部名單
+    AND a.EnterFlag <> 'D'
+
+-- 依據名單群組編號及資料序號依序排序
+ORDER BY A.GROUPID, a.ent_num;
 
 
-/* ==========================================================================
- * 2. SAR 可疑交易情境規則範本表
- * 說明：
- *   存放可疑交易申報（SAR）與交易監控情境（Scenario）的警示觸發語法範本。
- *   內容包含帶參數變數（如 {Parameter1}、{Parameter2}）的語句，
- *   在系統觸發警示時會動態代入交易金額、天數、頻率等實際數值。
- * ========================================================================== */
-SELECT 
-    QueryId,        -- 情境規則識別碼（Scenario Query ID）
-    Syntax,         -- 英文情境語法範本（English Scenario Syntax，含參數變數）
-    Syntax_zh_TW    -- 繁體中文情境語法範本（Traditional Chinese Scenario Syntax）
-FROM 
-    SAR_ScenarioTemplates
-ORDER BY 
-    QueryId;
-
-二、檔案命名建議
-因為對方是要拿去應對**「海外分行查核」**，稽核或查核人員通常需要一眼看出業務模組、內容屬性與語系，建議以下兩種命名方式：
-方案 A：中文檔名（清晰直覺，如信中已掛的名稱）
- * AML_CIP條件範本維度表_中英對照.csv
- * AML_SAR情境範本維度表_中英對照.csv
-方案 B：中英雙語 / 國際查核標準命名（最推薦給查核或稽核單位）
- * AML_CIP_Template_Dim_CIP條件範本表.csv
- * AML_SAR_ScenarioTemplates_SAR情境範本表.csv
-> 附註說明：如果查核方全為外籍稽核員，也可以直接命名為：
->  * AML_CIP_Template_Dimension.csv
->  * AML_SAR_Scenario_Templates.csv
-> 
+一句話說明這張表在幹嘛
