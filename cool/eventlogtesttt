@@ -1,0 +1,88 @@
+可以，用 .ps1 很適合測試 Windows Event Log 的「錯誤事件」。如果你是要驗證 AML/批次程式出錯時，Event Viewer 能不能收到 Error Event，可以直接這樣做。
+
+最簡單版本
+
+建立 Test-ErrorEvent.ps1：
+
+$Source = "AML-Test"
+$LogName = "Application"
+# 如果來源不存在，先建立
+if (-not [System.Diagnostics.EventLog]::SourceExists($Source)) {
+    New-EventLog -LogName $LogName -Source $Source
+}
+# 寫入 Error Event
+Write-EventLog `
+    -LogName $LogName `
+    -Source $Source `
+    -EventId 9999 `
+    -EntryType Error `
+    -Message "AML Test Error: 測試錯誤 Event Log"
+
+然後執行：
+
+.\Test-ErrorEvent.ps1
+
+再到：
+
+事件檢視器 → Windows Logs → Application
+
+應該會看到：
+
+Level: Error
+Source: AML-Test
+Event ID: 9999
+Message:
+AML Test Error: 測試錯誤 Event Log
+
+如果你想測「真的發生 PowerShell 錯誤」
+
+例如測試你的監控程式能不能抓到 PowerShell exception：
+
+try {
+    $a = 1 / 0
+}
+catch {
+    Write-EventLog `
+        -LogName Application `
+        -Source "AML-Test" `
+        -EventId 10001 `
+        -EntryType Error `
+        -Message "AML PowerShell Error: $($_.Exception.Message)"
+}
+
+這個會故意產生錯誤，然後把錯誤寫進 Event Log。
+
+⸻
+
+如果你要測「批次失敗」情境
+
+我反而推薦你用這種，會比較接近實際 AML batch：
+
+$Source = "AML-Batch"
+$LogName = "Application"
+if (-not [System.Diagnostics.EventLog]::SourceExists($Source)) {
+    New-EventLog -LogName $LogName -Source $Source
+}
+try {
+    Write-Host "Start AML Batch..."
+    # 模擬錯誤
+    throw "Database connection failed."
+    Write-Host "Batch completed."
+}
+catch {
+    $ErrorMessage = $_.Exception.Message
+    Write-EventLog `
+        -LogName $LogName `
+        -Source $Source `
+        -EventId 50001 `
+        -EntryType Error `
+        -Message "AML Batch Failed.`r`nError: $ErrorMessage"
+    Write-Host "ERROR: $ErrorMessage"
+    exit 1
+}
+
+這樣你可以同時驗證：
+
+PS1 執行失敗 → Catch → Event Log Error → Event ID 50001 → Batch 回傳 Exit Code 1
+
+如果你現在是要測試你們既有 AML PS1 發生錯誤時，是否會留下 Event Log，把你目前的 .ps1 貼給我，我可以直接幫你加一段「故意觸發錯誤」的測試版本，不會破壞原本的 SQL/FTP 流程。
