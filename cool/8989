@@ -1,4 +1,8 @@
 
+select * from CIP_TEMPLATE_DIM
+select * from SAR_ScenarioTemplates
+
+
 select * from PO_DefaultData where CtrlKey = 'IncludeDeletedWorkgroupForSelection'
 
  * 法規/內部稽核：查核人員手動建檔的名單是否都有「建立人」與「主管核准」紀錄。
