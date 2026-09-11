@@ -1,12 +1,67 @@
-WHERE A.TrxnType = 'TTL MTHLY SMRY'
-  AND NOT EXISTS (
-      SELECT 1
-      FROM dbo.TTL_MTHLY_ACCT_SMRY Z
-      WHERE Z.YYYYMM = A.YYYYMM
-        AND Z.CIF_KEY = B.NEW_CIF_KEY
-        AND Z.APPL = A.APPL
-        AND (
-            (C.FinalAcctKey IS NOT NULL AND Z.ACCT_KEY = C.FinalAcctKey)
-            OR (C.FinalAcctKey IS NULL AND Z.ACCT_KEY = 'SK_' + A.ACCT_KEY)
-        )
-  )
+最好的寫法是先用中介暫存表把欄位與運算算好，再對齊聚集索引寫入。
+這樣做能徹底解決三個效能致命傷：
+ * 消除 NOT EXISTS 內的 ISNULL 運算（原本讓索引完全失效的元凶）。
+ * 條件完美對齊聚集索引順序（YYYYMM \rightarrow CIF_KEY \rightarrow APPL \rightarrow ACCT_KEY，直接走精準 Index Seek）。
+ * 避免大表關聯與過濾混在一起（大幅減少記憶體溢出至 tempdb 的壓力）。
+完整優化腳本如下：
+DECLARE @StartTime DATETIME = GETDATE();
+DECLARE @InsertedCount INT = 0;
+
+-- 1. 預先過濾資料、完成 Join 與欄位運算，存入暫存表
+IF OBJECT_ID('tempdb..#PrepData') IS NOT NULL DROP TABLE #PrepData;
+
+SELECT  
+    B.NEW_CIF_KEY,
+    A.APPL,
+    ISNULL(C.FinalAcctKey, 'SK_' + A.ACCT_KEY) AS FinalAcctKey,
+    A.YYYYMM,
+    A.TTL, A.CRTTL, A.DRTTL, A.CNT, A.CRCNT, A.DRCNT,
+    A.MIN, A.MAX, A.CRMIN, A.DRMIN, A.CRMAX, A.DRMAX
+INTO #PrepData
+FROM dbo.LoadTrxn_Migrate_buffer A
+INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B 
+    ON A.CIF_KEY = B.SOURCE_CIF_KEY
+LEFT JOIN #TrxnAcctFinalMapping C 
+    ON A.ACCT_KEY = C.SourceAcctKey
+WHERE A.TrxnType = 'TTL MTHLY SMRY';
+
+-- 2. 為暫存表建立索引，欄位順序完全對齊 TTL_MTHLY_ACCT_SMRY 的 Clustered Index
+CREATE CLUSTERED INDEX IX_Prep ON #PrepData(YYYYMM, NEW_CIF_KEY, APPL, FinalAcctKey);
+
+-- 3. 執行寫入：條件乾淨無運算，並啟用 TABLOCK 最小化 Log 寫入
+INSERT INTO BatchJobDB..TTL_MTHLY_ACCT_SMRY_TEST03 WITH (TABLOCK)
+(
+    CIF_KEY, APPL, ACCT_KEY, YYYYMM, TTL, CRTTL, DRTTL,
+    CNT, CRCNT, DRCNT, MIN, MAX, CRMIN, DRMIN, CRMAX, DRMAX
+)
+SELECT  
+    P.NEW_CIF_KEY,
+    P.APPL,
+    P.FinalAcctKey,
+    P.YYYYMM,
+    P.TTL, P.CRTTL, P.DRTTL, P.CNT, P.CRCNT, P.DRCNT,
+    P.MIN, P.MAX, P.CRMIN, P.DRMIN, P.CRMAX, P.DRMAX
+FROM #PrepData P
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM dbo.TTL_MTHLY_ACCT_SMRY Z
+    WHERE Z.YYYYMM   = P.YYYYMM
+      AND Z.CIF_KEY  = P.NEW_CIF_KEY
+      AND Z.APPL     = P.APPL
+      AND Z.ACCT_KEY = P.FinalAcctKey
+);
+
+-- 取得寫入筆數
+SET @InsertedCount = @@ROWCOUNT;
+
+-- 釋放暫存表
+DROP TABLE #PrepData;
+
+-- 4. 記錄執行時間與筆數到 Log
+INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG)
+SELECT 
+    CONVERT(VARCHAR, dbo.ConvertToBankLocalTime(GETUTCDATE()), 109),
+    'TTL MTHLY SMRY inserted ' + CAST(@InsertedCount AS VARCHAR(10)) 
+    + ' rows. Duration: ' + CAST(DATEDIFF(SECOND, @StartTime, GETDATE()) AS VARCHAR(10)) + 's',
+    'N';
+
