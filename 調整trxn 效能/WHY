@@ -1,3 +1,32 @@
+這兩者在業務邏輯上是完全相反的兩件事：
+| 比較項目 | 原本的寫法 (NOT EXISTS) | 改成 LEFT JOIN B ... IS NULL |
+|---|---|---|
+| 比對與排除的對象 | 歷史目標表 TTL_MTHLY_ACCT_SMRY (Z) | 客戶轉換對照表 CIF_Migrate_Mapping_TEMP (B) |
+| 真正的過濾邏輯 | 「我要換新編號，但不要重複寫入已經搬過的帳務。」 | 「我要找**完全找不到新客戶編號（無對照）**的孤兒資料。」 |
+| B.NEW_CIF_KEY 的值 | 有值（成功從舊代碼轉成新代碼） | 全為 NULL（因為 B 表根本沒這筆） |
+| 寫入結果 | 正常寫入有效的新資料（只是跑得慢） | 資料全毀或直接報錯（因第 1 欄 CIF_KEY 塞進去的全都是 NULL） |
+原本寫法在做什麼？
+INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+WHERE ...
+  AND NOT EXISTS (SELECT 1 FROM dbo.TTL_MTHLY_ACCT_SMRY Z WHERE ...)
+
+ * 目的：先拿舊 CIF 去對照表 B 找出新編號 B.NEW_CIF_KEY，接著拿這個新編號去查已存在的歷史表 Z。
+ * 意義：如果歷史表 Z 已經有這筆紀錄就跳過，沒有的才寫入（防止重複寫入）。
+改成 LEFT JOIN B ... IS NULL 會發生什麼事？
+LEFT JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY
+WHERE ...
+  AND B.SOURCE_CIF_KEY IS NULL
+
+ * 目的：把舊資料 A 跟對照表 B 做比對，然後把在 B 表「查無此人」的資料撈出來。
+ * 問題：
+   * 因為在 B 表根本查不到，所以 B.NEW_CIF_KEY 一定是空值（NULL）。
+   * 你的 SELECT 第一個欄位就是 B.NEW_CIF_KEY，這會導致你準備塞進目標表的所有 CIF_KEY 通通變成 NULL。
+   * 它完全失去了原本要檢查「目標表有沒有重複」的功能。
+
+
+
+
+
 原本
 
 
