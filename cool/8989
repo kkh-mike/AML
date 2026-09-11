@@ -1,93 +1,144 @@
+/* =============================================================================
+   專案名稱：SWIFT MX (ISO 20022) 洗錢防制/制裁名單掃描 (AML/Sanction Screening) 分析
+   分析目標：評估 2026 年 6 月香港分行 (HK) 電文的警示分佈與常態性誤判 (False Positives)
+   主要產出：供後續調整比對閥值 (Threshold) 及建立白名單/停用詞 (Stopwords) 的依據
+   ============================================================================= */
 
 
+--------------------------------------------------------------------------------
+-- 階段 1：母體資料檢視與確認
+--------------------------------------------------------------------------------
 
--- MＸ
-SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw 
-order by CreatedDate DESC
+-- 查看最新接收/轉換的 SWIFT MX 原始電文結構
+SELECT * 
+FROM MESSAGEDATABASE..SwiftMX_Raw 
+ORDER BY CreatedDate DESC;
 
---14486
-  SELECT * FROM MESSAGEDATABASE..SwiftMX_Raw WHERE bankNo = 'HK'AND CompletedDate >= '20260601'  AND CompletedDate < '20260701' 
-
-
--- Cdtr  收款人
--- CdtrAgt 收款人銀行
--- FinInstnId 銀行識別資訊
-
---107
---Document/FIToFICstmrCdtTrf/CdtTrfTxInf/Cdtr/Nm 6565
---Document/FIToFICstmrCdtTrf/CdtTrfTxInf/CdtrAgt/FinInstnId/Nm 6276
---Document/FIToFICstmrCdtTrf/CdtTrfTxInf/Dbtr/Nm 6178
---Document/FIToFICstmrCdtTrf/CdtTrfTxInf/Dbtr/PstlAdr/AdrLine 4536
-
-SELECT  MessageItemPath ,count(*) FROM SwiftMX_DetectionResult b
-join MESSAGEDATABASE..SwiftMX_Raw a  on b.CaseId = a.id
-where a.bankNo = 'HK' AND a.CompletedDate >= '20260601'  AND a.CompletedDate < '20260701' 
- Group By  MessageItemPath order by 2 desc
+-- 確認目標母體筆數：2026 年 6 月份香港分行 (HK) 處理完成的電文總數
+-- 【統計結果】：共 14,486 筆
+SELECT * 
+FROM MESSAGEDATABASE..SwiftMX_Raw 
+WHERE bankNo = 'HK'
+  AND CompletedDate >= '20260601'  
+  AND CompletedDate < '20260701';
 
 
+--------------------------------------------------------------------------------
+-- 階段 2：命中欄位分佈統計 (找出最容易觸發警示的 XML 欄位)
+--------------------------------------------------------------------------------
+/*
+   業務名詞對照 (ISO 20022)：
+   - Cdtr        : 收款人 (Creditor)
+   - CdtrAgt     : 收款人往來銀行 (Creditor Agent)
+   - Dbtr        : 匯款人 (Debtor)
+   - FinInstnId  : 金融機構識別資訊 (Financial Institution Identification)
+
+   【統計結果排行榜】：
+   1. .../Cdtr/Nm                   (收款人名稱)     : 6,565 次 (最高)
+   2. .../CdtrAgt/FinInstnId/Nm     (收款行名稱)     : 6,276 次
+   3. .../Dbtr/Nm                   (匯款人名稱)     : 6,178 次
+   4. .../Dbtr/PstlAdr/AdrLine      (匯款人地址行)   : 4,536 次
+*/
+SELECT 
+    b.MessageItemPath,
+    COUNT(*) AS HitCount
+FROM SwiftMX_DetectionResult b
+JOIN MESSAGEDATABASE..SwiftMX_Raw a 
+    ON b.CaseId = a.id
+WHERE a.bankNo = 'HK' 
+  AND a.CompletedDate >= '20260601'  
+  AND a.CompletedDate < '20260701' 
+GROUP BY b.MessageItemPath 
+ORDER BY HitCount DESC;
 
 
+--------------------------------------------------------------------------------
+-- 階段 3：分析「收款人名稱 (Cdtr/Nm)」的黑名單命中與誤判
+--------------------------------------------------------------------------------
+
+-- 3-1. 統計在「收款人名稱」欄位中，命中頻率最高的前幾大制裁名單實體 (SdnName)
+SELECT 
+    b.SdnName, 
+    COUNT(*) AS HitCount
+FROM SwiftMX_DetectionResult b
+JOIN MESSAGEDATABASE..SwiftMX_Raw a 
+    ON b.CaseId = a.id
+WHERE a.bankNo = 'HK' 
+  AND a.CompletedDate >= '20260601'  
+  AND a.CompletedDate < '20260701' 
+  AND b.MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/Cdtr/Nm'
+GROUP BY b.SdnName 
+ORDER BY HitCount DESC;
 
 
- SELECT SdnName , count(*) FROM SwiftMX_DetectionResult b
-join MESSAGEDATABASE..SwiftMX_Raw a  on b.CaseId = a.id
-where a.bankNo = 'HK' AND a.CompletedDate >= '20260601'  AND a.CompletedDate < '20260701' 
-AND b.MessageItemPath in
-(
-'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/Cdtr/Nm'
-)
-group by SdnName order by 2 desc
+-- 3-2. 抽查比對原始 XML 電文 (RawMessage)，確認是否為常態誤判
+/*
+   【發現的誤判樣態】：
+   - 'Technology': 過於通用的單字，命中大量正常科技公司 (如 HOTLLIES TECHNOLOGY LIMITED, BOGE NETWORK TECHNOLOGY LIMITED)
+   - 'Pure'      : 命中一般商品/商用實體 (如 WATER PURE INC, Pure Stellans LP)
+   - 'Hong Le'   : 模糊比對/分詞異常，因包含 "HONG" 誤命中正常金融機構 (如 YUANTA SECURITIES (HONG KONG), TAISHIN ... HONG KONG BRANCH)
+*/
+SELECT 
+    b.RawMessage,
+    b.SdnName,
+    b.*  
+FROM SwiftMX_DetectionResult b
+JOIN MESSAGEDATABASE..SwiftMX_Raw a 
+    ON b.CaseId = a.id
+WHERE a.bankNo = 'HK' 
+  AND a.CompletedDate >= '20260601'  
+  AND a.CompletedDate < '20260701' 
+  AND b.MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/Cdtr/Nm'
+  AND b.SdnName IN (
+      'Technology',
+      'Pure',
+      'Hong Le'
+  );
 
 
+--------------------------------------------------------------------------------
+-- 階段 4：分析「收款行名稱 (CdtrAgt/FinInstnId/Nm)」的黑名單命中與誤判
+--------------------------------------------------------------------------------
+
+-- 4-1. 統計在「收款行名稱」欄位中，命中頻率最高的前幾大制裁名單實體 (SdnName)
+SELECT 
+    b.SdnName, 
+    COUNT(*) AS HitCount
+FROM SwiftMX_DetectionResult b
+JOIN MESSAGEDATABASE..SwiftMX_Raw a 
+    ON b.CaseId = a.id
+WHERE a.bankNo = 'HK' 
+  AND a.CompletedDate >= '20260601'  
+  AND a.CompletedDate < '20260701' 
+  AND b.MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/CdtrAgt/FinInstnId/Nm'
+GROUP BY b.SdnName 
+ORDER BY HitCount DESC;
 
 
+-- 4-2. 抽查收款行原始 XML 電文，釐清誤判原因
+/*
+   【發現的誤判樣態】：
+   - 'Shanghai'   : 知名大型行庫名稱包含地名，大量誤命中匯豐 (HONGKONG AND SHANGHAI BANKING CORPORATION LIMITED)
+   - 'MR Bank' / 'AT MR Bank': 模糊比對過於寬鬆，誤命中知名正規金融機構 
+     (如 CHINA CONSTRUCTION BANK 中國建設銀行, DEUTSCHE BANK AG 德意志銀行, TAISHIN 台新香港分行)
 
-
-SELECT RawMessage,SdnName,*  FROM SwiftMX_DetectionResult b
-join MESSAGEDATABASE..SwiftMX_Raw a  on b.CaseId = a.id
-where a.bankNo = 'HK' AND a.CompletedDate >= '20260601'  AND a.CompletedDate < '20260701' 
-AND b.MessageItemPath in
-(
-'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/Cdtr/Nm'
-) AND SdnName in
-(
-'Technology',  --<Nm> HOTLLIES TECHNOLOGY LIMITED </Nm>  ,  <Pac:Nm> BOGE NETWORK TECHNOLOGY LIMITED </Pac:Nm>  ,  
-'Pure',    --<Nm> WATER PURE INC </Nm>  ,  <Nm> Pure Stellans LP </Nm>  ,  
-'Hong Le'  -- <Nm> YUANTA SECURITIES (HONG KONG) COMPANY LIMITED </Nm>  ,  <Nm> TAISHIN INTERNATIONAL BANK CO., LTD HONG KONG BRANCH </Nm>  ,  
-)
-
-
-
-
-
-
-
- SELECT SdnName , count(*) FROM SwiftMX_DetectionResult b
-join MESSAGEDATABASE..SwiftMX_Raw a  on b.CaseId = a.id
-where a.bankNo = 'HK' AND a.CompletedDate >= '20260601'  AND a.CompletedDate < '20260701' 
-AND b.MessageItemPath in
-(
-'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/CdtrAgt/FinInstnId/Nm'
-)
-group by SdnName order by 2 desc
-
-
-
-
-
-
-SELECT RawMessage,SdnName,*  FROM SwiftMX_DetectionResult b
-join MESSAGEDATABASE..SwiftMX_Raw a  on b.CaseId = a.id
-where a.bankNo = 'HK' AND a.CompletedDate >= '20260601'  AND a.CompletedDate < '20260701' 
-AND b.MessageItemPath in
-(
-'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/CdtrAgt/FinInstnId/Nm'
-) AND SdnName in
-(
- 'Shanghai',   --<Nm> HONGKONG AND SHANGHAI BANKING GORPORATION LIMITED </Nm>  ,   <Nm> THE CALL HK OFFICES AND HEAD OFFICE </Nm>  ,  
- 'MR Bank',   --<Nm> CHINA CONSTRUCTION BANK</Nm>  
- 'AT MR Bank'  --<Nm> DEUTSCHE BANK AG</Nm>   ,  <Nm> TAISHIN INTERNATIONAL BANK CO., LTD HONG KONG BRANCH</Nm>   
-)
-
-幫我整理這些在幹嘛
-我要整理筆記
+   【後續建議】：
+   1. 評估導入常見行名白名單 (Whitelist / Good Guy List)，例如 HSBC、建設銀行、德銀等。
+   2. 收緊模糊比對分數門檻，避免通稱詞 (如 Bank、Technology) 造成過多無效警示。
+*/
+SELECT 
+    b.RawMessage,
+    b.SdnName,
+    b.*  
+FROM SwiftMX_DetectionResult b
+JOIN MESSAGEDATABASE..SwiftMX_Raw a 
+    ON b.CaseId = a.id
+WHERE a.bankNo = 'HK' 
+  AND a.CompletedDate >= '20260601'  
+  AND a.CompletedDate < '20260701' 
+  AND b.MessageItemPath = 'Document/FIToFICstmrCdtTrf/CdtTrfTxInf/CdtrAgt/FinInstnId/Nm'
+  AND b.SdnName IN (
+      'Shanghai',
+      'MR Bank',
+      'AT MR Bank'
+  );
