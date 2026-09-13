@@ -1,8 +1,3 @@
-要使用 PowerShell（.ps1）模擬寫入 Windows Event Log 錯誤並進行偵測，主要分為兩個步驟：
- * 模擬寫入：使用 Write-EventLog 寫入一筆 Error 等級事件。
- * 偵測事件：使用輪詢（Get-WinEvent）或即時訂閱（Register-WmiEvent）來捕捉該事件。
-步驟 1：註冊來源並寫入錯誤事件（模擬端）
-寫入自訂來源（Source）前，Windows 要求該來源必須先註冊。請以系統管理員身分執行以下腳本：
 # 1. 定義 Log 名稱與自訂來源
 $logName = "Application"
 $sourceName = "MyTestApp"
@@ -22,52 +17,21 @@ Write-EventLog -LogName $logName `
                -EventId $eventId `
                -Message $errorMessage
 
-Write-Host "已成功寫入 Event Log 錯誤事件！" -ForegroundColor Green
 
-驗證方式：開啟 Windows「事件檢視器」（eventvwr.msc）>「Windows 記錄」>「應用程式」，應能看到來源為 MyTestApp、事件識別碼為 9999 的錯誤項目。
-步驟 2：偵測 Event Log 錯誤（偵測端）
-常見偵測做法有兩種：
-方法 A：輪詢最新錯誤（適合排程巡檢）
-查詢過去 5 分鐘內特定來源的錯誤記錄：
-$filter = @{
-    LogName   = 'Application'
-    ProviderName = 'MyTestApp'
-    Level     = 2  # 2 代表 Error (1=Critical, 2=Error, 3=Warning, 4=Information)
-    StartTime = (Get-Date).AddMinutes(-5)
-}
+PS D:\TEST> D:\TEST\test.ps1
+以 "1" 引數呼叫 "SourceExists" 時發生例外狀況: "找不到來源，但無法搜尋部分或全部的事件記錄檔。無法存取的記錄檔: Security, State。"
+位於 D:\TEST\test.ps1:8 字元:5
++ if (-not [System.Diagnostics.EventLog]::SourceExists($sourceName)) {
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+    + FullyQualifiedErrorId : SecurityException
+ 
+Write-EventLog : 找不到來源，但無法搜尋部分或全部的事件記錄檔。無法存取的記錄檔: Security, State。
+位於 D:\TEST\test.ps1:14 字元:1
++ Write-EventLog -LogName $logName `
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [Write-EventLog], SecurityException
+    + FullyQualifiedErrorId : System.Security.SecurityException,Microsoft.PowerShell.Commands.WriteEventLogCommand
+ 
 
-$events = Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue
-
-if ($events) {
-    foreach ($evt in $events) {
-        Write-Host "[偵測到錯誤] ID: $($evt.Id) | 時間: $($evt.TimeCreated)" -ForegroundColor Red
-        Write-Host "內容: $($evt.Message)"
-    }
-} else {
-    Write-Host "過去 5 分鐘內無符合的錯誤事件。" -ForegroundColor Green
-}
-
-方法 B：即時監聽（觸發時立即反應）
-使用 WMI 事件訂閱，只要有符合條件的事件寫入就會立即在終端顯示：
-$query = "SELECT * FROM __InstanceCreationEvent WHERE TargetInstance ISA 'Win32_NTLogEvent' AND TargetInstance.Logfile = 'Application' AND TargetInstance.EventType = 1 AND TargetInstance.SourceName = 'MyTestApp'"
-
-Write-Host "正在即時監聽 MyTestApp 的 Error 事件（按 Ctrl+C 結束）..." -ForegroundColor Yellow
-
-Register-WmiEvent -Query $query -SourceIdentifier "MonitorAppError" -Action {
-    $eventRecord = $EventArgs.NewEvent.TargetInstance
-    Write-Host "`n>>> [即時攔截到錯誤事件] <<<" -ForegroundColor Red
-    Write-Host "時間: $($eventRecord.TimeGenerated)"
-    Write-Host "Event ID: $($eventRecord.EventCode)"
-    Write-Host "訊息: $($eventRecord.Message)"
-}
-
-# 維持腳本運行以接收事件
-try {
-    while ($true) { Start-Sleep -Seconds 1 }
-} finally {
-    # 結束時登出監聽事件
-    Unregister-Event -SourceIdentifier "MonitorAppError" -ErrorAction SilentlyContinue
-    Write-Host "已解除監聽。" -ForegroundColor Gray
-}
-
-驗證方式：先啟動「方法 B」的即時監聽視窗，再到另一個 PowerShell 視窗執行「步驟 1」的寫入腳本，監聽視窗會立即印出攔截到的錯誤訊息。
+PS D:\TEST> 
