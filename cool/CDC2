@@ -1,29 +1,126 @@
+以下是為你量身打造的完整監控與告警腳本。腳本會直接讀取你的 config.json 設定檔，自動處理 EventId = 0 的底層限制，並在比對到包含指定錯誤代碼（-2146232060）的事件時發送 HTML 格式的告警郵件。
+完整 PowerShell 監控與告警腳本
+請將以下程式碼儲存為 Monitor-AmlEvent.ps1（建議與 config.json 放置在同一資料夾）：
+# ==========================================
+# 1. 讀取 JSON 設定檔
+# ==========================================
+$configPath = Join-Path -Path $PSScriptRoot -ChildPath "config.json"
 
-
-{
-  "Monitor": {
-    "MinutesBack": 10,
-    "LogName": "Application",
-    "ProviderName": "PATRIOT OFFICER SWIFT Database Service",
-    "EventId": 0,
-    "Level": 2,
-    "ErrorCodePattern": "*-2146232060*"
-  },
-  "Mail": {
-    "SmtpServer": "relay.taishinbank.com.tw",
-    "SmtpPort": 25,
-    "Sender": "AML_ALERT@taishinbank.com.tw",
-    "Recipients": [
-      "1141923@taishinbank.com.tw"
-    ],
-    "TimeoutMs": 10000
-  }
+if (-not (Test-Path $configPath)) {
+    Write-Error "找不到設定檔: $configPath"
+    exit 1
 }
 
+$config = Get-Content -Path $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$monitorCfg = $config.Monitor
+$mailCfg    = $config.Mail
 
-這是我的json
+Write-Host "開始執行 AML Event Log 監控作業..." -ForegroundColor Cyan
 
+# ==========================================
+# 2. 建立查詢條件並讀取事件
+# ==========================================
+$startTime = (Get-Date).AddMinutes(-$monitorCfg.MinutesBack)
 
-那我
+# 注意：FilterHashtable 不放入 Id: 0，避免觸發底層「參數錯誤」例外
+$filter = @{
+    LogName      = $monitorCfg.LogName
+    ProviderName = $monitorCfg.ProviderName
+    Level        = $monitorCfg.Level
+    StartTime    = $startTime
+}
 
-偵測event log error 加上發信 我要怎麼寫
+$matchedEvents = @()
+
+try {
+    # 抓取事件後，在管線端過濾 EventId 與 ErrorCodePattern
+    $matchedEvents = Get-WinEvent -FilterHashtable $filter -ErrorAction Stop |
+        Where-Object { 
+            $_.Id -eq $monitorCfg.EventId -and 
+            $_.Message -like $monitorCfg.ErrorCodePattern 
+        }
+}
+catch [System.Diagnostics.Eventing.Reader.EventLogNotFoundException] {
+    Write-Host "區間內無任何符合 Provider 與 Level 的事件記錄。" -ForegroundColor Gray
+}
+catch {
+    Write-Error "查詢 Event Log 時發生未預期錯誤: $_"
+    exit 1
+}
+
+# 若無符合條件的事件則結束
+if (-not $matchedEvents -or $matchedEvents.Count -eq 0) {
+    Write-Host "過去 $($monitorCfg.MinutesBack) 分鐘內未發現符合條件之錯誤事件。" -ForegroundColor Green
+    exit 0
+}
+
+Write-Host "發現 $($matchedEvents.Count) 筆符合條件的錯誤，準備發送告警信件..." -ForegroundColor Red
+
+# ==========================================
+# 3. 組合 HTML 郵件內容
+# ==========================================
+$bodyRows = foreach ($event in $matchedEvents) {
+    $encodedMsg = [System.Web.HttpUtility]::HtmlEncode($event.Message)
+    @"
+    <tr>
+        <td style='border:1px solid #ccc; padding:8px;'>$($event.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss'))</td>
+        <td style='border:1px solid #ccc; padding:8px;'>$($event.Id)</td>
+        <td style='border:1px solid #ccc; padding:8px;'><pre style='font-family:Consolas, monospace; margin:0;'>$encodedMsg</pre></td>
+    </tr>
+"@
+}
+
+$mailBody = @"
+<html>
+<body style='font-family: Microsoft JhengHei, Arial, sans-serif; color: #333;'>
+    <h3 style='color: #D9534F;'>【系統告警】PATRIOT OFFICER SWIFT 偵測逾時 / 資料庫錯誤</h3>
+    <p>監控機制在過去 <b>$($monitorCfg.MinutesBack)</b> 分鐘內偵測到以下錯誤事件，請相關人員儘速確認：</p>
+    <table style='border-collapse: collapse; width: 100%; font-size: 13px;'>
+        <tr style='background-color: #f2f2f2; text-align: left;'>
+            <th style='border:1px solid #ccc; padding:8px; width: 180px;'>產生時間</th>
+            <th style='border:1px solid #ccc; padding:8px; width: 80px;'>Event ID</th>
+            <th style='border:1px solid #ccc; padding:8px;'>詳細訊息內容</th>
+        </tr>
+        $($bodyRows -join "`n")
+    </table>
+    <p style='color: #777; font-size: 12px; margin-top: 20px;'>此郵件為系統自動發送，請勿直接回覆。</p>
+</body>
+</html>
+"@
+
+# ==========================================
+# 4. 透過 .NET SmtpClient 發送郵件（支援 Timeout）
+# ==========================================
+Add-Type -AssemblyName System.Web
+
+$mail = New-Object System.Net.Mail.MailMessage
+$mail.From = $mailCfg.Sender
+foreach ($rcpt in $mailCfg.Recipients) {
+    $mail.To.Add($rcpt)
+}
+$mail.Subject = "【嚴重告警】$($monitorCfg.ProviderName) 資料庫逾時錯誤 ($($matchedEvents.Count) 筆)"
+$mail.Body = $mailBody
+$mail.IsBodyHtml = $true
+$mail.BodyEncoding = [System.Text.Encoding]::UTF8
+$mail.SubjectEncoding = [System.Text.Encoding]::UTF8
+
+$smtp = New-Object System.Net.Mail.SmtpClient($mailCfg.SmtpServer, [int]$mailCfg.SmtpPort)
+$smtp.Timeout = [int]$mailCfg.TimeoutMs
+
+try {
+    $smtp.Send($mail)
+    Write-Host "告警信件已成功發送至 $($mailCfg.Recipients -join ', ')！" -ForegroundColor Green
+}
+catch {
+    Write-Error "SMTP 寄件失敗: $_"
+}
+finally {
+    $mail.Dispose()
+    $smtp.Dispose()
+}
+
+設計重點說明
+ * 解決 EventId = 0 報錯：設定檔中雖然指定了 "EventId": 0，但腳本沒有將它放入 -FilterHashtable，而是保留在底層管線的 Where-Object 做二階段過濾，徹底避免先前遇到的「參數錯誤」。
+ * 精準關鍵字匹配：利用 Where-Object { $_.Message -like $monitorCfg.ErrorCodePattern }，只鎖定內含 -2146232060 錯誤碼的紀錄，避免其他同 Source 的一般警告觸發誤報。
+ * 支援 TimeoutMs 逾時控制：使用原生 .NET SmtpClient 代替 PowerShell 的 Send-MailMessage，精準套用你 JSON 中定義的 10000ms（10 秒）逾時機制，避免內部 Relay Server 偶發斷線時腳本卡死。
+ * HTML 轉義與排版保護：訊息使用 HttpUtility.HtmlEncode 並包在 <pre> 區塊，能完整保留資料庫錯誤訊息原本的換行與空白格式，在 Outlook 閱覽時清晰易讀。
