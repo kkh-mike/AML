@@ -1,114 +1,64 @@
-# ==========================================
-# 1. 讀取 JSON 設定檔
-# ==========================================
-$configPath = Join-Path -Path $PSScriptRoot -ChildPath "config.json"
+既然你目前是以一般使用者身分執行（非系統管理員），且前面遇到了無法註冊新來源的權限問題，最乾淨、不用 Admin 權限的做法是借用 Windows 原本就已經內建註冊好的事件來源。
+但因為你的監控腳本有檢查 ProviderName: "PATRIOT OFFICER SWIFT Database Service"，依據你的權限狀態，有以下兩種模擬方式：
+方法一：有管理者權限時（完全符合正式環境條件）
+如果能以系統管理員身分開啟一次 PowerShell，請先執行這行註冊指令（終生只需跑一次）：
+New-EventLog -LogName "Application" -Source "PATRIOT OFFICER SWIFT Database Service"
 
-if (-not (Test-Path $configPath)) {
-    Write-Error "找不到設定檔: $configPath"
-    exit 1
-}
+註冊完成後，任何人（即使是一般權限）都可以執行這段模擬寫入腳本：
+$source = "PATRIOT OFFICER SWIFT Database Service"
 
-$config = Get-Content -Path $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
-$monitorCfg = $config.Monitor
-$mailCfg    = $config.Mail
+# 模擬你要監控的真實逾時錯誤
+$mockMsg = @"
+Exception Type : SqlException
+Source : .Net SqlClient Data Provider
+Date : $(Get-Date -Format "yyyy年MM月dd日")
+Time : $(Get-Date -Format "tt hh:mm:ss")
+Message : 執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。
 
-Write-Host "正在檢查過去 $($monitorCfg.MinutesBack) 分鐘內的事件記錄..." -ForegroundColor Cyan
+Custom message :
+Message Id :$(New-Guid) does not completed in SWIFT detection
 
-# ==========================================
-# 2. 改用 Get-EventLog 查詢傳統來源
-# ==========================================
-$startTime = (Get-Date).AddMinutes(-$monitorCfg.MinutesBack)
-
-# EntryType 轉換 (Level 2 轉為 Error)
-$entryType = switch ($monitorCfg.Level) {
-    1 { "Error" }
-    2 { "Error" }
-    3 { "Warning" }
-    default { "Information" }
-}
-
-try {
-    # Get-EventLog 原生支援傳統 Source 與 EventID 0，絕不報「參數錯誤」
-    $events = Get-EventLog -LogName $monitorCfg.LogName `
-                           -Source $monitorCfg.ProviderName `
-                           -EntryType $entryType `
-                           -After $startTime `
-                           -ErrorAction Stop |
-              Where-Object { 
-                  $_.EventID -eq $monitorCfg.EventId -and 
-                  $_.Message -like $monitorCfg.ErrorCodePattern 
-              }
-}
-catch {
-    # 若該區間完全沒資料，或查無該來源
-    $events = @()
-}
-
-# ==========================================
-# 3. 判斷是否有匹配的錯誤
-# ==========================================
-if (-not $events -or $events.Count -eq 0) {
-    Write-Host "過去 $($monitorCfg.MinutesBack) 分鐘內無符合條件之錯誤事件。" -ForegroundColor Yellow
-    exit 0
-}
-
-Write-Host "發現 $($events.Count) 筆符合條件的錯誤，準備發送告警信件..." -ForegroundColor Red
-
-# ==========================================
-# 4. 組合 HTML 郵件內容與發信
-# ==========================================
-Add-Type -AssemblyName System.Web
-
-$bodyRows = foreach ($item in $events) {
-    $encodedMsg = [System.Web.HttpUtility]::HtmlEncode($item.Message)
-    @"
-    <tr>
-        <td style='border:1px solid #ccc; padding:8px;'>$($item.TimeGenerated.ToString('yyyy-MM-dd HH:mm:ss'))</td>
-        <td style='border:1px solid #ccc; padding:8px;'>$($item.EventID)</td>
-        <td style='border:1px solid #ccc; padding:8px;'><pre style='font-family:Consolas, monospace; margin:0;'>$encodedMsg</pre></td>
-    </tr>
-"@
-}
-
-$mailBody = @"
-<html>
-<body style='font-family: Microsoft JhengHei, Arial, sans-serif; color: #333;'>
-    <h3 style='color: #D9534F;'>【系統告警】$($monitorCfg.ProviderName) 偵測逾時 / 資料庫錯誤</h3>
-    <p>監控機制在過去 <b>$($monitorCfg.MinutesBack)</b> 分鐘內偵測到以下錯誤事件：</p>
-    <table style='border-collapse: collapse; width: 100%; font-size: 13px;'>
-        <tr style='background-color: #f2f2f2; text-align: left;'>
-            <th style='border:1px solid #ccc; padding:8px; width: 180px;'>產生時間</th>
-            <th style='border:1px solid #ccc; padding:8px; width: 80px;'>Event ID</th>
-            <th style='border:1px solid #ccc; padding:8px;'>詳細訊息內容</th>
-        </tr>
-        $($bodyRows -join "`n")
-    </table>
-</body>
-</html>
+SQL Exception Detail :
+Error Code : -2146232060
+Server : amldb1
+Source : .Net SqlClient Data Provider
 "@
 
-$mail = New-Object System.Net.Mail.MailMessage
-$mail.From = $mailCfg.Sender
-foreach ($rcpt in $mailCfg.Recipients) {
-    $mail.To.Add($rcpt)
-}
-$mail.Subject = "【嚴重告警】$($monitorCfg.ProviderName) 資料庫逾時錯誤 ($($events.Count) 筆)"
-$mail.Body = $mailBody
-$mail.IsBodyHtml = $true
-$mail.BodyEncoding = [System.Text.Encoding]::UTF8
-$mail.SubjectEncoding = [System.Text.Encoding]::UTF8
+# 寫入 Application Log
+Write-EventLog -LogName "Application" `
+               -Source $source `
+               -EntryType Error `
+               -EventId 0 `
+               -Message $mockMsg
 
-$smtp = New-Object System.Net.Mail.SmtpClient($mailCfg.SmtpServer, [int]$mailCfg.SmtpPort)
-$smtp.Timeout = [int]$mailCfg.TimeoutMs
+Write-Host "已成功模擬寫入 Event ID 0 錯誤事件！" -ForegroundColor Green
 
-try {
-    $smtp.Send($mail)
-    Write-Host "告警信件已成功發送至 $($mailCfg.Recipients -join ', ')！" -ForegroundColor Green
-}
-catch {
-    Write-Error "SMTP 寄件失敗: $_"
-}
-finally {
-    $mail.Dispose()
-    $smtp.Dispose()
-}
+> 驗證方式：執行後在 PowerShell 跑 Get-EventLog -LogName Application -Source "PATRIOT OFFICER SWIFT Database Service" -Newest 1，確認有印出該筆錯誤。
+> 
+方法二：完全沒有 Admin 權限時（免權限測試發信）
+若你在本機完全拿不到 Admin 權限，就無法註冊自訂 Source。此時可以借用系統內建一定存在的來源（例如 .NET Runtime 或 Windows Error Reporting）來做功能驗證：
+ 1. 暫時調整 config.json 的 ProviderName
+   測試用
+   將 config.json 裡的 ProviderName 暫時改成現成來源：
+   "ProviderName": ".NET Runtime"
+
+ 2. 執行無須權限的模擬寫入
+   直接執行
+   以一般使用者權限直接執行以下 PowerShell 指令：
+   $mockMsg = @"
+Exception Type : SqlException
+Error Code : -2146232060
+Message : 執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。
+"@
+
+Write-EventLog -LogName "Application" `
+               -Source ".NET Runtime" `
+               -EntryType Error `
+               -EventId 0 `
+               -Message $mockMsg
+
+Write-Host "已成功以 .NET Runtime 來源寫入模擬錯誤！" -ForegroundColor Green
+
+ 3. 執行監控腳本驗證發信
+   驗證
+   執行監控腳本，確認能成功抓取該事件並把 Email 寄到 1141923@taishinbank.com.tw。測試成功後，正式上線再將 config.json 改回 "PATRIOT OFFICER SWIFT Database Service" 即可。
