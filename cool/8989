@@ -1,93 +1,135 @@
-
-$smtpServer = "relay.taishinbank.com.tw"
-$smtpPort   = 25
-$sender     = "AML_PROD_TEST@taishinbank.com.tw"
-$recipient  = "1141923@taishinbank.com.tw"  # 請務必填你自己的真實員工信箱
-
-$mail = New-Object System.Net.Mail.MailMessage($sender, $recipient)
-$mail.Subject = "【PROD測試】正式機發信功能連線測試"
-$mail.Body = "這是一封來自正式環境 AP 主機的連線測試信件，確認正式機對 Relay 寄信正常。"
-
-$smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
-$smtp.Timeout = 10000
-
-try {
-    Write-Host "正在從正式機嘗試寄送測試信..." -ForegroundColor Cyan
-    $smtp.Send($mail)
-    Write-Host "測試信已成功送出！請至 Outlook 檢查收件匣。" -ForegroundColor Green
-} catch {
-    Write-Host "寄信失敗：" -ForegroundColor Red
-    Write-Host $_.Exception.Message -ForegroundColor Yellow
-    if ($_.Exception.InnerException) {
-        Write-Host "詳細原因: $($_.Exception.InnerException.Message)" -ForegroundColor Gray
-    }
-} finally {
-    $mail.Dispose()
-    $smtp.Dispose()
+關於 Id 是否需要保留：
+建議設為可選（不要強制寫死）。
+在 Windows Application Log 中，許多自建或第三方 AP（如 Patriot Officer）常會將所有自訂錯誤統一標記為 Event ID: 0 或隨意賦值，甚至同一支服務在不同版本的 Exception 可能拋出不同的 Event ID。因此，在設定檔中將 Id 設為非必填（填空值就不卡 ID，只依賴 ProviderName + Level + ErrorCode 篩選） 是最彈性穩當的做法。
+建議將架構拆成兩份檔案放同目錄：
+ * config.json：設定檔（方便維運抽換條件、增減收件人，免動程式碼）。
+ * Monitor_SendMail.ps1：主程式（自動讀取 json，抓到錯誤即組合 HTML 告警信寄出）。
+1. 設定檔：config.json
+在腳本同層目錄新增 config.json：
+{
+  "Monitor": {
+    "MinutesBack": 10,
+    "LogName": "Application",
+    "ProviderName": "PATRIOT OFFICER SWIFT Database Service",
+    "EventId": 0,
+    "Level": 2,
+    "ErrorCodePattern": "*-2146232060*"
+  },
+  "Mail": {
+    "SmtpServer": "relay.taishinbank.com.tw",
+    "SmtpPort": 25,
+    "Sender": "AML_ALERT@taishinbank.com.tw",
+    "Recipients": [
+      "1141923@taishinbank.com.tw"
+    ],
+    "TimeoutMs": 10000
+  }
 }
 
+> 說明：
+>  * 若未來不想限制 Event ID，把 "EventId": 0 改為 "EventId": null 即可，程式會自動略過該條件。
+>  * Recipients 是陣列格式，未來要加寄給主管或備用信箱，直接補字串即可（如 ["1141923@taishinbank.com.tw", "user2@taishinbank.com.tw"]）。
+> 
+2. 整合腳本：Monitor_SendMail.ps1
+# 確保抓取同目錄下的 config.json
+$scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$configPath = Join-Path $scriptPath "config.json"
 
+if (-not (Test-Path $configPath)) {
+    Write-Error "找不到設定檔: $configPath"
+    exit 1
+}
 
-剛剛在正式區有發信成功
+$config = Get-Content -Path $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
 
-
-我要把這個做結合怎麼改
-
-
-# 設定監控區間（例如抓過去 10 分鐘內）
-$minutesBack = 10
-$startTime = (Get-Date).AddMinutes(-$minutesBack)
-
+# 1. 建立 WinEvent 查詢條件
+$startTime = (Get-Date).AddMinutes(-$config.Monitor.MinutesBack)
 $filter = @{
-    LogName      = 'Application'
-    ProviderName = 'PATRIOT OFFICER SWIFT Database Service'
-    Id           = 0
-    Level        = 2   # 2 = Error
-    StartTime    = $startTime
+    LogName   = $config.Monitor.LogName
+    Level     = [int]$config.Monitor.Level
+    StartTime = $startTime
 }
 
-# 抓取事件
+if (-not [string]::IsNullOrWhiteSpace($config.Monitor.ProviderName)) {
+    $filter['ProviderName'] = $config.Monitor.ProviderName
+}
+
+# 若設定檔有明確指定 EventId (非 null/空白)，才加入過濾條件
+if ($null -ne $config.Monitor.EventId -and $config.Monitor.EventId -ne "") {
+    $filter['Id'] = [int]$config.Monitor.EventId
+}
+
+Write-Host "正在檢查過去 $($config.Monitor.MinutesBack) 分鐘內的事件記錄..." -ForegroundColor Cyan
 $events = Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue
 
-# 針對 Error Code: -2146232060 (0x80131904 Timeout) 進行精確過濾
-$targetErrors = $events | Where-Object { 
-    $_.Message -like "*-2146232060*"
+# 2. 過濾特定 Error Code
+$targetErrors = @()
+if ($events) {
+    $pattern = $config.Monitor.ErrorCodePattern
+    $targetErrors = @($events | Where-Object { $_.Message -like $pattern })
 }
 
-if ($targetErrors) {
-    Write-Host "========================================" -ForegroundColor Red
-    Write-Host " [告警] 偵測到 PATRIOT OFFICER SWIFT 資料庫逾時 (Error Code: -2146232060)！" -ForegroundColor Red
-    Write-Host " 筆數: $($targetErrors.Count)" -ForegroundColor Red
-    Write-Host "========================================" -ForegroundColor Red
+# 3. 若有符合條件的錯誤，發送告警信
+if ($targetErrors.Count -gt 0) {
+    Write-Host "[告警] 偵測到符合條件的錯誤事件！筆數: $($targetErrors.Count)" -ForegroundColor Red
 
-    foreach ($evt in $targetErrors) {
-        Write-Host "時間: $($evt.TimeCreated)" -ForegroundColor Yellow
-        Write-Host "主機: $($evt.MachineName)"
-        
-        # 擷取前幾行關鍵訊息
-        $lines = $evt.Message -split "`r`n|`n"
-        Write-Host "摘要: $($lines[0..4] -join ' | ')"
-        Write-Host "----------------------------------------"
+    # 組合信件內文 (HTML 格式)
+    $tableRows = foreach ($evt in $targetErrors) {
+        $cleanMsg = [System.Web.HttpUtility]::HtmlEncode($evt.Message)
+        "<tr>
+            <td style='padding:8px; border:1px solid #ddd;'>$($evt.TimeCreated.ToString('yyyy/MM/dd HH:mm:ss'))</td>
+            <td style='padding:8px; border:1px solid #ddd;'>$($evt.MachineName)</td>
+            <td style='padding:8px; border:1px solid #ddd;'>$($evt.Id)</td>
+            <td style='padding:8px; border:1px solid #ddd;'><pre style='margin:0; font-family:Consolas, monospace;'>$cleanMsg</pre></td>
+        </tr>"
     }
+
+    $htmlBody = @"
+    <html>
+    <body style='font-family:Microsoft JhengHei, Arial, sans-serif; font-size:14px;'>
+        <h3 style='color:#D9534F;'>【系統告警】$($config.Monitor.ProviderName) 異常通知</h3>
+        <p>監控機制於 <b>$($env:COMPUTERNAME)</b> 偵測到資料庫錯誤事件，詳情如下：</p>
+        <table style='border-collapse:collapse; width:100%; font-size:13px;'>
+            <tr style='background-color:#f2f2f2;'>
+                <th style='padding:8px; border:1px solid #ddd; width:150px;'>發生時間</th>
+                <th style='padding:8px; border:1px solid #ddd; width:100px;'>主機名稱</th>
+                <th style='padding:8px; border:1px solid #ddd; width:60px;'>事件 ID</th>
+                <th style='padding:8px; border:1px solid #ddd;'>錯誤內容</th>
+            </tr>
+            $($tableRows -join "`n")
+        </table>
+        <p style='color:gray; font-size:12px; margin-top:20px;'>本信件由系統監控排程自動發送，請勿直接回覆。</p>
+    </body>
+    </html>
+"@
+
+    # 建立 MailMessage
+    $mail = New-Object System.Net.Mail.MailMessage
+    $mail.From = New-Object System.Net.Mail.MailAddress($config.Mail.Sender, "AML_ALERT")
+    foreach ($to in $config.Mail.Recipients) {
+        $mail.To.Add($to)
+    }
+    $mail.Subject = "【告警】$($env:COMPUTERNAME) - 偵測到 $($config.Monitor.ProviderName) 逾時異常 (筆數: $($targetErrors.Count))"
+    $mail.Body = $htmlBody
+    $mail.IsBodyHtml = $true
+    $mail.Priority = [System.Net.Mail.MailPriority]::High
+
+    # 送出郵件
+    $smtp = New-Object System.Net.Mail.SmtpClient($config.Mail.SmtpServer, [int]$config.Mail.SmtpPort)
+    $smtp.Timeout = [int]$config.Mail.TimeoutMs
+
+    try {
+        Write-Host "正在寄送告警信件至: $($config.Mail.Recipients -join ', ')..." -ForegroundColor Yellow
+        $smtp.Send($mail)
+        Write-Host "告警信件已成功發送！" -ForegroundColor Green
+    } catch {
+        Write-Host "告警信件發送失敗: $($_.Exception.Message)" -ForegroundColor Red
+    } finally {
+        $mail.Dispose()
+        $smtp.Dispose()
+    }
+
 } else {
-    Write-Host "過去 $minutesBack 分鐘內無符合的 -2146232060 錯誤事件。" -ForegroundColor Green
+    Write-Host "過去 $($config.Monitor.MinutesBack) 分鐘內無符合條件之錯誤事件。" -ForegroundColor Green
 }
 
-
-
-
-
-然後我的一些條件希望可以用讀取configure的方式
-例如Error Code
-LogName
-ProviderName
-Id           
-    Level    
-
-sender     
-recipient  
-
-一些重要的變數
-
-Id 我不確定要不要幫我看看
-怎麼改
