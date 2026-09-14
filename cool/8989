@@ -1,13 +1,3 @@
-這個錯誤的原因是 PowerShell 目前沒有使用「系統管理員身分（Run as Administrator）」執行。
-[System.Diagnostics.EventLog]::SourceExists 與 Write-EventLog 在檢查來源時，底層會遍歷 Windows 的各個事件記錄檔（包含需要高權限的 Security 和 State 記錄檔），一般使用者權限讀取不到便會拋出 SecurityException。
-解法 1：以系統管理員身分執行（最標準）
- * 關閉目前的 PowerShell / VS Code 視窗。
- * 在 Windows 開始功能表搜尋 PowerShell，按右鍵選擇 「以系統管理員身分執行」（Run as Administrator）。
- * 重新執行 D:\TEST\test.ps1。
-驗證方式：執行後不再跳出紅字，並能順利顯示寫入成功的訊息。
-解法 2：改用系統內建既有的 Source（免系統管理員權限）
-如果是在公司環境受限於權限、無法取得 Administrator，直接使用 Windows 預先註冊好的來源即可繞過註冊與權限檢查，直接寫入 Application：
-# 1. 使用內建已註冊的來源 (例如: Application 或 Windows Error Reporting)
 $logName = "Application"
 $sourceName = "Application"  # 系統既有來源，不需呼叫 SourceExists 與 New-EventLog
 $eventId = 9999
@@ -22,9 +12,42 @@ Write-EventLog -LogName $logName `
 
 Write-Host "已成功使用內建來源寫入錯誤事件！" -ForegroundColor Green
 
-驗證方式：執行後直接成功，開啟事件檢視器確認 Application 記錄檔中是否出現該筆錯誤。
-解法 3：改用 Windows 內建工具 eventcreate.exe
-如果不透過 .NET API，Windows 內建的 eventcreate 指令在建立臨時 ID 時限制也較寬鬆：
-eventcreate /T ERROR /ID 999 /L APPLICATION /D "模擬系統異常：資料庫連線超時 (Simulated Error)"
 
-(註：eventcreate 的 ID 範圍限制為 1 ~ 1000。)
+PS C:\Users\1141923> D:\TEST\run_detail.ps1
+已成功使用內建來源寫入錯誤事件！
+
+PS C:\Users\1141923> 
+
+
+但是
+
+$filter = @{
+    LogName   = 'Application'
+    ProviderName = 'MyTestApp'
+    Level     = 2  # 2 代表 Error (1=Critical, 2=Error, 3=Warning, 4=Information)
+    StartTime = (Get-Date).AddMinutes(-5)
+}
+
+$events = Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue
+
+if ($events) {
+    foreach ($evt in $events) {
+        Write-Host "[偵測到錯誤] ID: $($evt.Id) | 時間: $($evt.TimeCreated)" -ForegroundColor Red
+        Write-Host "內容: $($evt.Message)"
+    }
+} else {
+    Write-Host "過去 5 分鐘內無符合的錯誤事件。" -ForegroundColor Green
+}
+
+
+PS D:\TEST> D:\TEST\test.ps1
+Get-WinEvent : 參數錯誤。
+位於 D:\TEST\test.ps1:8 字元:11
++ $events = Get-WinEvent -FilterHashtable $filter -ErrorAction Silently ...
++           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [Get-WinEvent], EventLogException
+    + FullyQualifiedErrorId : System.Diagnostics.Eventing.Reader.EventLogException,Microsoft.PowerShell.Commands.GetWinEventCommand
+ 
+過去 5 分鐘內無符合的錯誤事件。
+
+PS D:\TEST> 
