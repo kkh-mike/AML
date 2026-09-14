@@ -1,47 +1,22 @@
-
-# 建立錯誤訊息
-
-$logName = "Application"
-$sourceName = "PATRIOT OFFICER SWIFT Database Service"
-$eventId = 0
-
-# 1. 檢查並註冊該 Source（需系統管理員身分執行一次）
-if (-not [System.Diagnostics.EventLog]::SourceExists($sourceName)) {
-    New-EventLog -LogName $logName -Source $sourceName
-    Write-Host "已建立事件來源: $sourceName" -ForegroundColor Cyan
+完全可以，而且針對 Error Code : -2146232060 來抓會更加精準！
+為什麼抓 -2146232060 特別好？
+ * 它是標準的 SQL Timeout HRESULT 代碼：
+   -2146232060 換算成 16 進位就是 0x80131904，這是 .NET SqlException 最經典的錯誤代碼，代表 「連線或查詢逾時 (Timeout)」。
+ * 避免語系問題：
+   如果日後系統作業系統或 SQL 驅動更換語系（例如中文變成英文 Execution Timeout Expired），比對中文「逾時」可能會失效，但 Error Code : -2146232060 永遠不會變。
+如何修改過濾邏輯
+在 Get-WinEvent 的底層 API 中，這個代碼並不是 Windows 的獨立欄位，而是包含在 Message 本文字串裡。因此只需要把篩選那一行改為：
+# 直接比對 Message 內是否含有特定的 Error Code
+$targetErrors = $events | Where-Object { 
+    $_.Message -like "*Error Code : -2146232060*" 
 }
 
-# 2. 模擬真實的錯誤訊息內容
-$mockMessage = @"
-Exception Type : SqlException
-Source : .Net SqlClient Data Provider
-Date : $(Get-Date -Format "yyyy年MM月dd日")
-Time : $(Get-Date -Format "tt hh:mm:ss")
-Message : 執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。
+如果想要做到 雙重保險（確定是該服務、又是這個 Error Code）：
+$targetErrors = $events | Where-Object { 
+    $_.Message -like "*SqlException*" -and $_.Message -like "*-2146232060*"
+}
 
-Custom message :
-Message Id :$(New-Guid) does not completed in SWIFT detection
-
-SQL Exception Detail :
-Error Code : -2146232060
-Server : amldb1
-Source : .Net SqlClient Data Provider
-"@
-
-# 3. 寫入 Event Log
-Write-EventLog -LogName $logName `
-               -Source $sourceName `
-               -EntryType Error `
-               -EventId $eventId `
-               -Message $mockMessage
-
-Write-Host "已成功模擬寫入 PATRIOT OFFICER 逾時錯誤！" -ForegroundColor Green
-
-
-
-
-
-
+修改後的完整監控腳本片段
 # 設定監控區間（例如抓過去 10 分鐘內）
 $minutesBack = 10
 $startTime = (Get-Date).AddMinutes(-$minutesBack)
@@ -57,14 +32,14 @@ $filter = @{
 # 抓取事件
 $events = Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue
 
-# 過濾符合 SQL 逾時特徵的事件
+# 針對 Error Code: -2146232060 (0x80131904 Timeout) 進行精確過濾
 $targetErrors = $events | Where-Object { 
-    $_.Message -like "*SqlException*" -and $_.Message -like "*逾時*" 
+    $_.Message -like "*-2146232060*"
 }
 
 if ($targetErrors) {
     Write-Host "========================================" -ForegroundColor Red
-    Write-Host " [告警] 偵測到 PATRIOT OFFICER SWIFT 資料庫逾時錯誤！" -ForegroundColor Red
+    Write-Host " [告警] 偵測到 PATRIOT OFFICER SWIFT 資料庫逾時 (Error Code: -2146232060)！" -ForegroundColor Red
     Write-Host " 筆數: $($targetErrors.Count)" -ForegroundColor Red
     Write-Host "========================================" -ForegroundColor Red
 
@@ -72,17 +47,13 @@ if ($targetErrors) {
         Write-Host "時間: $($evt.TimeCreated)" -ForegroundColor Yellow
         Write-Host "主機: $($evt.MachineName)"
         
-        # 擷取關鍵訊息（印出前 6 行避免洗畫面）
+        # 擷取前幾行關鍵訊息
         $lines = $evt.Message -split "`r`n|`n"
         Write-Host "摘要: $($lines[0..4] -join ' | ')"
         Write-Host "----------------------------------------"
     }
-
-    # 此處可加入後續處理：發送 Teams Webhook、Email 或呼叫監控 API
 } else {
-    Write-Host "過去 $minutesBack 分鐘內無符合的逾時錯誤事件。" -ForegroundColor Green
+    Write-Host "過去 $minutesBack 分鐘內無符合的 -2146232060 錯誤事件。" -ForegroundColor Green
 }
 
-
-我不能針對error Code : -2146232060  去做?
-因為我看到我的錯誤都是 error Code : -2146232060
+這樣修改後，不管訊息文字如何微調，只要底層拋出的是這個 Timeout HRESULT 代碼，腳本就一定能捕捉到。
