@@ -1,22 +1,211 @@
-這張圖非常關鍵！直接揭露了兩個核心解答：
-1. 寄件者來源（EMAIL_FROM）
-在 App.config 的 <appSettings> 中可以看到這兩行：
-<!--<add key="EMAIL_FROM" value="AML@taishinbank.com.tw"/>-->
-<add key="EMAIL_FROM" value="AML@tsbtmail.com" />
 
- * 貴司這個專案原本用的發信寄件者是 AML@tsbtmail.com（或被註解掉的 AML@taishinbank.com.tw）。
- * 郵件伺服器通常只允許特定認可的寄件者名稱，改用 AML@tsbtmail.com 就不容易被 Mail Server 當作非法偽冒阻擋。
-2. 真實發信邏輯與 SMTP 設定在哪裡？
-從資料夾內容可以看到這是一個 C# 專案（CIP_RM_TIMEOUT_REPORT），既然 App.config 裡沒有直接寫死 SMTP IP，代表它可能寫在：
- * App._prd_config 或 App._dev_config 裡面。
- * C# 程式碼（如 DB.cs 或其他 .cs 檔） 裡面寫死了發信伺服器 IP 或從資料庫撈取。
-請直接在 PowerShell 執行以下指令，快速找出該專案裡所有與發信相關的關鍵字：
 Get-ChildItem -Path "D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT" -Recurse -Include *.config, *.cs | 
     Select-String -Pattern "SmtpClient", "Host", "Port", "mail", "10." | 
     Select-Object Path, LineNumber, Line
 
-立即測試更新後的寄件者發信
-如果該專案也是透過 relay.taishinbank.com.tw，請把寄件者換成它設定的 AML@tsbtmail.com 測試一次：
+
+
+PS C:\Users\1141923> D:\AML_Source\Source\1141923\UAT R4\AML_CIF_CHECK_SUM.ps1
+[2026-09-07 11:07:18] [INFO] ============================================
+[2026-09-07 11:07:18] [INFO] JOB START: Checksum & RowCount Verification
+[2026-09-07 11:07:18] [INFO] Input Path   : D:\AML_Source\Source\1141923\UAT R4
+[2026-09-07 11:07:18] [INFO] Baseline File: D:\AML_Source\Source\1141923\UAT R4\AML_CHECK_SUM_1.csv
+[2026-09-07 11:07:18] [INFO] Log File     : D:\AML_Source\Source\1141923\UAT R4\Log\SKcheck_CHECK_SUM_CIF_20260907_110718.log
+[2026-09-07 11:07:18] [INFO] ============================================
+[2026-09-07 11:07:38] [ERROR] MD5 MISMATCH -> File: AML_CUST.csv (Expected: 0f28746f68f3df360039190f38159852, Actual: 177ac4782f71e39327
+be2707ee9651b6)
+[2026-09-07 11:07:38] [ERROR] MD5 MISMATCH -> File: AML_SPEC_OFAC_SPEC.csv (Expected: d4ca4351ad71dbd859a06583df9cf0e8, Actual: a12e4eef
+ae4ea516a851bb978141213f)
+[2026-09-07 11:07:40] [ERROR] MD5 MISMATCH -> File: AML_NameProperty_RP.csv (Expected: 934bf1adaaf3f7b1f9d2a72d8cdd91f1, Actual: 6bde3a3
+0219db911bd8ffb7f9cf82799)
+[2026-09-07 11:19:02] [ERROR] MD5 MISMATCH -> File: AML_LoadTrxn.csv (Expected: 4a95dab84dc633dea58e2259998829b4, Actual: 12099d84d64c0a
+bda06ab7b2d3d4bc03)
+[2026-09-07 11:19:21] [INFO] PASSED -> File: AML_NameProperty_Cust.csv (Count: 6191958, MD5: OK)
+[2026-09-07 11:19:30] [ERROR] MD5 MISMATCH -> File: AML_Acct.csv (Expected: 78815fbbb101134228410164a55ae597, Actual: 61897892b3b37fc777
+0991443df21e82)
+[2026-09-07 11:19:30] [INFO] PASSED -> File: AML_SPEC_lowrisklistgroups.csv (Count: 25, MD5: OK)
+[2026-09-07 11:19:30] [INFO] ============================================
+[2026-09-07 11:19:30] [ERROR] JOB STATUS : FAILED (Exit Code: 1)
+[2026-09-07 11:19:30] [INFO] ============================================
+
+PS C:\Users\1141923> D:\AML_Source\Source\1141923\UAT R4\AML_CIF_CHECK_SUM.ps1
+[2026-09-07 13:59:49] [INFO] ============================================
+[2026-09-07 13:59:49] [INFO] JOB START: Checksum & RowCount Verification
+[2026-09-07 13:59:49] [INFO] Input Path   : D:\AML_Source\Source\1141923\UAT R4
+[2026-09-07 13:59:49] [INFO] Baseline File: D:\AML_Source\Source\1141923\UAT R4\AML_CHECK_SUM_1.csv
+[2026-09-07 13:59:49] [INFO] Log File     : D:\AML_Source\Source\1141923\UAT R4\Log\SKcheck_CHECK_SUM_CIF_20260907_135949.log
+[2026-09-07 13:59:49] [INFO] ============================================
+[2026-09-07 14:00:11] [INFO] PASSED -> File: AML_CUST.csv (Count: 6191958, MD5: OK)
+[2026-09-07 14:00:11] [INFO] PASSED -> File: AML_SPEC_OFAC_SPEC.csv (Count: 1940, MD5: OK)
+[2026-09-07 14:00:13] [INFO] PASSED -> File: AML_NameProperty_RP.csv (Count: 754208, MD5: OK)
+[2026-09-07 14:12:29] [INFO] PASSED -> File: AML_LoadTrxn.csv (Count: 189968007, MD5: OK)
+[2026-09-07 14:12:47] [INFO] PASSED -> File: AML_NameProperty_Cust.csv (Count: 6191958, MD5: OK)
+[2026-09-07 14:12:56] [INFO] PASSED -> File: AML_Acct.csv (Count: 1567892, MD5: OK)
+[2026-09-07 14:12:56] [INFO] PASSED -> File: AML_SPEC_lowrisklistgroups.csv (Count: 25, MD5: OK)
+[2026-09-07 14:12:56] [INFO] ============================================
+[2026-09-07 14:12:56] [INFO] JOB STATUS : SUCCESS (Exit Code: 0)
+[2026-09-07 14:12:57] [INFO] ============================================
+
+PS C:\Users\1141923> D:\AML_Source\Source\1141923\UAT R4\DTLBK\DTLBK_UPDATE_BATCH.ps1
+=== 開始執行 SQL 批次處理與更新作業 ===
+主執行紀錄檔: D:\AML_Source\Source\1141923\UAT R4\DTLBK\Log\Execution_20260908_073611.log
+解析連線資訊 -> Server: amlist | DB: RPADB | User: AML
+
+=========================================
+開始讀取 BatchControl.sql 擷取 BatchID...
+成功取得 BatchID: SK_SARB2600008
+開始執行各 Table 的 CustomerNo 更新 (共 6 個 Table)...
+正在更新 Table: SAR_Acct_Info ...
+SUCCESS：Table [SAR_Acct_Info] update成功
+正在更新 Table: SAR_Conductor_Info ...
+SUCCESS：Table [SAR_Conductor_Info] update成功
+正在更新 Table: SAR_Matched_Scenarios ...
+SUCCESS：Table [SAR_Matched_Scenarios] update成功
+正在更新 Table: SAR_Suspect_Info ...
+SUCCESS：Table [SAR_Suspect_Info] update成功
+正在更新 Table: SAR_Trxn_Detail ...
+SUCCESS：Table [SAR_Trxn_Detail] update成功
+正在更新 Table: SAR_Trxn_Detail_All ...
+SUCCESS：Table [SAR_Trxn_Detail_All] update成功
+
+=========================================
+開始執行分行代號轉換 (BranchNo / BranchOfTransaction)...
+正在更新 SAR_Case_Main, SAR_Case_Trxn_Branch, SAR_Acct_Info 的分行代號...
+SUCCESS：分行代號更新作業完成
+
+=========================================
+全部 SQL 檔案、CustomerNo 更新與分行代號更新皆已成功執行完成！
+=========================================
+
+PS C:\Users\1141923> D:\TEST\EAMIL.ps1
+
+Path                                                                                                
+----                                                                                                
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe.config  
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe.config  
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe.config  
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe.config  
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe.config  
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe.config  
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe._dev_...
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe._dev_...
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe._dev_...
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe._dev_...
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe._dev_...
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe._dev_...
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe._prd_...
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe._prd_...
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe._prd_...
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe._prd_...
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe._prd_...
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe._prd_...
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Release\CIP_RM_TIMEOUT_REPORT_MAIL.exe.config
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Release\CIP_RM_TIMEOUT_REPORT_MAIL.exe.config
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Release\CIP_RM_TIMEOUT_REPORT_MAIL.exe.config
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Release\CIP_RM_TIMEOUT_REPORT_MAIL.exe.config
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Release\CIP_RM_TIMEOUT_REPORT_MAIL.exe.config
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Release\CIP_RM_TIMEOUT_REPORT_MAIL.exe.config
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Release\CIP_RM_TIMEOUT_REPORT_MAIL.vshost....
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Release\CIP_RM_TIMEOUT_REPORT_MAIL.vshost....
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Release\CIP_RM_TIMEOUT_REPORT_MAIL.vshost....
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Release\CIP_RM_TIMEOUT_REPORT_MAIL.vshost....
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Release\CIP_RM_TIMEOUT_REPORT_MAIL.vshost....
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Release\CIP_RM_TIMEOUT_REPORT_MAIL.vshost....
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App.config                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App.config                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App.config                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App.config                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App.config                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App.config                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App._dev_.config                                 
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App._dev_.config                                 
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App._dev_.config                                 
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App._dev_.config                                 
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App._dev_.config                                 
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App._dev_.config                                 
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App._prd_.config                                 
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App._prd_.config                                 
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App._prd_.config                                 
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App._prd_.config                                 
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App._prd_.config                                 
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App._prd_.config                                 
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\LDAP.cs                                          
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\LDAP.cs                                          
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs                                       
+
+
+
+PS C:\Users\1141923> 
+.
+
+
+還是一樣
+
 $smtpServer = "relay.taishinbank.com.tw"
 $smtpPort   = 25
 $sender     = "AML@tsbtmail.com"              # 依 config 調整為系統專用寄件者
@@ -44,4 +233,14 @@ try {
     $smtp.Dispose()
 }
 
-先執行上方第一段指令看一下 CIP_RM_TIMEOUT_REPORT 程式碼裡實際使用的 SMTP Host 是哪一台，答案就會完全水落石出！
+
+
+PS C:\Users\1141923> D:\TEST\EAMIL.ps1
+嘗試寄送測試信...
+❌ 寄信失敗：
+以 "1" 引數呼叫 "Send" 時發生例外狀況: "SMTP 伺服器需要安全連接，或用戶端未經驗證。 伺服器回應為: 5.7.57 SMTP; Client was not authenticate
+d to send anonymous mail during MAIL FROM"
+詳細原因: SMTP 伺服器需要安全連接，或用戶端未經驗證。 伺服器回應為: 5.7.57 SMTP; Client was not authenticated to send anonymous ma
+il during MAIL FROM
+
+PS C:\Users\1141923> 
