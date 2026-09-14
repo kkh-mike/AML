@@ -1,59 +1,49 @@
-完全可以，而且針對 Error Code : -2146232060 來抓會更加精準！
-為什麼抓 -2146232060 特別好？
- * 它是標準的 SQL Timeout HRESULT 代碼：
-   -2146232060 換算成 16 進位就是 0x80131904，這是 .NET SqlException 最經典的錯誤代碼，代表 「連線或查詢逾時 (Timeout)」。
- * 避免語系問題：
-   如果日後系統作業系統或 SQL 驅動更換語系（例如中文變成英文 Execution Timeout Expired），比對中文「逾時」可能會失效，但 Error Code : -2146232060 永遠不會變。
-如何修改過濾邏輯
-在 Get-WinEvent 的底層 API 中，這個代碼並不是 Windows 的獨立欄位，而是包含在 Message 本文字串裡。因此只需要把篩選那一行改為：
-# 直接比對 Message 內是否含有特定的 Error Code
-$targetErrors = $events | Where-Object { 
-    $_.Message -like "*Error Code : -2146232060*" 
-}
+要確認伺服器「到底能不能把信寄出去」，不需要等真的發生異常，可以按照以下三步進行驗證與排查：
+第一步：網路與通訊埠連線測試（最關鍵）
+企業內網通常有防火牆限制。先確認你的主機是否被允許連線到公司的 SMTP 伺服器：
+$smtpHost = "mail.company.com.tw"  # 換成貴司的 SMTP 主機名或 IP
+$smtpPort = 25                     # 內網通常是 25，某些環境走 587
 
-如果想要做到 雙重保險（確定是該服務、又是這個 Error Code）：
-$targetErrors = $events | Where-Object { 
-    $_.Message -like "*SqlException*" -and $_.Message -like "*-2146232060*"
-}
+# 測試 TCP 通訊埠是否通暢
+Test-NetConnection -ComputerName $smtpHost -Port $smtpPort
 
-修改後的完整監控腳本片段
-# 設定監控區間（例如抓過去 10 分鐘內）
-$minutesBack = 10
-$startTime = (Get-Date).AddMinutes(-$minutesBack)
+ * 成功指標：輸出結果中看到 TcpTestSucceeded : True。
+ * 失敗（False 或逾時）：代表被 Windows 防火牆、防毒軟體或網路防火牆擋住，需要請網管/維運團隊開通該主機到 Mail Server 的 Port 25。
+第二步：發送一封極簡測試信
+連線通了之後，直接跑這段獨立的最小測試腳本，寄一封信給自己的信箱：
+$smtpServer = "mail.company.com.tw"    # 換成貴司 SMTP
+$smtpPort   = 25
+$sender     = "alert-test@company.com.tw"
+$recipient  = "your_email@company.com.tw" # 換成你自己的收件信箱
 
-$filter = @{
-    LogName      = 'Application'
-    ProviderName = 'PATRIOT OFFICER SWIFT Database Service'
-    Id           = 0
-    Level        = 2   # 2 = Error
-    StartTime    = $startTime
-}
+$mail = New-Object System.Net.Mail.MailMessage($sender, $recipient, "【連線測試】PowerShell 發信測試", "這是一封測試信，確認 SMTP 連線與發信正常。")
+$smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
 
-# 抓取事件
-$events = Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue
-
-# 針對 Error Code: -2146232060 (0x80131904 Timeout) 進行精確過濾
-$targetErrors = $events | Where-Object { 
-    $_.Message -like "*-2146232060*"
-}
-
-if ($targetErrors) {
-    Write-Host "========================================" -ForegroundColor Red
-    Write-Host " [告警] 偵測到 PATRIOT OFFICER SWIFT 資料庫逾時 (Error Code: -2146232060)！" -ForegroundColor Red
-    Write-Host " 筆數: $($targetErrors.Count)" -ForegroundColor Red
-    Write-Host "========================================" -ForegroundColor Red
-
-    foreach ($evt in $targetErrors) {
-        Write-Host "時間: $($evt.TimeCreated)" -ForegroundColor Yellow
-        Write-Host "主機: $($evt.MachineName)"
-        
-        # 擷取前幾行關鍵訊息
-        $lines = $evt.Message -split "`r`n|`n"
-        Write-Host "摘要: $($lines[0..4] -join ' | ')"
-        Write-Host "----------------------------------------"
+try {
+    $smtp.Send($mail)
+    Write-Host "✅ 郵件已成功送出！請至收件匣確認是否收到。" -ForegroundColor Green
+} catch {
+    Write-Host "❌ 發信失敗，錯誤訊息：" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Yellow
+    if ($_.Exception.InnerException) {
+        Write-Host "詳細原因: $($_.Exception.InnerException.Message)" -ForegroundColor Gray
     }
-} else {
-    Write-Host "過去 $minutesBack 分鐘內無符合的 -2146232060 錯誤事件。" -ForegroundColor Green
+} finally {
+    $mail.Dispose()
+    $smtp.Dispose()
 }
 
-這樣修改後，不管訊息文字如何微調，只要底層拋出的是這個 Timeout HRESULT 代碼，腳本就一定能捕捉到。
+第三步：常見失敗錯誤代碼與排查
+如果執行拋出例外，通常是以下幾種原因：
+ * 550 / 554 Relay Access Denied（拒絕轉發）：
+   * 原因：SMTP 伺服器不允許當前這台主機匿名寄信。
+   * 解法：需聯絡郵件系統管理員，將當前主機的 IP 加入 SMTP Relay 白名單（Relay Allowlist）。
+ * Mailbox unavailable / Sender rejected：
+   * 原因：寄件者地址（$sender）的網域名稱（Domain）不符合郵件伺服器的規則，或偽造寄件者被阻擋。
+   * 解法：將 $sender 換成公司規範的系統發信帳號（例如同網域的專用帳號）。
+ * Authentication required：
+   * 原因：該 SMTP 要求輸入帳號密碼才能發信。
+   * 解法：在 $smtp 物件加上身分驗證憑證：
+     $smtp.Credentials = New-Object System.Net.NetworkCredential("帳號", "密碼")
+
+只要第二步能順利在你的個人 Outlook/Webmail 收到測試信，就代表監控腳本上線後一定能成功將告警信送達。
