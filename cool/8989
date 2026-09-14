@@ -1,549 +1,93 @@
-模擬
+從提供的真實 Event Log 內容可以萃取出幾個關鍵特徵：
+ * LogName：Application
+ * ProviderName (Source)：PATRIOT OFFICER SWIFT Database Service
+ * Id (EventCode)：0
+ * Level：2（Error）
+ * 關鍵字特徵：訊息中包含 SqlException、逾時、amldb1 或 does not completed in SWIFT detection。
+1. 模擬腳本（simulate.ps1）
+為了模擬出完全一致的來源，需要先註冊 PATRIOT OFFICER SWIFT Database Service（需以系統管理員權限執行一次）。
 $logName = "Application"
-$sourceName = "Application"  # 系統既有來源，不需呼叫 SourceExists 與 New-EventLog
-$eventId = 9999
-$errorMessage = "模擬系統異常：資料庫連線超時 (Simulated Error)"
+$sourceName = "PATRIOT OFFICER SWIFT Database Service"
+$eventId = 0
 
-# 2. 直接寫入 Error 等級事件
+# 1. 檢查並註冊該 Source（需系統管理員身分執行一次）
+if (-not [System.Diagnostics.EventLog]::SourceExists($sourceName)) {
+    New-EventLog -LogName $logName -Source $sourceName
+    Write-Host "已建立事件來源: $sourceName" -ForegroundColor Cyan
+}
+
+# 2. 模擬真實的錯誤訊息內容
+$mockMessage = @"
+Exception Type : SqlException
+Source : .Net SqlClient Data Provider
+Date : $(Get-Date -Format "yyyy年MM月dd日")
+Time : $(Get-Date -Format "tt hh:mm:ss")
+Message : 執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。
+
+Custom message :
+Message Id :$(New-Guid) does not completed in SWIFT detection
+
+SQL Exception Detail :
+Error Code : -2146232060
+Server : amldb1
+Source : .Net SqlClient Data Provider
+"@
+
+# 3. 寫入 Event Log
 Write-EventLog -LogName $logName `
                -Source $sourceName `
                -EntryType Error `
                -EventId $eventId `
-               -Message $errorMessage
+               -Message $mockMessage
 
-Write-Host "已成功使用內建來源寫入錯誤事件！" -ForegroundColor Green
+Write-Host "已成功模擬寫入 PATRIOT OFFICER 逾時錯誤！" -ForegroundColor Green
 
+> 注意：如果測試機無法取得系統管理員權限註冊該 Source，可將 $sourceName 暫時改成 "Application"，只在訊息內放入相同的關鍵字進行過濾邏輯驗證。
+> 
+2. 監控 / 測試腳本（monitor.ps1）
+這類 .NET 傳統服務寫入的事件，Id 通常固定為 0。監控時除了比對 ProviderName 與 Level，建議加上關鍵字過濾（如 SqlException 或 逾時），避免誤判其他非資料庫類型的錯誤。
+# 設定監控區間（例如抓過去 10 分鐘內）
+$minutesBack = 10
+$startTime = (Get-Date).AddMinutes(-$minutesBack)
 
-PS C:\Users\1141923> D:\TEST\run_detail.ps1
-已成功使用內建來源寫入錯誤事件！
-
-PS C:\Users\1141923> 
-
-
-
-測試
 $filter = @{
     LogName      = 'Application'
-    ProviderName = 'Application'
-    Id           = 9999
-    Level        = 2  # Error
-    StartTime    = (Get-Date).AddMinutes(-5)
+    ProviderName = 'PATRIOT OFFICER SWIFT Database Service'
+    Id           = 0
+    Level        = 2   # 2 = Error
+    StartTime    = $startTime
 }
 
+# 抓取事件
 $events = Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue
 
-if ($events) {
-    foreach ($evt in $events) {
-        Write-Host "[偵測到錯誤] ID: $($evt.Id) | 時間: $($evt.TimeCreated)" -ForegroundColor Red
-        Write-Host "內容: $($evt.Message)`n"
-    }
-} else {
-    Write-Host "過去 5 分鐘內無符合的錯誤事件。" -ForegroundColor Green
+# 過濾符合 SQL 逾時特徵的事件
+$targetErrors = $events | Where-Object { 
+    $_.Message -like "*SqlException*" -and $_.Message -like "*逾時*" 
 }
 
-有了
+if ($targetErrors) {
+    Write-Host "========================================" -ForegroundColor Red
+    Write-Host " [告警] 偵測到 PATRIOT OFFICER SWIFT 資料庫逾時錯誤！" -ForegroundColor Red
+    Write-Host " 筆數: $($targetErrors.Count)" -ForegroundColor Red
+    Write-Host "========================================" -ForegroundColor Red
 
-PS D:\TEST> D:\TEST\test.ps1
-[偵測到錯誤] ID: 9999 | 時間: 09/14/2026 08:02:38
-內容: 
+    foreach ($evt in $targetErrors) {
+        Write-Host "時間: $($evt.TimeCreated)" -ForegroundColor Yellow
+        Write-Host "主機: $($evt.MachineName)"
+        
+        # 擷取關鍵訊息（印出前 6 行避免洗畫面）
+        $lines = $evt.Message -split "`r`n|`n"
+        Write-Host "摘要: $($lines[0..4] -join ' | ')"
+        Write-Host "----------------------------------------"
+    }
 
-[偵測到錯誤] ID: 9999 | 時間: 09/14/2026 08:01:01
-內容: 
+    # 此處可加入後續處理：發送 Teams Webhook、Email 或呼叫監控 API
+} else {
+    Write-Host "過去 $minutesBack 分鐘內無符合的逾時錯誤事件。" -ForegroundColor Green
+}
 
-
-然後下面是我之前遇到的error event 
-
-我現在要做這個的監控 我的模擬跟測試怎麼改
-
-
-Message              : Exception Type : SqlException
-                       Source : .Net SqlClient Data Provider
-                       Date : 2026年8月13日
-                       Time : 下午 07:01:41
-                       Message : 執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。
-                       
-                       Stack Trace : 
-                          於 System.Data.SqlClient.SqlConnection.OnError(SqlException exception, Boolean breakConnecti
-                       on, Action`1 wrapCloseInAction)
-                          於 System.Data.SqlClient.TdsParser.ThrowExceptionAndWarning(TdsParserStateObject stateObj, B
-                       oolean callerHasConnectionLock, Boolean asyncClose)
-                          於 System.Data.SqlClient.TdsParser.TryRun(RunBehavior runBehavior, SqlCommand cmdHandler, Sq
-                       lDataReader dataStream, BulkCopySimpleResultSet bulkCopyHandler, TdsParserStateObject stateObj
-                       , Boolean& dataReady)
-                          於 System.Data.SqlClient.SqlDataReader.TryConsumeMetaData()
-                          於 System.Data.SqlClient.SqlDataReader.get_MetaData()
-                          於 System.Data.SqlClient.SqlCommand.FinishExecuteReader(SqlDataReader ds, RunBehavior runBeh
-                       avior, String resetOptionsString, Boolean isInternal, Boolean forDescribeParameterEncryption, 
-                       Boolean shouldCacheForAlwaysEncrypted)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReaderTds(CommandBehavior cmdBehavior, RunBeha
-                       vior runBehavior, Boolean returnStream, Boolean async, Int32 timeout, Task& task, Boolean asyn
-                       cWrite, Boolean inRetry, SqlDataReader ds, Boolean describeParameterEncryptionRequest)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReader(CommandBehavior cmdBehavior, RunBehavio
-                       r runBehavior, Boolean returnStream, String method, TaskCompletionSource`1 completion, Int32 t
-                       imeout, Task& task, Boolean& usedCache, Boolean asyncWrite, Boolean inRetry)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReader(CommandBehavior cmdBehavior, RunBehavio
-                       r runBehavior, Boolean returnStream, String method)
-                          於 System.Data.SqlClient.SqlCommand.ExecuteReader(CommandBehavior behavior, String method)
-                          於 System.Data.SqlClient.SqlCommand.ExecuteReader()
-                          於 PatriotOfficer.SWIFT.DetectionList.ListSettings.SWIFT_GetDetectionSettings(String connect
-                       ionString)
-                          於 PatriotOfficer.SWIFT.SwiftDatabaseServiceHelper.BeginProcess()
-                       
-                       Custom message :
-                       Message Id :ce848626-0697-f111-ab24-f8f21eb70d41 does not completed in SWIFT detection
-                       
-                       ----------------------------------------------------------------------------------------------
-                       -----
-                       InnerException: 
-                       Exception Type : Win32Exception
-                       Source : 
-                       Message : 等候操作已逾時。
-                       
-                       Stack Trace : 
-                       
-                       
-                       SQL Exception Detail :
-                       Error Code : -2146232060
-                       Line number : 0
-                       Procedure : 
-                       Number : -2
-                       Server : amldb1
-                       Source : .Net SqlClient Data Provider
-                       
-                       
-Id                   : 0
-Version              : 
-Qualifiers           : 0
-Level                : 2
-Task                 : 0
-Opcode               : 
-Keywords             : 36028797018963968
-RecordId             : 1067042
-ProviderName         : PATRIOT OFFICER SWIFT Database Service
-ProviderId           : 
-LogName              : Application
-ProcessId            : 
-ThreadId             : 
-MachineName          : AMLIS1.taishinbank.com.tw
-UserId               : 
-TimeCreated          : 2026/8/13 下午 07:01:41
-ActivityId           : 
-RelatedActivityId    : 
-ContainerLog         : Application
-MatchedQueryIds      : {}
-Bookmark             : System.Diagnostics.Eventing.Reader.EventBookmark
-LevelDisplayName     : 錯誤
-OpcodeDisplayName    : 資訊
-TaskDisplayName      : 
-KeywordsDisplayNames : {傳統}
-Properties           : {System.Diagnostics.Eventing.Reader.EventProperty}
-
-Message              : Exception Type : SqlException
-                       Source : .Net SqlClient Data Provider
-                       Date : 2026年8月13日
-                       Time : 下午 06:35:27
-                       Message : 執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。
-                       
-                       Stack Trace : 
-                          於 System.Data.SqlClient.SqlConnection.OnError(SqlException exception, Boolean breakConnecti
-                       on, Action`1 wrapCloseInAction)
-                          於 System.Data.SqlClient.TdsParser.ThrowExceptionAndWarning(TdsParserStateObject stateObj, B
-                       oolean callerHasConnectionLock, Boolean asyncClose)
-                          於 System.Data.SqlClient.TdsParser.TryRun(RunBehavior runBehavior, SqlCommand cmdHandler, Sq
-                       lDataReader dataStream, BulkCopySimpleResultSet bulkCopyHandler, TdsParserStateObject stateObj
-                       , Boolean& dataReady)
-                          於 System.Data.SqlClient.SqlDataReader.TryConsumeMetaData()
-                          於 System.Data.SqlClient.SqlDataReader.get_MetaData()
-                          於 System.Data.SqlClient.SqlCommand.FinishExecuteReader(SqlDataReader ds, RunBehavior runBeh
-                       avior, String resetOptionsString, Boolean isInternal, Boolean forDescribeParameterEncryption, 
-                       Boolean shouldCacheForAlwaysEncrypted)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReaderTds(CommandBehavior cmdBehavior, RunBeha
-                       vior runBehavior, Boolean returnStream, Boolean async, Int32 timeout, Task& task, Boolean asyn
-                       cWrite, Boolean inRetry, SqlDataReader ds, Boolean describeParameterEncryptionRequest)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReader(CommandBehavior cmdBehavior, RunBehavio
-                       r runBehavior, Boolean returnStream, String method, TaskCompletionSource`1 completion, Int32 t
-                       imeout, Task& task, Boolean& usedCache, Boolean asyncWrite, Boolean inRetry)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReader(CommandBehavior cmdBehavior, RunBehavio
-                       r runBehavior, Boolean returnStream, String method)
-                          於 System.Data.SqlClient.SqlCommand.ExecuteReader(CommandBehavior behavior, String method)
-                          於 System.Data.SqlClient.SqlCommand.ExecuteReader()
-                          於 PatriotOfficer.SWIFT.DetectionList.ListSettings.SWIFT_GetDetectionSettings(String connect
-                       ionString)
-                          於 PatriotOfficer.SWIFT.SwiftDatabaseServiceHelper.BeginProcess()
-                       
-                       Custom message :
-                       Message Id :a75aef7b-0297-f111-ab24-f8f21eb70d41 does not completed in SWIFT detection
-                       
-                       ----------------------------------------------------------------------------------------------
-                       -----
-                       InnerException: 
-                       Exception Type : Win32Exception
-                       Source : 
-                       Message : 等候操作已逾時。
-                       
-                       Stack Trace : 
-                       
-                       
-                       SQL Exception Detail :
-                       Error Code : -2146232060
-                       Line number : 0
-                       Procedure : 
-                       Number : -2
-                       Server : amldb1
-                       Source : .Net SqlClient Data Provider
-                       
-                       
-Id                   : 0
-Version              : 
-Qualifiers           : 0
-Level                : 2
-Task                 : 0
-Opcode               : 
-Keywords             : 36028797018963968
-RecordId             : 1067041
-ProviderName         : PATRIOT OFFICER SWIFT Database Service
-ProviderId           : 
-LogName              : Application
-ProcessId            : 
-ThreadId             : 
-MachineName          : AMLIS1.taishinbank.com.tw
-UserId               : 
-TimeCreated          : 2026/8/13 下午 06:35:27
-ActivityId           : 
-RelatedActivityId    : 
-ContainerLog         : Application
-MatchedQueryIds      : {}
-Bookmark             : System.Diagnostics.Eventing.Reader.EventBookmark
-LevelDisplayName     : 錯誤
-OpcodeDisplayName    : 資訊
-TaskDisplayName      : 
-KeywordsDisplayNames : {傳統}
-Properties           : {System.Diagnostics.Eventing.Reader.EventProperty}
-
-Message              : Exception Type : SqlException
-                       Source : .Net SqlClient Data Provider
-                       Date : 2026年8月13日
-                       Time : 下午 06:30:24
-                       Message : 執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。
-                       
-                       Stack Trace : 
-                          於 System.Data.SqlClient.SqlConnection.OnError(SqlException exception, Boolean breakConnecti
-                       on, Action`1 wrapCloseInAction)
-                          於 System.Data.SqlClient.TdsParser.ThrowExceptionAndWarning(TdsParserStateObject stateObj, B
-                       oolean callerHasConnectionLock, Boolean asyncClose)
-                          於 System.Data.SqlClient.TdsParser.TryRun(RunBehavior runBehavior, SqlCommand cmdHandler, Sq
-                       lDataReader dataStream, BulkCopySimpleResultSet bulkCopyHandler, TdsParserStateObject stateObj
-                       , Boolean& dataReady)
-                          於 System.Data.SqlClient.SqlDataReader.TryConsumeMetaData()
-                          於 System.Data.SqlClient.SqlDataReader.get_MetaData()
-                          於 System.Data.SqlClient.SqlCommand.FinishExecuteReader(SqlDataReader ds, RunBehavior runBeh
-                       avior, String resetOptionsString, Boolean isInternal, Boolean forDescribeParameterEncryption, 
-                       Boolean shouldCacheForAlwaysEncrypted)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReaderTds(CommandBehavior cmdBehavior, RunBeha
-                       vior runBehavior, Boolean returnStream, Boolean async, Int32 timeout, Task& task, Boolean asyn
-                       cWrite, Boolean inRetry, SqlDataReader ds, Boolean describeParameterEncryptionRequest)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReader(CommandBehavior cmdBehavior, RunBehavio
-                       r runBehavior, Boolean returnStream, String method, TaskCompletionSource`1 completion, Int32 t
-                       imeout, Task& task, Boolean& usedCache, Boolean asyncWrite, Boolean inRetry)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReader(CommandBehavior cmdBehavior, RunBehavio
-                       r runBehavior, Boolean returnStream, String method)
-                          於 System.Data.SqlClient.SqlCommand.ExecuteReader(CommandBehavior behavior, String method)
-                          於 System.Data.SqlClient.SqlCommand.ExecuteReader()
-                          於 PatriotOfficer.SWIFT.DetectionList.ListSettings.SWIFT_GetDetectionSettings(String connect
-                       ionString)
-                          於 PatriotOfficer.SWIFT.SwiftDatabaseServiceHelper.BeginProcess()
-                       
-                       Custom message :
-                       Message Id :56b4c9c3-0197-f111-ab24-f8f21eb70d41 does not completed in SWIFT detection
-                       
-                       ----------------------------------------------------------------------------------------------
-                       -----
-                       InnerException: 
-                       Exception Type : Win32Exception
-                       Source : 
-                       Message : 等候操作已逾時。
-                       
-                       Stack Trace : 
-                       
-                       
-                       SQL Exception Detail :
-                       Error Code : -2146232060
-                       Line number : 0
-                       Procedure : 
-                       Number : -2
-                       Server : amldb1
-                       Source : .Net SqlClient Data Provider
-                       
-                       
-Id                   : 0
-Version              : 
-Qualifiers           : 0
-Level                : 2
-Task                 : 0
-Opcode               : 
-Keywords             : 36028797018963968
-RecordId             : 1067040
-ProviderName         : PATRIOT OFFICER SWIFT Database Service
-ProviderId           : 
-LogName              : Application
-ProcessId            : 
-ThreadId             : 
-MachineName          : AMLIS1.taishinbank.com.tw
-UserId               : 
-TimeCreated          : 2026/8/13 下午 06:30:24
-ActivityId           : 
-RelatedActivityId    : 
-ContainerLog         : Application
-MatchedQueryIds      : {}
-Bookmark             : System.Diagnostics.Eventing.Reader.EventBookmark
-LevelDisplayName     : 錯誤
-OpcodeDisplayName    : 資訊
-TaskDisplayName      : 
-KeywordsDisplayNames : {傳統}
-Properties           : {System.Diagnostics.Eventing.Reader.EventProperty}
-
-Message              : Exception Type : SqlException
-                       Source : .Net SqlClient Data Provider
-                       Date : 2026年8月13日
-                       Time : 下午 06:26:36
-                       Message : 執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。
-                       
-                       Stack Trace : 
-                          於 System.Data.SqlClient.SqlConnection.OnError(SqlException exception, Boolean breakConnecti
-                       on, Action`1 wrapCloseInAction)
-                          於 System.Data.SqlClient.TdsParser.ThrowExceptionAndWarning(TdsParserStateObject stateObj, B
-                       oolean callerHasConnectionLock, Boolean asyncClose)
-                          於 System.Data.SqlClient.TdsParser.TryRun(RunBehavior runBehavior, SqlCommand cmdHandler, Sq
-                       lDataReader dataStream, BulkCopySimpleResultSet bulkCopyHandler, TdsParserStateObject stateObj
-                       , Boolean& dataReady)
-                          於 System.Data.SqlClient.SqlDataReader.TryConsumeMetaData()
-                          於 System.Data.SqlClient.SqlDataReader.get_MetaData()
-                          於 System.Data.SqlClient.SqlCommand.FinishExecuteReader(SqlDataReader ds, RunBehavior runBeh
-                       avior, String resetOptionsString, Boolean isInternal, Boolean forDescribeParameterEncryption, 
-                       Boolean shouldCacheForAlwaysEncrypted)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReaderTds(CommandBehavior cmdBehavior, RunBeha
-                       vior runBehavior, Boolean returnStream, Boolean async, Int32 timeout, Task& task, Boolean asyn
-                       cWrite, Boolean inRetry, SqlDataReader ds, Boolean describeParameterEncryptionRequest)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReader(CommandBehavior cmdBehavior, RunBehavio
-                       r runBehavior, Boolean returnStream, String method, TaskCompletionSource`1 completion, Int32 t
-                       imeout, Task& task, Boolean& usedCache, Boolean asyncWrite, Boolean inRetry)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReader(CommandBehavior cmdBehavior, RunBehavio
-                       r runBehavior, Boolean returnStream, String method)
-                          於 System.Data.SqlClient.SqlCommand.ExecuteReader(CommandBehavior behavior, String method)
-                          於 System.Data.SqlClient.SqlCommand.ExecuteReader()
-                          於 PatriotOfficer.SWIFT.DetectionList.ListSettings.SWIFT_GetDetectionSettings(String connect
-                       ionString)
-                          於 PatriotOfficer.SWIFT.SwiftDatabaseServiceHelper.BeginProcess()
-                       
-                       Custom message :
-                       Message Id :bf57543f-0197-f111-ab24-f8f21eb70d41 does not completed in SWIFT detection
-                       
-                       ----------------------------------------------------------------------------------------------
-                       -----
-                       InnerException: 
-                       Exception Type : Win32Exception
-                       Source : 
-                       Message : 等候操作已逾時。
-                       
-                       Stack Trace : 
-                       
-                       
-                       SQL Exception Detail :
-                       Error Code : -2146232060
-                       Line number : 0
-                       Procedure : 
-                       Number : -2
-                       Server : amldb1
-                       Source : .Net SqlClient Data Provider
-                       
-                       
-Id                   : 0
-Version              : 
-Qualifiers           : 0
-Level                : 2
-Task                 : 0
-Opcode               : 
-Keywords             : 36028797018963968
-RecordId             : 1067039
-ProviderName         : PATRIOT OFFICER SWIFT Database Service
-ProviderId           : 
-LogName              : Application
-ProcessId            : 
-ThreadId             : 
-MachineName          : AMLIS1.taishinbank.com.tw
-UserId               : 
-TimeCreated          : 2026/8/13 下午 06:26:36
-ActivityId           : 
-RelatedActivityId    : 
-ContainerLog         : Application
-MatchedQueryIds      : {}
-Bookmark             : System.Diagnostics.Eventing.Reader.EventBookmark
-LevelDisplayName     : 錯誤
-OpcodeDisplayName    : 資訊
-TaskDisplayName      : 
-KeywordsDisplayNames : {傳統}
-Properties           : {System.Diagnostics.Eventing.Reader.EventProperty}
-
-Message              : Exception Type : SqlException
-                       Source : .Net SqlClient Data Provider
-                       Date : 2026年8月13日
-                       Time : 下午 06:08:42
-                       Message : 執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。
-                       
-                       Stack Trace : 
-                          於 System.Data.SqlClient.SqlConnection.OnError(SqlException exception, Boolean breakConnecti
-                       on, Action`1 wrapCloseInAction)
-                          於 System.Data.SqlClient.TdsParser.ThrowExceptionAndWarning(TdsParserStateObject stateObj, B
-                       oolean callerHasConnectionLock, Boolean asyncClose)
-                          於 System.Data.SqlClient.TdsParser.TryRun(RunBehavior runBehavior, SqlCommand cmdHandler, Sq
-                       lDataReader dataStream, BulkCopySimpleResultSet bulkCopyHandler, TdsParserStateObject stateObj
-                       , Boolean& dataReady)
-                          於 System.Data.SqlClient.SqlDataReader.TryConsumeMetaData()
-                          於 System.Data.SqlClient.SqlDataReader.get_MetaData()
-                          於 System.Data.SqlClient.SqlCommand.FinishExecuteReader(SqlDataReader ds, RunBehavior runBeh
-                       avior, String resetOptionsString, Boolean isInternal, Boolean forDescribeParameterEncryption, 
-                       Boolean shouldCacheForAlwaysEncrypted)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReaderTds(CommandBehavior cmdBehavior, RunBeha
-                       vior runBehavior, Boolean returnStream, Boolean async, Int32 timeout, Task& task, Boolean asyn
-                       cWrite, Boolean inRetry, SqlDataReader ds, Boolean describeParameterEncryptionRequest)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReader(CommandBehavior cmdBehavior, RunBehavio
-                       r runBehavior, Boolean returnStream, String method, TaskCompletionSource`1 completion, Int32 t
-                       imeout, Task& task, Boolean& usedCache, Boolean asyncWrite, Boolean inRetry)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReader(CommandBehavior cmdBehavior, RunBehavio
-                       r runBehavior, Boolean returnStream, String method)
-                          於 System.Data.SqlClient.SqlCommand.ExecuteReader(CommandBehavior behavior, String method)
-                          於 System.Data.SqlClient.SqlCommand.ExecuteReader()
-                          於 PatriotOfficer.SWIFT.DetectionList.ListSettings.SWIFT_GetDetectionSettings(String connect
-                       ionString)
-                          於 PatriotOfficer.SWIFT.SwiftDatabaseServiceHelper.BeginProcess()
-                       
-                       Custom message :
-                       Message Id :573172bf-fe96-f111-ab24-f8f21eb70d41 does not completed in SWIFT detection
-                       
-                       ----------------------------------------------------------------------------------------------
-                       -----
-                       InnerException: 
-                       Exception Type : Win32Exception
-                       Source : 
-                       Message : 等候操作已逾時。
-                       
-                       Stack Trace : 
-                       
-                       
-                       SQL Exception Detail :
-                       Error Code : -2146232060
-                       Line number : 0
-                       Procedure : 
-                       Number : -2
-                       Server : amldb1
-                       Source : .Net SqlClient Data Provider
-                       
-                       
-Id                   : 0
-Version              : 
-Qualifiers           : 0
-Level                : 2
-Task                 : 0
-Opcode               : 
-Keywords             : 36028797018963968
-RecordId             : 1067038
-ProviderName         : PATRIOT OFFICER SWIFT Database Service
-ProviderId           : 
-LogName              : Application
-ProcessId            : 
-ThreadId             : 
-MachineName          : AMLIS1.taishinbank.com.tw
-UserId               : 
-TimeCreated          : 2026/8/13 下午 06:08:42
-ActivityId           : 
-RelatedActivityId    : 
-ContainerLog         : Application
-MatchedQueryIds      : {}
-Bookmark             : System.Diagnostics.Eventing.Reader.EventBookmark
-LevelDisplayName     : 錯誤
-OpcodeDisplayName    : 資訊
-TaskDisplayName      : 
-KeywordsDisplayNames : {傳統}
-Properties           : {System.Diagnostics.Eventing.Reader.EventProperty}
-
-Message              : Exception Type : SqlException
-                       Source : .Net SqlClient Data Provider
-                       Date : 2026年8月13日
-                       Time : 下午 06:06:33
-                       Message : 執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。
-                       
-                       Stack Trace : 
-                          於 System.Data.SqlClient.SqlConnection.OnError(SqlException exception, Boolean breakConnecti
-                       on, Action`1 wrapCloseInAction)
-                          於 System.Data.SqlClient.TdsParser.ThrowExceptionAndWarning(TdsParserStateObject stateObj, B
-                       oolean callerHasConnectionLock, Boolean asyncClose)
-                          於 System.Data.SqlClient.TdsParser.TryRun(RunBehavior runBehavior, SqlCommand cmdHandler, Sq
-                       lDataReader dataStream, BulkCopySimpleResultSet bulkCopyHandler, TdsParserStateObject stateObj
-                       , Boolean& dataReady)
-                          於 System.Data.SqlClient.SqlDataReader.TryConsumeMetaData()
-                          於 System.Data.SqlClient.SqlDataReader.get_MetaData()
-                          於 System.Data.SqlClient.SqlCommand.FinishExecuteReader(SqlDataReader ds, RunBehavior runBeh
-                       avior, String resetOptionsString, Boolean isInternal, Boolean forDescribeParameterEncryption, 
-                       Boolean shouldCacheForAlwaysEncrypted)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReaderTds(CommandBehavior cmdBehavior, RunBeha
-                       vior runBehavior, Boolean returnStream, Boolean async, Int32 timeout, Task& task, Boolean asyn
-                       cWrite, Boolean inRetry, SqlDataReader ds, Boolean describeParameterEncryptionRequest)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReader(CommandBehavior cmdBehavior, RunBehavio
-                       r runBehavior, Boolean returnStream, String method, TaskCompletionSource`1 completion, Int32 t
-                       imeout, Task& task, Boolean& usedCache, Boolean asyncWrite, Boolean inRetry)
-                          於 System.Data.SqlClient.SqlCommand.RunExecuteReader(CommandBehavior cmdBehavior, RunBehavio
-                       r runBehavior, Boolean returnStream, String method)
-                          於 System.Data.SqlClient.SqlCommand.ExecuteReader(CommandBehavior behavior, String method)
-                          於 System.Data.SqlClient.SqlCommand.ExecuteReader()
-                          於 PatriotOfficer.SWIFT.DetectionList.ListSettings.SWIFT_GetDetectionSettings(String connect
-                       ionString)
-                          於 PatriotOfficer.SWIFT.SwiftDatabaseServiceHelper.BeginProcess()
-                       
-                       Custom message :
-                       Message Id :e1e2bf6d-fe96-f111-ab24-f8f21eb70d41 does not completed in SWIFT detection
-                       
-                       ----------------------------------------------------------------------------------------------
-                       -----
-                       InnerException: 
-                       Exception Type : Win32Exception
-                       Source : 
-                       Message : 等候操作已逾時。
-                       
-                       Stack Trace : 
-                       
-                       
-                       SQL Exception Detail :
-                       Error Code : -2146232060
-                       Line number : 0
-                       Procedure : 
-                       Number : -2
-                       Server : amldb1
-                       Source : .Net SqlClient Data Provider
-                       
-                       
-Id                   : 0
-Version              : 
-Qualifiers           : 0
-Level                : 2
-Task                 : 0
-Opcode               : 
-Keywords             : 36028797018963968
-RecordId             : 1067037
-ProviderName         : PATRIOT OFFICER SWIFT Database Service
-ProviderId           : 
-LogName              : Application
-ProcessId            : 
-ThreadId             : 
-MachineName          : AMLIS1.taishinbank.com.tw
-UserId               : 
-TimeCreated          : 2026/8/13 下午 06:06:33
-ActivityId           : 
-RelatedActivityId    : 
-ContainerLog         : Application
-MatchedQueryIds      : {}
-Bookmark             : System.Diagnostics.Eventing.Reader.EventBookmark
-LevelDisplayName     : 錯誤
-OpcodeDisplayName    : 資訊
-TaskDisplayName      : 
-KeywordsDisplayNames : {傳統}
-Properties           : {System.Diagnostics.Eventing.Reader.EventProperty}
+測試驗證步驟
+ * 打開系統管理員權限的 PowerShell 執行 simulate.ps1。
+ * 執行 monitor.ps1，確認終端能精確抓到該筆資料並顯示紅色告警。
+ * 監控端若要常駐（例如透過 Windows 工作排程器 Task Scheduler），建議設定每 5 或 10 分鐘執行一次，並將 $minutesBack 設為相同週期即可。
