@@ -1,3 +1,9 @@
+
+cd "C:\Users\1141923\Desktop"
+.\Test_SendMail.ps1
+
+
+
 這是一份不抓 Windows 事件檢視器、但會讀取 config.json 的純測試版本。它會直接塞入一筆模擬的逾時錯誤資料，組裝成正式告警的 HTML 表格並寄出，方便你先驗證排版外觀與發信流程。
 1. 設定檔：config.json
 與主程式放在同一個資料夾底下：
