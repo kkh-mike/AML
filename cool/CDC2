@@ -1,53 +1,20 @@
-目前的連線與配置狀況非常清晰：
- * 10.13.113.110 確定不可用：DestinationHostUnreachable 表示該 IP 在目前網段路由不可達或機器已不存在。
- * 本機目前的 IP 是 10.13.60.30（之前測試顯示 SourceAddress）。
- * CIP_RM_TIMEOUT_REPORT 是歷史測試專案：設定檔未定義其他 SMTP，且程式碼內寫死的測試主機已失效。
- * 唯一連線暢通的伺服器：relay.taishinbank.com.tw（10.1.2.8:25），但需要授權。
-最快發信路徑：向郵件/網管團隊開單申請 Relay 白名單
-在行內環境中，Windows 伺服器排程發送告警信的標準作法就是將主機 IP 加入 Relay 匿名轉發白名單。
-直接將以下內容複製並提交資訊服務單（或寄給維運 / Exchange 管理窗口）：
-> 申請主旨：申請將伺服器 IP 加入內部 SMTP Relay 匿名發信白名單
-> 申請說明：
-> 因應 AML 系統（AMLIS1）需透過排程腳本監控資料庫連線逾時異常並發送內部告警通知，需申請透過內部 Mail Relay 發送信件，請協助將來源主機加入允許清單。
->  * 來源主機名稱：AMLIS1
->  * 來源主機 IP：10.13.60.30
->  * 目標 SMTP Relay：relay.taishinbank.com.tw (10.1.2.8)，Port 25
->  * 發信寄件者：AML@tsbtmail.com 或 PatriotOfficer-Alert@taishinbank.com.tw
->  * 收件對象：行內員工信箱（*@taishinbank.com.tw）
-> 
-白名單生效後的標準寄信指令
-白名單開通後，使用先前驗證過的指令即可直接寄出，不需要帳號密碼：
-$smtpServer = "relay.taishinbank.com.tw"
-$smtpPort   = 25
-$sender     = "AML@tsbtmail.com"
-$recipient  = "1141923@taishinbank.com.tw"
 
-$mail = New-Object System.Net.Mail.MailMessage($sender, $recipient)
-$mail.Subject = "【正式】AMLIS1 系統告警發信測試"
-$mail.Body = "Relay 白名單開通成功，此郵件由 10.13.60.30 發送。"
 
-$smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
-$smtp.Timeout = 10000
 
-try {
-    $smtp.Send($mail)
-    Write-Host "✅ 信件已成功送出！" -ForegroundColor Green
-} catch {
-    Write-Host "❌ 失敗: $($_.Exception.Message)" -ForegroundColor Red
-} finally {
-    $mail.Dispose()
-    $smtp.Dispose()
-}
+PS C:\Users\it1141923.TSBANK_NET.001\Desktop> C:\Users\it1141923.TSBANK_NET.001\Desktop\test.ps1
+正在檢查過去 10 分鐘內的事件記錄...
+Get-WinEvent : 參數錯誤。
+位於 C:\Users\it1141923.TSBANK_NET.001\Desktop\test.ps1:30 字元:11
++ $events = Get-WinEvent -FilterHashtable $filter -ErrorAction Silently ...
++           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [Get-WinEvent], EventLogException
+    + FullyQualifiedErrorId : System.Diagnostics.Eventing.Reader.EventLogException,Microsoft.PowerShell.Commands.GetWinEventCommand
+ 
+過去 10 分鐘內無符合條件之錯誤事件。
 
-替代方案：在等待白名單審核期間先記錄 Log
-在開單審核完成前，可先讓監控腳本將偵測到的 -2146232060 錯誤自動輸出到本機 Log 檔案，避免漏掉異常：
-$logPath = "D:\TEST\AML_Timeout_Alert.log"
-$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+PS C:\Users\it1141923.TSBANK_NET.001\Desktop> 
 
-# 偵測到錯誤時追加寫入檔案
-if ($targetErrors) {
-    $alertText = "[$timestamp] 偵測到 $($targetErrors.Count) 筆逾時錯誤"
-    Add-Content -Path $logPath -Value $alertText
-    Write-Host $alertText -ForegroundColor Red
-}
 
+
+
+那這個?
