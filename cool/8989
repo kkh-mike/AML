@@ -1,6 +1,6 @@
 $smtpServer = "relay.taishinbank.com.tw"
 $smtpPort   = 25
-$sender     = "PatriotOfficer-Alert@taishinbank.com.tw"
+$sender     = "1141923@taishinbank.com.tw"
 $recipient  = "1141923@taishinbank.com.tw"  # 請確認或換成你的實際收件信箱
 
 $mail = New-Object System.Net.Mail.MailMessage($sender, $recipient)
@@ -24,3 +24,13 @@ try {
     $mail.Dispose()
     $smtp.Dispose()
 }
+
+
+
+PS C:\Users\1141923> D:\TEST\run_detail.ps1
+正在嘗試寄送測試信...
+❌ 寄信失敗：
+以 "1" 引數呼叫 "Send" 時發生例外狀況: "SMTP 伺服器需要安全連接，或用戶端未經驗證。 伺服器回應為: 5.7.57 SMTP; Client was not authenticated to send anonymous mail during MAIL FROM"
+詳細原因: SMTP 伺服器需要安全連接，或用戶端未經驗證。 伺服器回應為: 5.7.57 SMTP; Client was not authenticated to send anonymous mail during MAIL FROM
+
+PS C:\Users\1141923> 
