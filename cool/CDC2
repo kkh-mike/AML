@@ -1,13 +1,114 @@
-這樣還會有這個錯誤?
-PS C:\Users\it1141923.TSBANK_NET.001\Desktop> C:\Users\it1141923.TSBANK_NET.001\Desktop\test.ps1
-正在檢查過去 10 分鐘內的事件記錄...
-Get-WinEvent : 參數錯誤。
-位於 C:\Users\it1141923.TSBANK_NET.001\Desktop\test.ps1:30 字元:11
-+ $events = Get-WinEvent -FilterHashtable $filter -ErrorAction Silently ...
-+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (:) [Get-WinEvent], EventLogException
-    + FullyQualifiedErrorId : System.Diagnostics.Eventing.Reader.EventLogException,Microsoft.PowerShell.Commands.GetWinEventCommand
- 
-過去 10 分鐘內無符合條件之錯誤事件。
+# ==========================================
+# 1. 讀取 JSON 設定檔
+# ==========================================
+$configPath = Join-Path -Path $PSScriptRoot -ChildPath "config.json"
 
-PS C:\Users\it1141923.TSBANK_NET.001\Desktop> 
+if (-not (Test-Path $configPath)) {
+    Write-Error "找不到設定檔: $configPath"
+    exit 1
+}
+
+$config = Get-Content -Path $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$monitorCfg = $config.Monitor
+$mailCfg    = $config.Mail
+
+Write-Host "正在檢查過去 $($monitorCfg.MinutesBack) 分鐘內的事件記錄..." -ForegroundColor Cyan
+
+# ==========================================
+# 2. 改用 Get-EventLog 查詢傳統來源
+# ==========================================
+$startTime = (Get-Date).AddMinutes(-$monitorCfg.MinutesBack)
+
+# EntryType 轉換 (Level 2 轉為 Error)
+$entryType = switch ($monitorCfg.Level) {
+    1 { "Error" }
+    2 { "Error" }
+    3 { "Warning" }
+    default { "Information" }
+}
+
+try {
+    # Get-EventLog 原生支援傳統 Source 與 EventID 0，絕不報「參數錯誤」
+    $events = Get-EventLog -LogName $monitorCfg.LogName `
+                           -Source $monitorCfg.ProviderName `
+                           -EntryType $entryType `
+                           -After $startTime `
+                           -ErrorAction Stop |
+              Where-Object { 
+                  $_.EventID -eq $monitorCfg.EventId -and 
+                  $_.Message -like $monitorCfg.ErrorCodePattern 
+              }
+}
+catch {
+    # 若該區間完全沒資料，或查無該來源
+    $events = @()
+}
+
+# ==========================================
+# 3. 判斷是否有匹配的錯誤
+# ==========================================
+if (-not $events -or $events.Count -eq 0) {
+    Write-Host "過去 $($monitorCfg.MinutesBack) 分鐘內無符合條件之錯誤事件。" -ForegroundColor Yellow
+    exit 0
+}
+
+Write-Host "發現 $($events.Count) 筆符合條件的錯誤，準備發送告警信件..." -ForegroundColor Red
+
+# ==========================================
+# 4. 組合 HTML 郵件內容與發信
+# ==========================================
+Add-Type -AssemblyName System.Web
+
+$bodyRows = foreach ($item in $events) {
+    $encodedMsg = [System.Web.HttpUtility]::HtmlEncode($item.Message)
+    @"
+    <tr>
+        <td style='border:1px solid #ccc; padding:8px;'>$($item.TimeGenerated.ToString('yyyy-MM-dd HH:mm:ss'))</td>
+        <td style='border:1px solid #ccc; padding:8px;'>$($item.EventID)</td>
+        <td style='border:1px solid #ccc; padding:8px;'><pre style='font-family:Consolas, monospace; margin:0;'>$encodedMsg</pre></td>
+    </tr>
+"@
+}
+
+$mailBody = @"
+<html>
+<body style='font-family: Microsoft JhengHei, Arial, sans-serif; color: #333;'>
+    <h3 style='color: #D9534F;'>【系統告警】$($monitorCfg.ProviderName) 偵測逾時 / 資料庫錯誤</h3>
+    <p>監控機制在過去 <b>$($monitorCfg.MinutesBack)</b> 分鐘內偵測到以下錯誤事件：</p>
+    <table style='border-collapse: collapse; width: 100%; font-size: 13px;'>
+        <tr style='background-color: #f2f2f2; text-align: left;'>
+            <th style='border:1px solid #ccc; padding:8px; width: 180px;'>產生時間</th>
+            <th style='border:1px solid #ccc; padding:8px; width: 80px;'>Event ID</th>
+            <th style='border:1px solid #ccc; padding:8px;'>詳細訊息內容</th>
+        </tr>
+        $($bodyRows -join "`n")
+    </table>
+</body>
+</html>
+"@
+
+$mail = New-Object System.Net.Mail.MailMessage
+$mail.From = $mailCfg.Sender
+foreach ($rcpt in $mailCfg.Recipients) {
+    $mail.To.Add($rcpt)
+}
+$mail.Subject = "【嚴重告警】$($monitorCfg.ProviderName) 資料庫逾時錯誤 ($($events.Count) 筆)"
+$mail.Body = $mailBody
+$mail.IsBodyHtml = $true
+$mail.BodyEncoding = [System.Text.Encoding]::UTF8
+$mail.SubjectEncoding = [System.Text.Encoding]::UTF8
+
+$smtp = New-Object System.Net.Mail.SmtpClient($mailCfg.SmtpServer, [int]$mailCfg.SmtpPort)
+$smtp.Timeout = [int]$mailCfg.TimeoutMs
+
+try {
+    $smtp.Send($mail)
+    Write-Host "告警信件已成功發送至 $($mailCfg.Recipients -join ', ')！" -ForegroundColor Green
+}
+catch {
+    Write-Error "SMTP 寄件失敗: $_"
+}
+finally {
+    $mail.Dispose()
+    $smtp.Dispose()
+}
