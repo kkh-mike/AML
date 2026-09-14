@@ -1,29 +1,32 @@
-$smtpServer = "10.13.113.110"               # 測試環境專用發信主機
-$smtpPort   = 25
-$sender     = "AML@tsbtmail.com"            # 專案指定寄件者
-$recipient  = "1141923@taishinbank.com.tw"  # 你的收件信箱
+顯示「作業逾時」，代表從這台主機（10.13.60.8）連往 10.13.113.110:25 在網路層封包就卡住了（可能跨網段防火牆沒開，或該測試機已關機/未起 SMTP 服務）。
+第一步：排查 10.13.113.110 網路與通訊埠
+先用 Test-NetConnection 檢查連線狀態：
+Test-NetConnection -ComputerName "10.13.113.110" -Port 25
 
-$mail = New-Object System.Net.Mail.MailMessage($sender, $recipient)
-$mail.Subject = "【連線成功】AMLIS1 系統監控發信測試"
-$mail.Body = "透過 10.13.113.110 與 AML@tsbtmail.com 測試寄信成功！"
+ * 若 TcpTestSucceeded : False，代表 10.13.113.110 目前無法連通。
+第二步：從現有設定檔找出「真正能連的環境設定」
+剛才在搜尋時，發現專案內有 App._prd_.config 以及 bin\Release 下的設定檔。既然 10.13.113.110 是測試環境且已無法連線，正式環境（PRD）使用的主機很可能就是別台。
+執行以下指令，直接檢查 _prd_.config 與 Release 目錄下的設定檔內容：
+Get-ChildItem -Path "D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT" -Recurse -Include "*_prd_*.config", "*Release*.config" | 
+    ForEach-Object {
+        Write-Host "=== 檔案: $($_.FullName) ===" -ForegroundColor Cyan
+        Get-Content $_.FullName | Select-String -Pattern "Mail_Host", "smtp", "IP", "10."
+    }
 
-$smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
-$smtp.Timeout = 10000
-
-try {
-    Write-Host "正在透過 $smtpServer 寄送測試信..." -ForegroundColor Cyan
-    $smtp.Send($mail)
-    Write-Host "✅ 測試信已成功寄出！請至 Outlook 確認信件。" -ForegroundColor Green
-} catch {
-    Write-Host "❌ 寄信失敗: $($_.Exception.Message)" -ForegroundColor Red
-} finally {
-    $mail.Dispose()
-    $smtp.Dispose()
-}
-
-
-PS C:\Users\1141923> D:\TEST\EAMIL.ps1
-正在透過 10.13.113.110 寄送測試信...
-❌ 寄信失敗: 以 "1" 引數呼叫 "Send" 時發生例外狀況: "作業逾時。"
-
-PS C:\Users\1141923> 
+第三步：回到最穩固的路徑——申請 10.1.2.8 轉發白名單
+回顧先前的連線測試：
+| 主機 | 網路連線 (Port 25) | 發信狀態 |
+|---|---|---|
+| 10.13.113.110 | ❌ 逾時 (連不上) | 連線逾時 |
+| relay.taishinbank.com.tw (10.1.2.8) | ✅ 通暢 (True) | 回傳 5.7.57 Client was not authenticated |
+10.1.2.8 是唯一網路通暢且全行統一的 Mail Relay。它跳出的 5.7.57 是因為郵件伺服器的安全性設定（只收已認證或白名單 IP 的信件）。
+在企業標準流程中，最快且最穩定的解決方法是向 Exchange / 郵件系統維運團隊開單申請白名單：
+> 申請說明範本：
+>  * 申請事項：內部 SMTP Relay 匿名發信權限（加入白名單）
+>  * 來源主機 IP：10.13.60.8 (主機名: AMLIS1)
+>  * 目標 Relay 主機：relay.taishinbank.com.tw (10.1.2.8:25)
+>  * 使用情境：AML 系統（Patriot Officer）異常錯誤監控排程發送內部告警信
+>  * 寄件者：AML@tsbtmail.com 或 PatriotOfficer-Alert@taishinbank.com.tw
+>  * 收件者：行內員工/維運團隊信箱（@taishinbank.com.tw）
+> 
+只要網管人員在 10.1.2.8 的 Receive Connector 白名單勾選或填入 10.13.60.8，最前面測試的那段腳本不用改任何帳密即可直接寄信成功。
