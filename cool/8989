@@ -1,19 +1,38 @@
+這張圖非常關鍵！直接揭露了兩個核心解答：
+1. 寄件者來源（EMAIL_FROM）
+在 App.config 的 <appSettings> 中可以看到這兩行：
+<!--<add key="EMAIL_FROM" value="AML@taishinbank.com.tw"/>-->
+<add key="EMAIL_FROM" value="AML@tsbtmail.com" />
+
+ * 貴司這個專案原本用的發信寄件者是 AML@tsbtmail.com（或被註解掉的 AML@taishinbank.com.tw）。
+ * 郵件伺服器通常只允許特定認可的寄件者名稱，改用 AML@tsbtmail.com 就不容易被 Mail Server 當作非法偽冒阻擋。
+2. 真實發信邏輯與 SMTP 設定在哪裡？
+從資料夾內容可以看到這是一個 C# 專案（CIP_RM_TIMEOUT_REPORT），既然 App.config 裡沒有直接寫死 SMTP IP，代表它可能寫在：
+ * App._prd_config 或 App._dev_config 裡面。
+ * C# 程式碼（如 DB.cs 或其他 .cs 檔） 裡面寫死了發信伺服器 IP 或從資料庫撈取。
+請直接在 PowerShell 執行以下指令，快速找出該專案裡所有與發信相關的關鍵字：
+Get-ChildItem -Path "D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT" -Recurse -Include *.config, *.cs | 
+    Select-String -Pattern "SmtpClient", "Host", "Port", "mail", "10." | 
+    Select-Object Path, LineNumber, Line
+
+立即測試更新後的寄件者發信
+如果該專案也是透過 relay.taishinbank.com.tw，請把寄件者換成它設定的 AML@tsbtmail.com 測試一次：
 $smtpServer = "relay.taishinbank.com.tw"
 $smtpPort   = 25
-$sender     = "1141923@taishinbank.com.tw"
-$recipient  = "1141923@taishinbank.com.tw"  # 請確認或換成你的實際收件信箱
+$sender     = "AML@tsbtmail.com"              # 依 config 調整為系統專用寄件者
+$recipient  = "1141923@taishinbank.com.tw"
 
 $mail = New-Object System.Net.Mail.MailMessage($sender, $recipient)
-$mail.Subject = "【測試】AMLIS1 系統告警郵件連線測試"
-$mail.Body = "這是一封來自 AMLIS1 主機的測試信件，確認 relay.taishinbank.com.tw 發信正常。"
+$mail.Subject = "【測試】CIP 逾時監控發信測試"
+$mail.Body = "測試使用 AML@tsbtmail.com 寄送告警信。"
 
 $smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
-$smtp.Timeout = 10000  # 10 秒逾時
+$smtp.Timeout = 10000
 
 try {
-    Write-Host "正在嘗試寄送測試信..." -ForegroundColor Cyan
+    Write-Host "嘗試寄送測試信..." -ForegroundColor Cyan
     $smtp.Send($mail)
-    Write-Host "✅ 測試信已成功寄出！請至 Outlook 檢查收件匣。" -ForegroundColor Green
+    Write-Host "✅ 測試信已成功寄出！" -ForegroundColor Green
 } catch {
     Write-Host "❌ 寄信失敗：" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Yellow
@@ -25,12 +44,4 @@ try {
     $smtp.Dispose()
 }
 
-
-
-PS C:\Users\1141923> D:\TEST\run_detail.ps1
-正在嘗試寄送測試信...
-❌ 寄信失敗：
-以 "1" 引數呼叫 "Send" 時發生例外狀況: "SMTP 伺服器需要安全連接，或用戶端未經驗證。 伺服器回應為: 5.7.57 SMTP; Client was not authenticated to send anonymous mail during MAIL FROM"
-詳細原因: SMTP 伺服器需要安全連接，或用戶端未經驗證。 伺服器回應為: 5.7.57 SMTP; Client was not authenticated to send anonymous mail during MAIL FROM
-
-PS C:\Users\1141923> 
+先執行上方第一段指令看一下 CIP_RM_TIMEOUT_REPORT 程式碼裡實際使用的 SMTP Host 是哪一台，答案就會完全水落石出！
