@@ -1,14 +1,108 @@
-剛才搜尋時，因為指令欄位被截斷，我們只看到路徑清單，但最關鍵的 Program.cs 裡面是怎麼寫 SmtpClient 的 剛好藏在內容中！
-直接執行以下這行指令，將 Program.cs 裡面 發信連線的那幾行程式碼 直接印出來：
 Get-Content "D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs" | 
     Select-String -Pattern "SmtpClient", "Send", "Credentials", "Host", "Port", "MailAddress" -Context 3, 3
 
-為什麼這段指令能直接解答？
-在 C# 寫發信通常只有三種設定方式，印出來後一眼就能看穿：
- * 指向另外一台內網發信機（不是 relay.taishinbank.com.tw）：
-   如果看到類似 new SmtpClient("10.13.x.x") 或讀取自某個 IP，那台就是專門免認證的發信主機。
- * 帶入了專用的服務帳號密碼：
-   如果看到 smtp.Credentials = new NetworkCredential(...)，就代表必須帶特定帳號驗證。
- * 從資料庫撈取設定：
-   如果看到它是從剛才的 amlist / RPADB 撈出 SMTP 設定，我們直接進 DB 查那筆設定即可。
-請在 PowerShell 貼上執行上方指令，看印出的程式碼上下文是怎麼寫的。
+
+
+
+
+PS C:\Users\1141923> D:\TEST\EAMIL.ps1
+
+                  DB db = new DB();
+  
+  //                sql = @"
+> //select * from oaaml.aml_cip_rm_timeout_report where data_date='" + DataDate + @"' and TimeOut_da
+y > 0 ";
+                  //ShowMSG(LDAP.LDAPConn);
+                  //ShowMSG(DataDate);
+>                string sql= @"select workgroup , case_type , count(*) as timeout_row from oaaml.aml
+_cip_rm_timeout_report where data_date='" + DataDate + @"'  
+  group by workgroup ,case_type order by workgroup ,case_type";
+  
+  
+                      {
+  
+                          System.Net.Mail.MailMessage CipRmMail = new System.Net.Mail.MailMessage();
+>                         CipRmMail.From = new System.Net.Mail.MailAddress(EMAIL_FROM,"AML");
+                          foreach (DataRow rowEmail in dtEMail.Rows)
+                          {
+                              ShowMSG(rowEmail["EMAIL"].ToString());
+                          CipRmMail.Body = HtmlBody;
+                          CipRmMail.IsBodyHtml = true;
+                          CipRmMail.Priority = System.Net.Mail.MailPriority.High;
+>                         //String Mail_Host = "10.1.2.8";
+>                         String Mail_Host = "10.13.113.110"; //測試環境
+>                         System.Net.Mail.SmtpClient amlSMTP = new System.Net.Mail.SmtpClient(Mail_H
+ost);
+>                         //amlSMTP.Credentials = new System.Net.NetworkCredential("account", "PW");
+  
+                          try
+                          {
+>                             amlSMTP.Send(CipRmMail);
+                              CipRmMail.Dispose();
+                          }
+                          catch (Exception ex)
+                          {
+>                             insertMailSendError(DataDate, row["workgroup"].ToString(), row["CASE_T
+YPE"].ToString(), row["timeout_row"].ToString(), ex.ToString());
+                              
+                          }
+                      }
+                      else
+                      {
+>                         insertMailSendError(DataDate, row["workgroup"].ToString(), row["CASE_TYPE"
+].ToString(), row["timeout_row"].ToString(), "此工作群組的第二關主管沒有設定email");
+                      }
+  
+                  }
+                  
+                  //=== end foreach dt.Rows ===
+                  Logger.Log("=== 回傳成功給autosys ===");
+>                 SendError("執行成功", "S_000", 0);
+                  Logger.Log("=== 執行結束! ===");
+                  ShowMSG("批次一執行完畢!");
+                  System.Threading.Thread.Sleep(1000); //-> 暫停1秒以顯示訊息 
+              catch (Exception ex)
+              {
+                  Logger.Log("=== 回傳失敗給autosys ===");
+>                 SendError("執行失敗", "F_999", 1);
+                  Logger.Error(ex.Message + Environment.NewLine + ex.StackTrace);
+                  ShowMSG("批次一 執行發生錯誤!", ex);
+                  System.Threading.Thread.Sleep(3000); //-> 暫停3秒以顯示訊息
+          {
+              DB db = new DB();
+  
+>             DataTable dt = db.GetDataTable("select * from oaaml.AML_CIP_RM_TIMEOUT_REPORT  WHERE D
+ATA_DATE='" + DataDate + "' and WORKGROUP='" + WORKGROUP + "' and CASE_TYPE='" + CASE_TYPE + "'  ord
+er by WORKGROUP , CASE_TYPE ,  TIMEOUT_DAY desc , RISK_LEVEL");
+  
+              String ShowHtml = "";
+  
+              return ShowHtml;
+          }
+  
+>         private static void insertMailSendError(string DATA_DATE, string WORKGROUP, string CASE_TY
+PE, string ROW_COUNT, string ERROR_MSG)
+          {
+              String sqlRecord = @" Insert into oaaml.AML_MAIL_ERROR ( DATA_DATE ,WORKGROUP ,CASE_TY
+PE ,ROW_COUNT ,ERROR_MSG ) values ('" + DATA_DATE + "','" + WORKGROUP + "','" + CASE_TYPE + "','" + 
+ROW_COUNT + "','" + ERROR_MSG + "') ";
+              
+          ///400~   : Fail 請call ap
+          ///</param>
+          /// <param name="ExitCode">0:表示成功 1:表示失敗</param>
+>         private static void SendError(string Msg, string EventCode, int ExitCode)
+          {
+              //"C:\TND\DIN\cawto.exe TSBB_MDWOP_F_401:^ MDWOPC001^資料不存"
+              try
+              }
+              catch (Exception ex)
+              {
+>                 Logger.Error("批次1-回傳autosys訊息時發生錯誤! - SendError(Msg:" + Msg + " |EventCode:" + Eve
+ntCode + " |ExitCode:" + ExitCode + ") ex:" + ex.ToString());
+                  //System.Environment.Exit(ExitCode);
+              }
+          }
+
+
+
+PS C:\Users\1141923> 
