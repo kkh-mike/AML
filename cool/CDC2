@@ -1,23 +1,29 @@
-有的！這兩張關鍵表就在你提供的清單裡：
- * WORKFLOW_MGMT_BRANCH：這張正是「工作群組與分行對應關聯表」（決定圖一上方清單顯示哪個工作群組綁定了哪家分行）。
- * BRANCH_DIM：這張是「分行主檔維度表 (Dimension)」（決定圖中下拉選單裡有哪些分行代號與分行中文名稱）。
-1. 為什麼重建環境的選單缺少分行、中文變成代碼？
- * 原因在 BRANCH_DIM：
-   圖一選單有 0000、0001A (通路營運...)、0002 (敦南分行)，而圖二只有 0002 (0002)，代表圖二的 BRANCH_DIM 資料不齊全或中文名稱欄位是空的。
-請執行以下語法比對查看：
-SELECT TOP 50 * 
-FROM [dbo].[BRANCH_DIM]
-ORDER BY 1;
+$smtpServer = "10.13.113.110"               # 測試環境專用發信主機
+$smtpPort   = 25
+$sender     = "AML@tsbtmail.com"            # 專案指定寄件者
+$recipient  = "1141923@taishinbank.com.tw"  # 你的收件信箱
 
-(可比對兩個環境這張表的筆數與欄位內容，通常將圖一環境的 BRANCH_DIM 倒過來就能解決選單問題。)
-2. 為什麼工作群組上方沒有顯示對應分行？
- * 原因在 WORKFLOW_MGMT_BRANCH：
-   先前你只匯入了 WORKFLOW_MGMT_QUEUE（工作群組主表），而畫面要顯示分行，靠的是關聯表 WORKFLOW_MGMT_BRANCH。
-請先確認它的結構：
-SELECT TOP 10 * 
-FROM [dbo].[WORKFLOW_MGMT_BRANCH];
+$mail = New-Object System.Net.Mail.MailMessage($sender, $recipient)
+$mail.Subject = "【連線成功】AMLIS1 系統監控發信測試"
+$mail.Body = "透過 10.13.113.110 與 AML@tsbtmail.com 測試寄信成功！"
 
-通常這張表的主要欄位是 QUEUEID 和 BRANCH（或 BRANCH_ID / BRANCH_CODE）。
-解決方案建議
- * 同步分行字典： 將正式/正常環境的 BRANCH_DIM 補齊到目前環境，選單的代碼與中文名稱就會完整。
- * 匯入分行關聯： 檢查當初提供給你的匯入來源中，是否還有一份分行對應檔（或是需要將 WORKFLOW_MGMT_BRANCH 的資料對應新的 QUEUEID 匯入）。
+$smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
+$smtp.Timeout = 10000
+
+try {
+    Write-Host "正在透過 $smtpServer 寄送測試信..." -ForegroundColor Cyan
+    $smtp.Send($mail)
+    Write-Host "✅ 測試信已成功寄出！請至 Outlook 確認信件。" -ForegroundColor Green
+} catch {
+    Write-Host "❌ 寄信失敗: $($_.Exception.Message)" -ForegroundColor Red
+} finally {
+    $mail.Dispose()
+    $smtp.Dispose()
+}
+
+
+PS C:\Users\1141923> D:\TEST\EAMIL.ps1
+正在透過 10.13.113.110 寄送測試信...
+❌ 寄信失敗: 以 "1" 引數呼叫 "Send" 時發生例外狀況: "作業逾時。"
+
+PS C:\Users\1141923> 
