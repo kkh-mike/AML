@@ -106,3 +106,35 @@ ntCode + " |ExitCode:" + ExitCode + ") ex:" + ex.ToString());
 
 
 PS C:\Users\1141923> 
+'
+
+我知道這個幹嘛
+
+跟下面這個發信的好像沒關係啊
+# 寄件者通常規範使用同網域的系統帳號格式
+$smtpServer = "relay.taishinbank.com.tw"
+$smtpPort   = 25
+$sender     = "AML@taishinbank.com.tw"
+$recipient  = "1141923@taishinbank.com.tw"  # 請確認或換成你的實際收件信箱
+
+$mail = New-Object System.Net.Mail.MailMessage($sender, $recipient)
+$mail.Subject = "【測試】AMLIS1 系統告警郵件連線測試"
+$mail.Body = "這是一封來自 AMLIS1 主機的測試信件，確認 relay.taishinbank.com.tw 發信正常。"
+
+$smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
+$smtp.Timeout = 10000  # 10 秒逾時
+
+try {
+    Write-Host "正在嘗試寄送測試信..." -ForegroundColor Cyan
+    $smtp.Send($mail)
+    Write-Host "? 測試信已成功寄出！請至 Outlook 檢查收件匣。" -ForegroundColor Green
+} catch {
+    Write-Host "? 寄信失敗：" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Yellow
+    if ($_.Exception.InnerException) {
+        Write-Host "詳細原因: $($_.Exception.InnerException.Message)" -ForegroundColor Gray
+    }
+} finally {
+    $mail.Dispose()
+    $smtp.Dispose()
+}
