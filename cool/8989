@@ -1,49 +1,35 @@
-要確認伺服器「到底能不能把信寄出去」，不需要等真的發生異常，可以按照以下三步進行驗證與排查：
-第一步：網路與通訊埠連線測試（最關鍵）
-企業內網通常有防火牆限制。先確認你的主機是否被允許連線到公司的 SMTP 伺服器：
-$smtpHost = "mail.company.com.tw"  # 換成貴司的 SMTP 主機名或 IP
-$smtpPort = 25                     # 內網通常是 25，某些環境走 587
+在企業內部或 Windows 伺服器上，要找出可以用的 SMTP Host（Mail Server），有以下幾種最快、最有效的方法：
+方法 1：查詢既有應用程式的設定檔（最準確）
+這台主機目前已經運行著各類系統服務（例如 Patriot Officer、其他監控軟體或 IIS），通常伺服器上早就已經有設定好的 SMTP IP 或主機名稱。
+1. 搜尋 .config 檔案中的郵件設定
+在 PowerShell 中執行以下指令，搜尋 C: 槽或特定專案目錄下是否有設定過 mailSettings 或 smtp：
+# 搜尋目前目錄或應用程式目錄下的 config 檔（可將路徑換成軟體安裝路徑，如 D:\ 或 C:\）
+Get-ChildItem -Path "C:\" -Filter "*.config" -Recurse -ErrorAction SilentlyContinue | 
+    Select-String -Pattern "mailSettings", "smtp", "network host" | 
+    Select-Object Path, Line -First 10
 
-# 測試 TCP 通訊埠是否通暢
-Test-NetConnection -ComputerName $smtpHost -Port $smtpPort
+ * 如果找到類似 <network host="10.x.x.x" port="25" /> 或 mail.taishinbank.com.tw，這就是該主機平常在用的發信 Host。
+方法 2：查詢內網 DNS 的 MX 紀錄（郵件交換伺服器）
+如果是加入網域（AD Domain）的企業主機，可以直接透過 DNS 查詢公司網域的 MX 紀錄。
+在 PowerShell 執行：
+# 自動帶入本機所屬網域（例如 taishinbank.com.tw）
+$domain = (Get-CimInstance Win32_ComputerSystem).Domain
 
- * 成功指標：輸出結果中看到 TcpTestSucceeded : True。
- * 失敗（False 或逾時）：代表被 Windows 防火牆、防毒軟體或網路防火牆擋住，需要請網管/維運團隊開通該主機到 Mail Server 的 Port 25。
-第二步：發送一封極簡測試信
-連線通了之後，直接跑這段獨立的最小測試腳本，寄一封信給自己的信箱：
-$smtpServer = "mail.company.com.tw"    # 換成貴司 SMTP
-$smtpPort   = 25
-$sender     = "alert-test@company.com.tw"
-$recipient  = "your_email@company.com.tw" # 換成你自己的收件信箱
+Write-Host "查詢網域: $domain" -ForegroundColor Cyan
+Resolve-DnsName -Name $domain -Type MX | Select-Object NameExchange, Preference
 
-$mail = New-Object System.Net.Mail.MailMessage($sender, $recipient, "【連線測試】PowerShell 發信測試", "這是一封測試信，確認 SMTP 連線與發信正常。")
-$smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
+ * 輸出範例：
+   若看到 NameExchange : mailrelay.taishinbank.com.tw 或 relay.taishinbank.com.tw，這個 NameExchange 的名稱就是你的 SMTP Host。
+方法 3：檢查本機是否安裝了「本機 SMTP 服務」（IIS SMTP Relay）
+許多銀行或企業的應用伺服器，自己本身或同網段反向代理機就是一個 Relay（指向 localhost 或 127.0.0.1），由本機的 Windows SMTP Service 代轉給真正的核心郵件伺服器。
+執行這行測試本機 25 Port 有沒有開：
+Test-NetConnection -ComputerName "127.0.0.1" -Port 25
 
-try {
-    $smtp.Send($mail)
-    Write-Host "✅ 郵件已成功送出！請至收件匣確認是否收到。" -ForegroundColor Green
-} catch {
-    Write-Host "❌ 發信失敗，錯誤訊息：" -ForegroundColor Red
-    Write-Host $_.Exception.Message -ForegroundColor Yellow
-    if ($_.Exception.InnerException) {
-        Write-Host "詳細原因: $($_.Exception.InnerException.Message)" -ForegroundColor Gray
-    }
-} finally {
-    $mail.Dispose()
-    $smtp.Dispose()
-}
-
-第三步：常見失敗錯誤代碼與排查
-如果執行拋出例外，通常是以下幾種原因：
- * 550 / 554 Relay Access Denied（拒絕轉發）：
-   * 原因：SMTP 伺服器不允許當前這台主機匿名寄信。
-   * 解法：需聯絡郵件系統管理員，將當前主機的 IP 加入 SMTP Relay 白名單（Relay Allowlist）。
- * Mailbox unavailable / Sender rejected：
-   * 原因：寄件者地址（$sender）的網域名稱（Domain）不符合郵件伺服器的規則，或偽造寄件者被阻擋。
-   * 解法：將 $sender 換成公司規範的系統發信帳號（例如同網域的專用帳號）。
- * Authentication required：
-   * 原因：該 SMTP 要求輸入帳號密碼才能發信。
-   * 解法：在 $smtp 物件加上身分驗證憑證：
-     $smtp.Credentials = New-Object System.Net.NetworkCredential("帳號", "密碼")
-
-只要第二步能順利在你的個人 Outlook/Webmail 收到測試信，就代表監控腳本上線後一定能成功將告警信送達。
+ * 若結果顯示 TcpTestSucceeded : True：
+   恭喜你，你的 $smtpHost 直接填 "127.0.0.1" 或 "localhost" 就能發信了。
+方法 4：直接詢問內網維運 / 網管團隊（企業標準流程）
+在金融或大企業環境中，寄發警報通常有規範的 內部專用 SMTP Relay（免驗證內部轉發機）。如果上面 3 個方法沒找到，直接開單或詢問系統維運/網管窗口最快：
+> 詢問範本：
+> 「您好，我們在主機 AMLIS1 上需要透過 PowerShell 排程腳本寄送系統異常告警信，想請問本機發內部告警信應該指向哪一台 內部 SMTP Relay 主機（IP/Host）？另外發件人（Sender）網域是否有特殊規範，或主機 IP 是否需要先加入 Relay 白名單？」
+> 
+通常維運人員會直接提供一組內部 IP（如 10.x.x.x）或內部網域名稱（如 smtp.inside...）。
