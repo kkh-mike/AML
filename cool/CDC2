@@ -1,20 +1,29 @@
 
 
+{
+  "Monitor": {
+    "MinutesBack": 10,
+    "LogName": "Application",
+    "ProviderName": "PATRIOT OFFICER SWIFT Database Service",
+    "EventId": 0,
+    "Level": 2,
+    "ErrorCodePattern": "*-2146232060*"
+  },
+  "Mail": {
+    "SmtpServer": "relay.taishinbank.com.tw",
+    "SmtpPort": 25,
+    "Sender": "AML_ALERT@taishinbank.com.tw",
+    "Recipients": [
+      "1141923@taishinbank.com.tw"
+    ],
+    "TimeoutMs": 10000
+  }
+}
 
-PS C:\Users\it1141923.TSBANK_NET.001\Desktop> C:\Users\it1141923.TSBANK_NET.001\Desktop\test.ps1
-正在檢查過去 10 分鐘內的事件記錄...
-Get-WinEvent : 參數錯誤。
-位於 C:\Users\it1141923.TSBANK_NET.001\Desktop\test.ps1:30 字元:11
-+ $events = Get-WinEvent -FilterHashtable $filter -ErrorAction Silently ...
-+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (:) [Get-WinEvent], EventLogException
-    + FullyQualifiedErrorId : System.Diagnostics.Eventing.Reader.EventLogException,Microsoft.PowerShell.Commands.GetWinEventCommand
- 
-過去 10 分鐘內無符合條件之錯誤事件。
 
-PS C:\Users\it1141923.TSBANK_NET.001\Desktop> 
+這是我的json
 
 
+那我
 
-
-那這個?
+偵測event log error 加上發信 我要怎麼寫
