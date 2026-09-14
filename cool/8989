@@ -1,82 +1,49 @@
-$logName = "Application"
-$sourceName = "PATRIOT OFFICER SWIFT Database Service"
-$eventId = 0
+要確認伺服器「到底能不能把信寄出去」，不需要等真的發生異常，可以按照以下三步進行驗證與排查：
+第一步：網路與通訊埠連線測試（最關鍵）
+企業內網通常有防火牆限制。先確認你的主機是否被允許連線到公司的 SMTP 伺服器：
+$smtpHost = "mail.company.com.tw"  # 換成貴司的 SMTP 主機名或 IP
+$smtpPort = 25                     # 內網通常是 25，某些環境走 587
 
-# 1. 檢查並註冊該 Source（需系統管理員身分執行一次）
-if (-not [System.Diagnostics.EventLog]::SourceExists($sourceName)) {
-    New-EventLog -LogName $logName -Source $sourceName
-    Write-Host "已建立事件來源: $sourceName" -ForegroundColor Cyan
-}
+# 測試 TCP 通訊埠是否通暢
+Test-NetConnection -ComputerName $smtpHost -Port $smtpPort
 
-# 2. 模擬真實的錯誤訊息內容
-$mockMessage = @"
-Exception Type : SqlException
-Source : .Net SqlClient Data Provider
-Date : $(Get-Date -Format "yyyy年MM月dd日")
-Time : $(Get-Date -Format "tt hh:mm:ss")
-Message : 執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。
+ * 成功指標：輸出結果中看到 TcpTestSucceeded : True。
+ * 失敗（False 或逾時）：代表被 Windows 防火牆、防毒軟體或網路防火牆擋住，需要請網管/維運團隊開通該主機到 Mail Server 的 Port 25。
+第二步：發送一封極簡測試信
+連線通了之後，直接跑這段獨立的最小測試腳本，寄一封信給自己的信箱：
+$smtpServer = "mail.company.com.tw"    # 換成貴司 SMTP
+$smtpPort   = 25
+$sender     = "alert-test@company.com.tw"
+$recipient  = "your_email@company.com.tw" # 換成你自己的收件信箱
 
-Custom message :
-Message Id :$(New-Guid) does not completed in SWIFT detection
+$mail = New-Object System.Net.Mail.MailMessage($sender, $recipient, "【連線測試】PowerShell 發信測試", "這是一封測試信，確認 SMTP 連線與發信正常。")
+$smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
 
-SQL Exception Detail :
-Error Code : -2146232060
-Server : amldb1
-Source : .Net SqlClient Data Provider
-"@
-
-# 3. 寫入 Event Log
-Write-EventLog -LogName $logName `
-               -Source $sourceName `
-               -EntryType Error `
-               -EventId $eventId `
-               -Message $mockMessage
-
-Write-Host "已成功模擬寫入 PATRIOT OFFICER 逾時錯誤！" -ForegroundColor Green
-
-
-
-
-
-
-# 設定監控區間（例如抓過去 10 分鐘內）
-$minutesBack = 10
-$startTime = (Get-Date).AddMinutes(-$minutesBack)
-
-$filter = @{
-    LogName      = 'Application'
-    ProviderName = 'PATRIOT OFFICER SWIFT Database Service'
-    Id           = 0
-    Level        = 2   # 2 = Error
-    StartTime    = $startTime
-}
-
-# 抓取事件
-$events = Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue
-
-# 過濾符合 SQL 逾時特徵的事件
-$targetErrors = $events | Where-Object { 
-    $_.Message -like "*SqlException*" -and $_.Message -like "*逾時*" 
-}
-
-if ($targetErrors) {
-    Write-Host "========================================" -ForegroundColor Red
-    Write-Host " [告警] 偵測到 PATRIOT OFFICER SWIFT 資料庫逾時錯誤！" -ForegroundColor Red
-    Write-Host " 筆數: $($targetErrors.Count)" -ForegroundColor Red
-    Write-Host "========================================" -ForegroundColor Red
-
-    foreach ($evt in $targetErrors) {
-        Write-Host "時間: $($evt.TimeCreated)" -ForegroundColor Yellow
-        Write-Host "主機: $($evt.MachineName)"
-        
-        # 擷取關鍵訊息（印出前 6 行避免洗畫面）
-        $lines = $evt.Message -split "`r`n|`n"
-        Write-Host "摘要: $($lines[0..4] -join ' | ')"
-        Write-Host "----------------------------------------"
+try {
+    $smtp.Send($mail)
+    Write-Host "✅ 郵件已成功送出！請至收件匣確認是否收到。" -ForegroundColor Green
+} catch {
+    Write-Host "❌ 發信失敗，錯誤訊息：" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Yellow
+    if ($_.Exception.InnerException) {
+        Write-Host "詳細原因: $($_.Exception.InnerException.Message)" -ForegroundColor Gray
     }
-
-    # 此處可加入後續處理：發送 Teams Webhook、Email 或呼叫監控 API
-} else {
-    Write-Host "過去 $minutesBack 分鐘內無符合的逾時錯誤事件。" -ForegroundColor Green
+} finally {
+    $mail.Dispose()
+    $smtp.Dispose()
 }
 
+第三步：常見失敗錯誤代碼與排查
+如果執行拋出例外，通常是以下幾種原因：
+ * 550 / 554 Relay Access Denied（拒絕轉發）：
+   * 原因：SMTP 伺服器不允許當前這台主機匿名寄信。
+   * 解法：需聯絡郵件系統管理員，將當前主機的 IP 加入 SMTP Relay 白名單（Relay Allowlist）。
+ * Mailbox unavailable / Sender rejected：
+   * 原因：寄件者地址（$sender）的網域名稱（Domain）不符合郵件伺服器的規則，或偽造寄件者被阻擋。
+   * 解法：將 $sender 換成公司規範的系統發信帳號（例如同網域的專用帳號）。
+ * Authentication required：
+   * 原因：該 SMTP 要求輸入帳號密碼才能發信。
+   * 解法：在 $smtp 物件加上身分驗證憑證：
+     $smtp.Credentials = New-Object System.Net.NetworkCredential("帳號", "密碼")
+
+只要第二步能順利在你的個人 Outlook/Webmail 收到測試信，就代表監控腳本上線後一定能成功將告警信送達。
