@@ -1,37 +1,30 @@
-# 1. 定義 Log 名稱與自訂來源
+這個錯誤的原因是 PowerShell 目前沒有使用「系統管理員身分（Run as Administrator）」執行。
+[System.Diagnostics.EventLog]::SourceExists 與 Write-EventLog 在檢查來源時，底層會遍歷 Windows 的各個事件記錄檔（包含需要高權限的 Security 和 State 記錄檔），一般使用者權限讀取不到便會拋出 SecurityException。
+解法 1：以系統管理員身分執行（最標準）
+ * 關閉目前的 PowerShell / VS Code 視窗。
+ * 在 Windows 開始功能表搜尋 PowerShell，按右鍵選擇 「以系統管理員身分執行」（Run as Administrator）。
+ * 重新執行 D:\TEST\test.ps1。
+驗證方式：執行後不再跳出紅字，並能順利顯示寫入成功的訊息。
+解法 2：改用系統內建既有的 Source（免系統管理員權限）
+如果是在公司環境受限於權限、無法取得 Administrator，直接使用 Windows 預先註冊好的來源即可繞過註冊與權限檢查，直接寫入 Application：
+# 1. 使用內建已註冊的來源 (例如: Application 或 Windows Error Reporting)
 $logName = "Application"
-$sourceName = "MyTestApp"
+$sourceName = "Application"  # 系統既有來源，不需呼叫 SourceExists 與 New-EventLog
 $eventId = 9999
 $errorMessage = "模擬系統異常：資料庫連線超時 (Simulated Error)"
 
-# 2. 若來源不存在則先註冊（需系統管理員權限）
-if (-not [System.Diagnostics.EventLog]::SourceExists($sourceName)) {
-    New-EventLog -LogName $logName -Source $sourceName
-    Write-Host "已建立事件來源: $sourceName" -ForegroundColor Cyan
-}
-
-# 3. 寫入 Error 等級事件
+# 2. 直接寫入 Error 等級事件
 Write-EventLog -LogName $logName `
                -Source $sourceName `
                -EntryType Error `
                -EventId $eventId `
                -Message $errorMessage
 
+Write-Host "已成功使用內建來源寫入錯誤事件！" -ForegroundColor Green
 
-PS D:\TEST> D:\TEST\test.ps1
-以 "1" 引數呼叫 "SourceExists" 時發生例外狀況: "找不到來源，但無法搜尋部分或全部的事件記錄檔。無法存取的記錄檔: Security, State。"
-位於 D:\TEST\test.ps1:8 字元:5
-+ if (-not [System.Diagnostics.EventLog]::SourceExists($sourceName)) {
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
-    + FullyQualifiedErrorId : SecurityException
- 
-Write-EventLog : 找不到來源，但無法搜尋部分或全部的事件記錄檔。無法存取的記錄檔: Security, State。
-位於 D:\TEST\test.ps1:14 字元:1
-+ Write-EventLog -LogName $logName `
-+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (:) [Write-EventLog], SecurityException
-    + FullyQualifiedErrorId : System.Security.SecurityException,Microsoft.PowerShell.Commands.WriteEventLogCommand
- 
+驗證方式：執行後直接成功，開啟事件檢視器確認 Application 記錄檔中是否出現該筆錯誤。
+解法 3：改用 Windows 內建工具 eventcreate.exe
+如果不透過 .NET API，Windows 內建的 eventcreate 指令在建立臨時 ID 時限制也較寬鬆：
+eventcreate /T ERROR /ID 999 /L APPLICATION /D "模擬系統異常：資料庫連線超時 (Simulated Error)"
 
-PS D:\TEST> 
+(註：eventcreate 的 ID 範圍限制為 1 ~ 1000。)
