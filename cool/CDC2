@@ -1,32 +1,46 @@
-顯示「作業逾時」，代表從這台主機（10.13.60.8）連往 10.13.113.110:25 在網路層封包就卡住了（可能跨網段防火牆沒開，或該測試機已關機/未起 SMTP 服務）。
 第一步：排查 10.13.113.110 網路與通訊埠
 先用 Test-NetConnection 檢查連線狀態：
 Test-NetConnection -ComputerName "10.13.113.110" -Port 25
 
- * 若 TcpTestSucceeded : False，代表 10.13.113.110 目前無法連通。
+PS C:\Users\1141923> D:\TEST\EAMIL.ps1
+警告: TCP connect to (10.13.113.110 : 25) failed
+警告: Ping to 10.13.113.110 failed with status: DestinationHostUnreachable
+
+
+ComputerName           : 10.13.113.110
+RemoteAddress          : 10.13.113.110
+RemotePort             : 25
+InterfaceAlias         : Ethernet0
+SourceAddress          : 10.13.60.30
+PingSucceeded          : False
+PingReplyDetails (RTT) : 0 ms
+TcpTestSucceeded       : False
+
+
+
 第二步：從現有設定檔找出「真正能連的環境設定」
-剛才在搜尋時，發現專案內有 App._prd_.config 以及 bin\Release 下的設定檔。既然 10.13.113.110 是測試環境且已無法連線，正式環境（PRD）使用的主機很可能就是別台。
-執行以下指令，直接檢查 _prd_.config 與 Release 目錄下的設定檔內容：
+
+
 Get-ChildItem -Path "D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT" -Recurse -Include "*_prd_*.config", "*Release*.config" | 
     ForEach-Object {
         Write-Host "=== 檔案: $($_.FullName) ===" -ForegroundColor Cyan
         Get-Content $_.FullName | Select-String -Pattern "Mail_Host", "smtp", "IP", "10."
     }
+PS C:\Users\1141923> D:\TEST\EAMIL.ps1
+=== 檔案: D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\bin\Debug\CIP_RM_TIMEOUT_REPORT_MAIL.exe._
+prd_.config ===
 
-第三步：回到最穩固的路徑——申請 10.1.2.8 轉發白名單
-回顧先前的連線測試：
-| 主機 | 網路連線 (Port 25) | 發信狀態 |
-|---|---|---|
-| 10.13.113.110 | ❌ 逾時 (連不上) | 連線逾時 |
-| relay.taishinbank.com.tw (10.1.2.8) | ✅ 通暢 (True) | 回傳 5.7.57 Client was not authenticated |
-10.1.2.8 是唯一網路通暢且全行統一的 Mail Relay。它跳出的 5.7.57 是因為郵件伺服器的安全性設定（只收已認證或白名單 IP 的信件）。
-在企業標準流程中，最快且最穩定的解決方法是向 Exchange / 郵件系統維運團隊開單申請白名單：
-> 申請說明範本：
->  * 申請事項：內部 SMTP Relay 匿名發信權限（加入白名單）
->  * 來源主機 IP：10.13.60.8 (主機名: AMLIS1)
->  * 目標 Relay 主機：relay.taishinbank.com.tw (10.1.2.8:25)
->  * 使用情境：AML 系統（Patriot Officer）異常錯誤監控排程發送內部告警信
->  * 寄件者：AML@tsbtmail.com 或 PatriotOfficer-Alert@taishinbank.com.tw
->  * 收件者：行內員工/維運團隊信箱（@taishinbank.com.tw）
-> 
-只要網管人員在 10.1.2.8 的 Receive Connector 白名單勾選或填入 10.13.60.8，最前面測試的那段腳本不用改任何帳密即可直接寄信成功。
+    <!--<add key="LDAP_SERVER_HOST" value="10.13.60.220" />-->
+    <membership defaultProvider="ClientAuthenticationMembershipProvider">
+        <add name="ClientAuthenticationMembershipProvider" type="System.Web.ClientServices.Providers
+.ClientFormsAuthenticationMembershipProvider, System.Web.Extensions, Version=4.0.0.0, Culture=neutra
+l, PublicKeyToken=31bf3856ad364e35" serviceUri="" />
+    </membership>
+=== 檔案: D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\App._prd_.config ===
+    <!--<add key="LDAP_SERVER_HOST" value="10.13.60.220" />-->
+    <membership defaultProvider="ClientAuthenticationMembershipProvider">
+        <add name="ClientAuthenticationMembershipProvider" type="System.Web.ClientServices.Providers
+.ClientFormsAuthenticationMembershipProvider, System.Web.Extensions, Version=4.0.0.0, Culture=neutra
+l, PublicKeyToken=31bf3856ad364e35" serviceUri="" />
+    </membership>
+
