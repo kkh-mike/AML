@@ -1,11 +1,3 @@
-從提供的真實 Event Log 內容可以萃取出幾個關鍵特徵：
- * LogName：Application
- * ProviderName (Source)：PATRIOT OFFICER SWIFT Database Service
- * Id (EventCode)：0
- * Level：2（Error）
- * 關鍵字特徵：訊息中包含 SqlException、逾時、amldb1 或 does not completed in SWIFT detection。
-1. 模擬腳本（simulate.ps1）
-為了模擬出完全一致的來源，需要先註冊 PATRIOT OFFICER SWIFT Database Service（需以系統管理員權限執行一次）。
 $logName = "Application"
 $sourceName = "PATRIOT OFFICER SWIFT Database Service"
 $eventId = 0
@@ -42,10 +34,11 @@ Write-EventLog -LogName $logName `
 
 Write-Host "已成功模擬寫入 PATRIOT OFFICER 逾時錯誤！" -ForegroundColor Green
 
-> 注意：如果測試機無法取得系統管理員權限註冊該 Source，可將 $sourceName 暫時改成 "Application"，只在訊息內放入相同的關鍵字進行過濾邏輯驗證。
-> 
-2. 監控 / 測試腳本（monitor.ps1）
-這類 .NET 傳統服務寫入的事件，Id 通常固定為 0。監控時除了比對 ProviderName 與 Level，建議加上關鍵字過濾（如 SqlException 或 逾時），避免誤判其他非資料庫類型的錯誤。
+
+
+
+
+
 # 設定監控區間（例如抓過去 10 分鐘內）
 $minutesBack = 10
 $startTime = (Get-Date).AddMinutes(-$minutesBack)
@@ -87,7 +80,3 @@ if ($targetErrors) {
     Write-Host "過去 $minutesBack 分鐘內無符合的逾時錯誤事件。" -ForegroundColor Green
 }
 
-測試驗證步驟
- * 打開系統管理員權限的 PowerShell 執行 simulate.ps1。
- * 執行 monitor.ps1，確認終端能精確抓到該筆資料並顯示紅色告警。
- * 監控端若要常駐（例如透過 Windows 工作排程器 Task Scheduler），建議設定每 5 或 10 分鐘執行一次，並將 $minutesBack 設為相同週期即可。
