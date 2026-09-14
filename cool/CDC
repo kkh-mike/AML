@@ -1,129 +1,110 @@
-賓果！所有的關鍵謎底全都在這段程式碼解開了：
-CipRmMail.From = new System.Net.Mail.MailAddress(EMAIL_FROM,"AML");
-//String Mail_Host = "10.1.2.8";
-String Mail_Host = "10.13.113.110"; //測試環境
-System.Net.Mail.SmtpClient amlSMTP = new System.Net.Mail.SmtpClient(Mail_Host);
-//amlSMTP.Credentials = new System.Net.NetworkCredential("account", "PW");
+這是一份不抓 Windows 事件檢視器、但會讀取 config.json 的純測試版本。它會直接塞入一筆模擬的逾時錯誤資料，組裝成正式告警的 HTML 表格並寄出，方便你先驗證排版外觀與發信流程。
+1. 設定檔：config.json
+與主程式放在同一個資料夾底下：
+{
+  "Monitor": {
+    "MinutesBack": 10,
+    "LogName": "Application",
+    "ProviderName": "PATRIOT OFFICER SWIFT Database Service",
+    "EventId": 0,
+    "Level": 2,
+    "ErrorCodePattern": "*-2146232060*"
+  },
+  "Mail": {
+    "SmtpServer": "relay.taishinbank.com.tw",
+    "SmtpPort": 25,
+    "Sender": "AML_ALERT@taishinbank.com.tw",
+    "Recipients": [
+      "1141923@taishinbank.com.tw"
+    ],
+    "TimeoutMs": 10000
+  }
+}
 
-原因解析
- * 為什麼剛才連 relay.taishinbank.com.tw (即 10.1.2.8) 會報 5.7.57 驗證失敗？
-   * 因為 10.1.2.8 是正式/跨網域中繼，未開通匿名轉發；原本的程式碼也把 10.1.2.8 註解掉了。
- * 真正的發信主機與規則：
-   * 測試環境發信主機 (SMTP Host)：10.13.113.110（專門免驗證的內部發信機）。
-   * 寄件者 (EMAIL_FROM)：依據剛才的 App.config，值為 AML@tsbtmail.com。
-   * 驗證方式：不需要帳號密碼（Credentials 整行被註解，走匿名轉發）。
-第一步：測試發信（確認成功）
-請在 PowerShell 執行以下這段腳本，測試使用 10.13.113.110 寄信給自己：
-$smtpServer = "10.13.113.110"               # 測試環境專用發信主機
-$smtpPort   = 25
-$sender     = "AML@tsbtmail.com"            # 專案指定寄件者
-$recipient  = "1141923@taishinbank.com.tw"  # 你的收件信箱
+2. 測試發信腳本：Test_SendMail.ps1
+# 1. 讀取同目錄下的 config.json
+$scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$configPath = Join-Path $scriptPath "config.json"
 
-$mail = New-Object System.Net.Mail.MailMessage($sender, $recipient)
-$mail.Subject = "【連線成功】AMLIS1 系統監控發信測試"
-$mail.Body = "透過 10.13.113.110 與 AML@tsbtmail.com 測試寄信成功！"
+if (-not (Test-Path $configPath)) {
+    Write-Error "找不到設定檔: $configPath"
+    exit 1
+}
 
-$smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
-$smtp.Timeout = 10000
+$config = Get-Content -Path $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+Write-Host "成功讀取設定檔: $configPath" -ForegroundColor Green
+
+# 2. 產生一筆「模擬」的逾時錯誤事件資料（不讀取事件檢視器）
+$mockErrorMsg = @"
+System.Data.SqlClient.SqlException (0x80131904): 執行逾時已過期。在作業完成之前已過了逾時等待期間，或者伺服器未回應。
+錯誤代碼: -2146232060
+   於 System.Data.SqlClient.SqlConnection.OnError(SqlException exception, Boolean breakConnection)
+   於 PATRIOT_OFFICER_SWIFT.DbWorker.ExecuteQuery()
+"@
+
+$mockErrors = @(
+    [PSCustomObject]@{
+        TimeCreated = (Get-Date).ToString("yyyy/MM/dd HH:mm:ss")
+        MachineName = $env:COMPUTERNAME
+        Id          = if ($config.Monitor.EventId) { $config.Monitor.EventId } else { "0" }
+        Message     = $mockErrorMsg
+    }
+)
+
+# 3. 組合 HTML 表格信件
+$tableRows = foreach ($evt in $mockErrors) {
+    $cleanMsg = [System.Web.HttpUtility]::HtmlEncode($evt.Message)
+    "<tr>
+        <td style='padding:8px; border:1px solid #ddd;'>$($evt.TimeCreated)</td>
+        <td style='padding:8px; border:1px solid #ddd;'>$($evt.MachineName)</td>
+        <td style='padding:8px; border:1px solid #ddd;'>$($evt.Id)</td>
+        <td style='padding:8px; border:1px solid #ddd;'><pre style='margin:0; font-family:Consolas, monospace;'>$cleanMsg</pre></td>
+    </tr>"
+}
+
+$htmlBody = @"
+<html>
+<body style='font-family:Microsoft JhengHei, Arial, sans-serif; font-size:14px;'>
+    <h3 style='color:#D9534F;'>【系統告警】$($config.Monitor.ProviderName) 異常通知 (排版測試)</h3>
+    <p>監控機制於 <b>$($env:COMPUTERNAME)</b> 偵測到資料庫錯誤事件，詳情如下：</p>
+    <table style='border-collapse:collapse; width:100%; font-size:13px;'>
+        <tr style='background-color:#f2f2f2;'>
+            <th style='padding:8px; border:1px solid #ddd; width:150px;'>發生時間</th>
+            <th style='padding:8px; border:1px solid #ddd; width:100px;'>主機名稱</th>
+            <th style='padding:8px; border:1px solid #ddd; width:60px;'>事件 ID</th>
+            <th style='padding:8px; border:1px solid #ddd;'>錯誤內容</th>
+        </tr>
+        $($tableRows -join "`n")
+    </table>
+    <p style='color:gray; font-size:12px; margin-top:20px;'>本信件為排程發信測試樣本，請勿直接回覆。</p>
+</body>
+</html>
+"@
+
+# 4. 建立郵件物件並送出
+$mail = New-Object System.Net.Mail.MailMessage
+$mail.From = New-Object System.Net.Mail.MailAddress($config.Mail.Sender, "AML_ALERT")
+
+foreach ($to in $config.Mail.Recipients) {
+    $mail.To.Add($to)
+}
+
+$mail.Subject = "【測試告警】$($env:COMPUTERNAME) - 偵測到 $($config.Monitor.ProviderName) 逾時異常 (模擬)"
+$mail.Body = $htmlBody
+$mail.IsBodyHtml = $true
+$mail.Priority = [System.Net.Mail.MailPriority]::High
+
+$smtp = New-Object System.Net.Mail.SmtpClient($config.Mail.SmtpServer, [int]$config.Mail.SmtpPort)
+$smtp.Timeout = [int]$config.Mail.TimeoutMs
 
 try {
-    Write-Host "正在透過 $smtpServer 寄送測試信..." -ForegroundColor Cyan
+    Write-Host "正在寄送測試告警信至: $($config.Mail.Recipients -join ', ')..." -ForegroundColor Cyan
     $smtp.Send($mail)
-    Write-Host "✅ 測試信已成功寄出！請至 Outlook 確認信件。" -ForegroundColor Green
+    Write-Host "測試信件已成功發送！請至 Outlook 檢查排版效果。" -ForegroundColor Green
 } catch {
-    Write-Host "❌ 寄信失敗: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "測試信件發送失敗: $($_.Exception.Message)" -ForegroundColor Red
 } finally {
     $mail.Dispose()
     $smtp.Dispose()
-}
-
-第二步：完整的正式「逾時錯誤監控 + 自動發信」腳本
-當第一步測試信成功後，這就是專門監控 PATRIOT OFFICER SWIFT Database Service 的 -2146232060 錯誤，並自動發信告警的完整腳本：
-# ================= 設定區 =================
-$minutesBack = 10                            # 每次檢查過去幾分鐘
-$smtpServer  = "10.13.113.110"               # 內部發信主機
-$smtpPort    = 25
-$sender      = "AML@tsbtmail.com"            # 寄件者
-$recipients  = @("1141923@taishinbank.com.tw") # 收件者清單（可填多人）
-# ==========================================
-
-$startTime = (Get-Date).AddMinutes(-$minutesBack)
-
-# 1. 查詢 Application Event Log
-$filter = @{
-    LogName      = 'Application'
-    ProviderName = 'PATRIOT OFFICER SWIFT Database Service'
-    Level        = 2   # 2 = Error
-    StartTime    = $startTime
-}
-
-$events = Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue
-
-# 2. 精確過濾 SQL Timeout 錯誤碼 (-2146232060)
-$targetErrors = $events | Where-Object { 
-    $_.Message -like "*-2146232060*" 
-}
-
-# 3. 偵測到異常時組裝 HTML 表格並寄信
-if ($targetErrors) {
-    Write-Host "⚠️ 偵測到 $($targetErrors.Count) 筆資料庫逾時錯誤，開始發信..." -ForegroundColor Red
-
-    $hostName = $env:COMPUTERNAME
-    $subject  = "[系統嚴重告警] $hostName - PATRIOT OFFICER SWIFT 資料庫逾時異常 ($($targetErrors.Count) 筆)"
-
-    $tableRows = ""
-    foreach ($evt in $targetErrors) {
-        # 抓取錯誤訊息前 5 行精簡顯示
-        $summary = ($evt.Message -split "`r`n|`n")[0..4] -join "<br/>"
-        $tableRows += @"
-        <tr>
-            <td style='border:1px solid #ccc; padding:8px;'>$($evt.TimeCreated.ToString("yyyy-MM-dd HH:mm:ss"))</td>
-            <td style='border:1px solid #ccc; padding:8px;'>$summary</td>
-        </tr>
-"@
-    }
-
-    $bodyHtml = @"
-    <html>
-    <body style='font-family: Arial, Microsoft JhengHei;'>
-        <h3 style='color: #d9534f;'>PATRIOT OFFICER SWIFT 資料庫逾時告警 (-2146232060)</h3>
-        <p><strong>主機名稱:</strong> $hostName</p>
-        <p><strong>偵測區間:</strong> 過去 $minutesBack 分鐘內</p>
-        <p><strong>異常筆數:</strong> $($targetErrors.Count) 筆</p>
-        
-        <table style='border-collapse:collapse; width:100%;'>
-            <tr style='background-color:#f2f2f2;'>
-                <th style='border:1px solid #ccc; padding:8px; text-align:left; width:180px;'>發生時間</th>
-                <th style='border:1px solid #ccc; padding:8px; text-align:left;'>錯誤摘要</th>
-            </tr>
-            $tableRows
-        </table>
-        <p style='color:#888; font-size:12px; margin-top:15px;'>此郵件由 $hostName 監控排程自動發送，請勿直接回覆。</p>
-    </body>
-    </html>
-"@
-
-    $mail = New-Object System.Net.Mail.MailMessage
-    $mail.From = New-Object System.Net.Mail.MailAddress($sender, "AML-Alert")
-    foreach ($r in $recipients) { $mail.To.Add($r) }
-    $mail.Subject = $subject
-    $mail.Body = $bodyHtml
-    $mail.IsBodyHtml = $true
-    $mail.Priority = [System.Net.Mail.MailPriority]::High
-
-    $smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
-    $smtp.Timeout = 10000
-
-    try {
-        $smtp.Send($mail)
-        Write-Host "✅ 告警郵件已成功寄出！" -ForegroundColor Green
-    } catch {
-        Write-Host "❌ 寄信失敗: $($_.Exception.Message)" -ForegroundColor Red
-    } finally {
-        $mail.Dispose()
-        $smtp.Dispose()
-    }
-} else {
-    Write-Host "過去 $minutesBack 分鐘內無符合的 -2146232060 錯誤。" -ForegroundColor Green
 }
 
