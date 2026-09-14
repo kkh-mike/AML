@@ -1,83 +1,48 @@
-已成功模擬寫入 PATRIOT OFFICER 逾時錯誤！
-
-PS C:\Users\1141923> D:\TEST\run_detail.ps1
-Select-String : 無法讀取檔案 C:\Program Files\Common Files\microsoft shared\Web Server Extensions\15\WebServices\Reporting\rsreportserver.config: 拒絕存取路徑 'C:\Program Files\Comm
-on Files\microsoft shared\Web Server Extensions\15\WebServices\Reporting\rsreportserver.config'。
-位於 D:\TEST\run_detail.ps1:2 字元:5
-+     Select-String -Pattern "mailSettings", "smtp", "network host" |
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidArgument: (:) [Select-String]，ArgumentException
-    + FullyQualifiedErrorId : ProcessingFile,Microsoft.PowerShell.Commands.SelectStringCommand
- 
-Select-String : 無法讀取檔案 C:\Program Files\Common Files\microsoft shared\Web Server Extensions\16\WebServices\Reporting\rsreportserver.config: 拒絕存取路徑 'C:\Program Files\Comm
-on Files\microsoft shared\Web Server Extensions\16\WebServices\Reporting\rsreportserver.config'。
-位於 D:\TEST\run_detail.ps1:2 字元:5
-+     Select-String -Pattern "mailSettings", "smtp", "network host" |
-+     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidArgument: (:) [Select-String]，ArgumentException
-    + FullyQualifiedErrorId : ProcessingFile,Microsoft.PowerShell.Commands.SelectStringCommand
- 
-
-Path                                                                                                      Line                                                           
-----                                                                                                      ----                                                           
-C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<!--the name or IP address of the computer to use for SMTP...
-C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<add key="SmtpNotificationService.SmtpServerIp" value=""/>   
-C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<!--port used for SMTP transactions. Default is 25-->        
-C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<add key="SmtpNotificationService.SmtpServerPort" value="2...
-C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<add key="SmtpNotificationService.EnableSsl" value="false"/> 
-C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<!--username to login smtp server. put empty if not valida...
-C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<add key="SmtpNotificationService.Username" value=""/>       
-C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<!--password to login smtp server. put empty if not valida...
-C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<add key="SmtpNotificationService.Password" value=""/>       
-C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<add key="SmtpNotificationService.Timeout" value="100"/>     
-
-
-
-PS C:\Users\1141923> 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-$domain = (Get-CimInstance Win32_ComputerSystem).Domain
-
-Write-Host "查詢網域: $domain" -ForegroundColor Cyan
-Resolve-DnsName -Name $domain -Type MX | Select-Object NameExchange, Preference
-
-
-PS C:\Users\1141923> D:\TEST\run_detail.ps1
-查詢網域: taishinbank.com.tw
-
-NameExchange             Preference
+根據你跑出來的結果，線索非常清楚：
+ * 本機沒有本機 Relay：127.0.0.1:25 測試為 TcpTestSucceeded : False，表示本機沒有裝 IIS SMTP。
+ * 網域 MX 紀錄已明確指引：
+   NameExchange             Preference
 ------------             ----------
 relay.taishinbank.com.tw          0
-                                   
 
+   這代表貴司全行郵件中繼站就是 relay.taishinbank.com.tw！
+第一步：驗證是否連得到該中繼主機 (Port 25)
+請先在 PowerShell 執行這行，測試這台伺服器到中繼站的網路通訊埠是否暢通：
+Test-NetConnection -ComputerName "relay.taishinbank.com.tw" -Port 25
 
+ * 若 TcpTestSucceeded : True：代表防火牆完全暢通，可以直接寄信。
+ * 若 TcpTestSucceeded : False：代表這台伺服器對外連到 relay.taishinbank.com.tw 的 Port 25 被網段防火牆擋住，需要請維運/網路團隊開通防火牆規則。
+第二步：寄送一封測試信給自己
+確認 TcpTestSucceeded : True 後，直接跑這段測試寄信（請將收件人換成你自己的員工信箱）：
+$smtpServer = "relay.taishinbank.com.tw"
+$smtpPort   = 25
 
+# 寄件者通常規範使用同網域的系統帳號格式
+$sender    = "PatriotOfficer-Alert@taishinbank.com.tw"
+$recipient = "1141923@taishinbank.com.tw"  # 換成你的收件信箱
 
-Test-NetConnection -ComputerName "127.0.0.1" -Port 25
+$mail = New-Object System.Net.Mail.MailMessage
+$mail.From = $sender
+$mail.To.Add($recipient)
+$mail.Subject = "【測試】AMLIS1 系統告警郵件連線測試"
+$mail.Body = "這是一封來自 AMLIS1 主機的測試信件，確認 relay.taishinbank.com.tw 寄送正常。"
 
-                                   
-PS C:\Users\1141923> D:\TEST\run_detail.ps1
-警告: TCP connect to (127.0.0.1 : 25) failed
+$smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
+$smtp.Timeout = 10000  # 10 秒逾時
 
+try {
+    Write-Host "正在嘗試透過 $smtpServer 寄送測試信..." -ForegroundColor Cyan
+    $smtp.Send($mail)
+    Write-Host "✅ 測試信已成功寄出！請檢查信箱收件匣或垃圾郵件。" -ForegroundColor Green
+} catch {
+    Write-Host "❌ 寄信失敗：" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Yellow
+    if ($_.Exception.InnerException) {
+        Write-Host "詳細原因: $($_.Exception.InnerException.Message)" -ForegroundColor Gray
+    }
+} finally {
+    $mail.Dispose()
+    $smtp.Dispose()
+}
 
-ComputerName           : 127.0.0.1
-RemoteAddress          : 127.0.0.1
-RemotePort             : 25
-InterfaceAlias         : Loopback Pseudo-Interface 1
-SourceAddress          : 127.0.0.1
-PingSucceeded          : True
-PingReplyDetails (RTT) : 0 ms
-TcpTestSucceeded       : False
+執行後如果終端顯示綠色的 「測試信已成功寄出」 且你在 Outlook 收到信，就可以直接把 $smtpServer = "relay.taishinbank.com.tw" 帶入正式的錯誤監控腳本中了。
