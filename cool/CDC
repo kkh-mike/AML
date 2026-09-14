@@ -1,17 +1,129 @@
-PS C:\Users\1141923> D:\1141923\2026\ONGOING\EVENTLOG\Test-MonitorWorkflow.ps1
-因為這個系統上已停用指令碼執行，所以無法載入 D:\1141923\2026\ONGOING\EVENTLOG\Test-MonitorWorkflow.ps
-1 檔案。如需詳細資訊，請參閱 about_Execution_Policies，網址為 https:/go.microsoft.com/fwlink/?Li
-nkID=135170。
-    + CategoryInfo          : SecurityError: (:) [], ParentContainsErrorRecord 
-   Exception
-    + FullyQualifiedErrorId : UnauthorizedAccess
+賓果！所有的關鍵謎底全都在這段程式碼解開了：
+CipRmMail.From = new System.Net.Mail.MailAddress(EMAIL_FROM,"AML");
+//String Mail_Host = "10.1.2.8";
+String Mail_Host = "10.13.113.110"; //測試環境
+System.Net.Mail.SmtpClient amlSMTP = new System.Net.Mail.SmtpClient(Mail_Host);
+//amlSMTP.Credentials = new System.Net.NetworkCredential("account", "PW");
 
-PS C:\Users\1141923> D:\1141923\2026\ONGOING\EVENTLOG\Test-MonitorWorkflow.ps1
-因為這個系統上已停用指令碼執行，所以無法載入 D:\1141923\2026\ONGOING\EVENTLOG\Test-MonitorWorkflow.ps
-1 檔案。如需詳細資訊，請參閱 about_Execution_Policies，網址為 https:/go.microsoft.com/fwlink/?Li
-nkID=135170。
-    + CategoryInfo          : SecurityError: (:) [], ParentContainsErrorRecord 
-   Exception
-    + FullyQualifiedErrorId : UnauthorizedAccess
+原因解析
+ * 為什麼剛才連 relay.taishinbank.com.tw (即 10.1.2.8) 會報 5.7.57 驗證失敗？
+   * 因為 10.1.2.8 是正式/跨網域中繼，未開通匿名轉發；原本的程式碼也把 10.1.2.8 註解掉了。
+ * 真正的發信主機與規則：
+   * 測試環境發信主機 (SMTP Host)：10.13.113.110（專門免驗證的內部發信機）。
+   * 寄件者 (EMAIL_FROM)：依據剛才的 App.config，值為 AML@tsbtmail.com。
+   * 驗證方式：不需要帳號密碼（Credentials 整行被註解，走匿名轉發）。
+第一步：測試發信（確認成功）
+請在 PowerShell 執行以下這段腳本，測試使用 10.13.113.110 寄信給自己：
+$smtpServer = "10.13.113.110"               # 測試環境專用發信主機
+$smtpPort   = 25
+$sender     = "AML@tsbtmail.com"            # 專案指定寄件者
+$recipient  = "1141923@taishinbank.com.tw"  # 你的收件信箱
 
-PS C:\Users\1141923> 
+$mail = New-Object System.Net.Mail.MailMessage($sender, $recipient)
+$mail.Subject = "【連線成功】AMLIS1 系統監控發信測試"
+$mail.Body = "透過 10.13.113.110 與 AML@tsbtmail.com 測試寄信成功！"
+
+$smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
+$smtp.Timeout = 10000
+
+try {
+    Write-Host "正在透過 $smtpServer 寄送測試信..." -ForegroundColor Cyan
+    $smtp.Send($mail)
+    Write-Host "✅ 測試信已成功寄出！請至 Outlook 確認信件。" -ForegroundColor Green
+} catch {
+    Write-Host "❌ 寄信失敗: $($_.Exception.Message)" -ForegroundColor Red
+} finally {
+    $mail.Dispose()
+    $smtp.Dispose()
+}
+
+第二步：完整的正式「逾時錯誤監控 + 自動發信」腳本
+當第一步測試信成功後，這就是專門監控 PATRIOT OFFICER SWIFT Database Service 的 -2146232060 錯誤，並自動發信告警的完整腳本：
+# ================= 設定區 =================
+$minutesBack = 10                            # 每次檢查過去幾分鐘
+$smtpServer  = "10.13.113.110"               # 內部發信主機
+$smtpPort    = 25
+$sender      = "AML@tsbtmail.com"            # 寄件者
+$recipients  = @("1141923@taishinbank.com.tw") # 收件者清單（可填多人）
+# ==========================================
+
+$startTime = (Get-Date).AddMinutes(-$minutesBack)
+
+# 1. 查詢 Application Event Log
+$filter = @{
+    LogName      = 'Application'
+    ProviderName = 'PATRIOT OFFICER SWIFT Database Service'
+    Level        = 2   # 2 = Error
+    StartTime    = $startTime
+}
+
+$events = Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue
+
+# 2. 精確過濾 SQL Timeout 錯誤碼 (-2146232060)
+$targetErrors = $events | Where-Object { 
+    $_.Message -like "*-2146232060*" 
+}
+
+# 3. 偵測到異常時組裝 HTML 表格並寄信
+if ($targetErrors) {
+    Write-Host "⚠️ 偵測到 $($targetErrors.Count) 筆資料庫逾時錯誤，開始發信..." -ForegroundColor Red
+
+    $hostName = $env:COMPUTERNAME
+    $subject  = "[系統嚴重告警] $hostName - PATRIOT OFFICER SWIFT 資料庫逾時異常 ($($targetErrors.Count) 筆)"
+
+    $tableRows = ""
+    foreach ($evt in $targetErrors) {
+        # 抓取錯誤訊息前 5 行精簡顯示
+        $summary = ($evt.Message -split "`r`n|`n")[0..4] -join "<br/>"
+        $tableRows += @"
+        <tr>
+            <td style='border:1px solid #ccc; padding:8px;'>$($evt.TimeCreated.ToString("yyyy-MM-dd HH:mm:ss"))</td>
+            <td style='border:1px solid #ccc; padding:8px;'>$summary</td>
+        </tr>
+"@
+    }
+
+    $bodyHtml = @"
+    <html>
+    <body style='font-family: Arial, Microsoft JhengHei;'>
+        <h3 style='color: #d9534f;'>PATRIOT OFFICER SWIFT 資料庫逾時告警 (-2146232060)</h3>
+        <p><strong>主機名稱:</strong> $hostName</p>
+        <p><strong>偵測區間:</strong> 過去 $minutesBack 分鐘內</p>
+        <p><strong>異常筆數:</strong> $($targetErrors.Count) 筆</p>
+        
+        <table style='border-collapse:collapse; width:100%;'>
+            <tr style='background-color:#f2f2f2;'>
+                <th style='border:1px solid #ccc; padding:8px; text-align:left; width:180px;'>發生時間</th>
+                <th style='border:1px solid #ccc; padding:8px; text-align:left;'>錯誤摘要</th>
+            </tr>
+            $tableRows
+        </table>
+        <p style='color:#888; font-size:12px; margin-top:15px;'>此郵件由 $hostName 監控排程自動發送，請勿直接回覆。</p>
+    </body>
+    </html>
+"@
+
+    $mail = New-Object System.Net.Mail.MailMessage
+    $mail.From = New-Object System.Net.Mail.MailAddress($sender, "AML-Alert")
+    foreach ($r in $recipients) { $mail.To.Add($r) }
+    $mail.Subject = $subject
+    $mail.Body = $bodyHtml
+    $mail.IsBodyHtml = $true
+    $mail.Priority = [System.Net.Mail.MailPriority]::High
+
+    $smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
+    $smtp.Timeout = 10000
+
+    try {
+        $smtp.Send($mail)
+        Write-Host "✅ 告警郵件已成功寄出！" -ForegroundColor Green
+    } catch {
+        Write-Host "❌ 寄信失敗: $($_.Exception.Message)" -ForegroundColor Red
+    } finally {
+        $mail.Dispose()
+        $smtp.Dispose()
+    }
+} else {
+    Write-Host "過去 $minutesBack 分鐘內無符合的 -2146232060 錯誤。" -ForegroundColor Green
+}
+
