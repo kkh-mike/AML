@@ -1,31 +1,14 @@
-$logName = "Application"
-$sourceName = "Application"  # 系統既有來源，不需呼叫 SourceExists 與 New-EventLog
-$eventId = 9999
-$errorMessage = "模擬系統異常：資料庫連線超時 (Simulated Error)"
-
-# 2. 直接寫入 Error 等級事件
-Write-EventLog -LogName $logName `
-               -Source $sourceName `
-               -EntryType Error `
-               -EventId $eventId `
-               -Message $errorMessage
-
-Write-Host "已成功使用內建來源寫入錯誤事件！" -ForegroundColor Green
-
-
-PS C:\Users\1141923> D:\TEST\run_detail.ps1
-已成功使用內建來源寫入錯誤事件！
-
-PS C:\Users\1141923> 
-
-
-但是
-
+造成「參數錯誤」且找不到事件的原因有兩個：
+ * ProviderName 與寫入時不一致：你寫入時改用了 $sourceName = "Application"，但偵測腳本裡依然在查 ProviderName = 'MyTestApp'。
+ * FilterHashtable 的查詢限制：在 Windows 事件日誌中，如果指定了 LogName = 'Application'，底層 Provider 若為傳統來源（如 Application），有時搭配特定鍵值會觸發 Windows API 的「參數錯誤 (The parameter is incorrect)」。
+解法 1：使用 Get-WinEvent（修正 ProviderName 與加入 Id）
+將 ProviderName 改為 'Application'，並加上 Id = 9999 精確比對：
 $filter = @{
-    LogName   = 'Application'
-    ProviderName = 'MyTestApp'
-    Level     = 2  # 2 代表 Error (1=Critical, 2=Error, 3=Warning, 4=Information)
-    StartTime = (Get-Date).AddMinutes(-5)
+    LogName      = 'Application'
+    ProviderName = 'Application'
+    Id           = 9999
+    Level        = 2  # Error
+    StartTime    = (Get-Date).AddMinutes(-5)
 }
 
 $events = Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue
@@ -33,21 +16,29 @@ $events = Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue
 if ($events) {
     foreach ($evt in $events) {
         Write-Host "[偵測到錯誤] ID: $($evt.Id) | 時間: $($evt.TimeCreated)" -ForegroundColor Red
-        Write-Host "內容: $($evt.Message)"
+        Write-Host "內容: $($evt.Message)`n"
     }
 } else {
     Write-Host "過去 5 分鐘內無符合的錯誤事件。" -ForegroundColor Green
 }
 
+驗證方式：執行後不再出現紅字「參數錯誤」，且會列出剛才寫入的 9999 錯誤內容。
+解法 2：改用傳統的 Get-EventLog（最相容、不報參數錯誤）
+Write-EventLog 寫入的是傳統 Windows Event Log 機制，搭配舊版指令 Get-EventLog 容錯率最高，完全不會有 API 參數解析錯誤：
+$events = Get-EventLog -LogName Application `
+                       -Source "Application" `
+                       -EntryType Error `
+                       -InstanceId 9999 `
+                       -After (Get-Date).AddMinutes(-5) `
+                       -ErrorAction SilentlyContinue
 
-PS D:\TEST> D:\TEST\test.ps1
-Get-WinEvent : 參數錯誤。
-位於 D:\TEST\test.ps1:8 字元:11
-+ $events = Get-WinEvent -FilterHashtable $filter -ErrorAction Silently ...
-+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: (:) [Get-WinEvent], EventLogException
-    + FullyQualifiedErrorId : System.Diagnostics.Eventing.Reader.EventLogException,Microsoft.PowerShell.Commands.GetWinEventCommand
- 
-過去 5 分鐘內無符合的錯誤事件。
+if ($events) {
+    foreach ($evt in $events) {
+        Write-Host "[偵測到錯誤] ID: $($evt.InstanceId) | 時間: $($evt.TimeGenerated)" -ForegroundColor Red
+        Write-Host "內容: $($evt.Message)`n"
+    }
+} else {
+    Write-Host "過去 5 分鐘內無符合的錯誤事件。" -ForegroundColor Green
+}
 
-PS D:\TEST> 
+驗證方式：執行後終端直接印出紅色的 [偵測到錯誤] ID: 9999 與自訂的錯誤內容。
