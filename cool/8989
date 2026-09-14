@@ -1,35 +1,83 @@
-在企業內部或 Windows 伺服器上，要找出可以用的 SMTP Host（Mail Server），有以下幾種最快、最有效的方法：
-方法 1：查詢既有應用程式的設定檔（最準確）
-這台主機目前已經運行著各類系統服務（例如 Patriot Officer、其他監控軟體或 IIS），通常伺服器上早就已經有設定好的 SMTP IP 或主機名稱。
-1. 搜尋 .config 檔案中的郵件設定
-在 PowerShell 中執行以下指令，搜尋 C: 槽或特定專案目錄下是否有設定過 mailSettings 或 smtp：
-# 搜尋目前目錄或應用程式目錄下的 config 檔（可將路徑換成軟體安裝路徑，如 D:\ 或 C:\）
-Get-ChildItem -Path "C:\" -Filter "*.config" -Recurse -ErrorAction SilentlyContinue | 
-    Select-String -Pattern "mailSettings", "smtp", "network host" | 
-    Select-Object Path, Line -First 10
+已成功模擬寫入 PATRIOT OFFICER 逾時錯誤！
 
- * 如果找到類似 <network host="10.x.x.x" port="25" /> 或 mail.taishinbank.com.tw，這就是該主機平常在用的發信 Host。
-方法 2：查詢內網 DNS 的 MX 紀錄（郵件交換伺服器）
-如果是加入網域（AD Domain）的企業主機，可以直接透過 DNS 查詢公司網域的 MX 紀錄。
-在 PowerShell 執行：
-# 自動帶入本機所屬網域（例如 taishinbank.com.tw）
+PS C:\Users\1141923> D:\TEST\run_detail.ps1
+Select-String : 無法讀取檔案 C:\Program Files\Common Files\microsoft shared\Web Server Extensions\15\WebServices\Reporting\rsreportserver.config: 拒絕存取路徑 'C:\Program Files\Comm
+on Files\microsoft shared\Web Server Extensions\15\WebServices\Reporting\rsreportserver.config'。
+位於 D:\TEST\run_detail.ps1:2 字元:5
++     Select-String -Pattern "mailSettings", "smtp", "network host" |
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidArgument: (:) [Select-String]，ArgumentException
+    + FullyQualifiedErrorId : ProcessingFile,Microsoft.PowerShell.Commands.SelectStringCommand
+ 
+Select-String : 無法讀取檔案 C:\Program Files\Common Files\microsoft shared\Web Server Extensions\16\WebServices\Reporting\rsreportserver.config: 拒絕存取路徑 'C:\Program Files\Comm
+on Files\microsoft shared\Web Server Extensions\16\WebServices\Reporting\rsreportserver.config'。
+位於 D:\TEST\run_detail.ps1:2 字元:5
++     Select-String -Pattern "mailSettings", "smtp", "network host" |
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidArgument: (:) [Select-String]，ArgumentException
+    + FullyQualifiedErrorId : ProcessingFile,Microsoft.PowerShell.Commands.SelectStringCommand
+ 
+
+Path                                                                                                      Line                                                           
+----                                                                                                      ----                                                           
+C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<!--the name or IP address of the computer to use for SMTP...
+C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<add key="SmtpNotificationService.SmtpServerIp" value=""/>   
+C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<!--port used for SMTP transactions. Default is 25-->        
+C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<add key="SmtpNotificationService.SmtpServerPort" value="2...
+C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<add key="SmtpNotificationService.EnableSsl" value="false"/> 
+C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<!--username to login smtp server. put empty if not valida...
+C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<add key="SmtpNotificationService.Username" value=""/>       
+C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<!--password to login smtp server. put empty if not valida...
+C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<add key="SmtpNotificationService.Password" value=""/>       
+C:\Program Files\GlobalVision Systems\PATRIOT OFFICER Email Sender\PatriotOfficer.POMailSender.exe.config 		<add key="SmtpNotificationService.Timeout" value="100"/>     
+
+
+
+PS C:\Users\1141923> 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 $domain = (Get-CimInstance Win32_ComputerSystem).Domain
 
 Write-Host "查詢網域: $domain" -ForegroundColor Cyan
 Resolve-DnsName -Name $domain -Type MX | Select-Object NameExchange, Preference
 
- * 輸出範例：
-   若看到 NameExchange : mailrelay.taishinbank.com.tw 或 relay.taishinbank.com.tw，這個 NameExchange 的名稱就是你的 SMTP Host。
-方法 3：檢查本機是否安裝了「本機 SMTP 服務」（IIS SMTP Relay）
-許多銀行或企業的應用伺服器，自己本身或同網段反向代理機就是一個 Relay（指向 localhost 或 127.0.0.1），由本機的 Windows SMTP Service 代轉給真正的核心郵件伺服器。
-執行這行測試本機 25 Port 有沒有開：
+
+PS C:\Users\1141923> D:\TEST\run_detail.ps1
+查詢網域: taishinbank.com.tw
+
+NameExchange             Preference
+------------             ----------
+relay.taishinbank.com.tw          0
+                                   
+
+
+
+
 Test-NetConnection -ComputerName "127.0.0.1" -Port 25
 
- * 若結果顯示 TcpTestSucceeded : True：
-   恭喜你，你的 $smtpHost 直接填 "127.0.0.1" 或 "localhost" 就能發信了。
-方法 4：直接詢問內網維運 / 網管團隊（企業標準流程）
-在金融或大企業環境中，寄發警報通常有規範的 內部專用 SMTP Relay（免驗證內部轉發機）。如果上面 3 個方法沒找到，直接開單或詢問系統維運/網管窗口最快：
-> 詢問範本：
-> 「您好，我們在主機 AMLIS1 上需要透過 PowerShell 排程腳本寄送系統異常告警信，想請問本機發內部告警信應該指向哪一台 內部 SMTP Relay 主機（IP/Host）？另外發件人（Sender）網域是否有特殊規範，或主機 IP 是否需要先加入 Relay 白名單？」
-> 
-通常維運人員會直接提供一組內部 IP（如 10.x.x.x）或內部網域名稱（如 smtp.inside...）。
+                                   
+PS C:\Users\1141923> D:\TEST\run_detail.ps1
+警告: TCP connect to (127.0.0.1 : 25) failed
+
+
+ComputerName           : 127.0.0.1
+RemoteAddress          : 127.0.0.1
+RemotePort             : 25
+InterfaceAlias         : Loopback Pseudo-Interface 1
+SourceAddress          : 127.0.0.1
+PingSucceeded          : True
+PingReplyDetails (RTT) : 0 ms
+TcpTestSucceeded       : False
