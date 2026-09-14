@@ -1,135 +1,30 @@
-Get-Content "D:\project\AML\src\NET_EMAIL\CIP_RM_TIMEOUT_REPORT\Program.cs" | 
-    Select-String -Pattern "SmtpClient", "Send", "Credentials", "Host", "Port", "MailAddress" -Context 3, 3
+到正式區驗證發信，絕對不能直接去觸發原有的批次程式（避免誤發真實逾期報表給主管）。最安全、規範的做法是直接用你的那支 PowerShell 測試腳本 進行單點驗證。
+請依序按照以下步驟在正式機執行：
+步驟 1：確認正式機與 Relay 主機的網路通訊 (Port 25)
+先開正式機的 PowerShell，確認正式機這台伺服器有沒有被防火牆擋住，能不能連上轉信伺服器：
+Test-NetConnection -ComputerName "relay.taishinbank.com.tw" -Port 25
 
-
-
-
-
-PS C:\Users\1141923> D:\TEST\EAMIL.ps1
-
-                  DB db = new DB();
-  
-  //                sql = @"
-> //select * from oaaml.aml_cip_rm_timeout_report where data_date='" + DataDate + @"' and TimeOut_da
-y > 0 ";
-                  //ShowMSG(LDAP.LDAPConn);
-                  //ShowMSG(DataDate);
->                string sql= @"select workgroup , case_type , count(*) as timeout_row from oaaml.aml
-_cip_rm_timeout_report where data_date='" + DataDate + @"'  
-  group by workgroup ,case_type order by workgroup ,case_type";
-  
-  
-                      {
-  
-                          System.Net.Mail.MailMessage CipRmMail = new System.Net.Mail.MailMessage();
->                         CipRmMail.From = new System.Net.Mail.MailAddress(EMAIL_FROM,"AML");
-                          foreach (DataRow rowEmail in dtEMail.Rows)
-                          {
-                              ShowMSG(rowEmail["EMAIL"].ToString());
-                          CipRmMail.Body = HtmlBody;
-                          CipRmMail.IsBodyHtml = true;
-                          CipRmMail.Priority = System.Net.Mail.MailPriority.High;
->                         //String Mail_Host = "10.1.2.8";
->                         String Mail_Host = "10.13.113.110"; //測試環境
->                         System.Net.Mail.SmtpClient amlSMTP = new System.Net.Mail.SmtpClient(Mail_H
-ost);
->                         //amlSMTP.Credentials = new System.Net.NetworkCredential("account", "PW");
-  
-                          try
-                          {
->                             amlSMTP.Send(CipRmMail);
-                              CipRmMail.Dispose();
-                          }
-                          catch (Exception ex)
-                          {
->                             insertMailSendError(DataDate, row["workgroup"].ToString(), row["CASE_T
-YPE"].ToString(), row["timeout_row"].ToString(), ex.ToString());
-                              
-                          }
-                      }
-                      else
-                      {
->                         insertMailSendError(DataDate, row["workgroup"].ToString(), row["CASE_TYPE"
-].ToString(), row["timeout_row"].ToString(), "此工作群組的第二關主管沒有設定email");
-                      }
-  
-                  }
-                  
-                  //=== end foreach dt.Rows ===
-                  Logger.Log("=== 回傳成功給autosys ===");
->                 SendError("執行成功", "S_000", 0);
-                  Logger.Log("=== 執行結束! ===");
-                  ShowMSG("批次一執行完畢!");
-                  System.Threading.Thread.Sleep(1000); //-> 暫停1秒以顯示訊息 
-              catch (Exception ex)
-              {
-                  Logger.Log("=== 回傳失敗給autosys ===");
->                 SendError("執行失敗", "F_999", 1);
-                  Logger.Error(ex.Message + Environment.NewLine + ex.StackTrace);
-                  ShowMSG("批次一 執行發生錯誤!", ex);
-                  System.Threading.Thread.Sleep(3000); //-> 暫停3秒以顯示訊息
-          {
-              DB db = new DB();
-  
->             DataTable dt = db.GetDataTable("select * from oaaml.AML_CIP_RM_TIMEOUT_REPORT  WHERE D
-ATA_DATE='" + DataDate + "' and WORKGROUP='" + WORKGROUP + "' and CASE_TYPE='" + CASE_TYPE + "'  ord
-er by WORKGROUP , CASE_TYPE ,  TIMEOUT_DAY desc , RISK_LEVEL");
-  
-              String ShowHtml = "";
-  
-              return ShowHtml;
-          }
-  
->         private static void insertMailSendError(string DATA_DATE, string WORKGROUP, string CASE_TY
-PE, string ROW_COUNT, string ERROR_MSG)
-          {
-              String sqlRecord = @" Insert into oaaml.AML_MAIL_ERROR ( DATA_DATE ,WORKGROUP ,CASE_TY
-PE ,ROW_COUNT ,ERROR_MSG ) values ('" + DATA_DATE + "','" + WORKGROUP + "','" + CASE_TYPE + "','" + 
-ROW_COUNT + "','" + ERROR_MSG + "') ";
-              
-          ///400~   : Fail 請call ap
-          ///</param>
-          /// <param name="ExitCode">0:表示成功 1:表示失敗</param>
->         private static void SendError(string Msg, string EventCode, int ExitCode)
-          {
-              //"C:\TND\DIN\cawto.exe TSBB_MDWOP_F_401:^ MDWOPC001^資料不存"
-              try
-              }
-              catch (Exception ex)
-              {
->                 Logger.Error("批次1-回傳autosys訊息時發生錯誤! - SendError(Msg:" + Msg + " |EventCode:" + Eve
-ntCode + " |ExitCode:" + ExitCode + ") ex:" + ex.ToString());
-                  //System.Environment.Exit(ExitCode);
-              }
-          }
-
-
-
-PS C:\Users\1141923> 
-'
-
-我知道這個幹嘛
-
-跟下面這個發信的好像沒關係啊
-# 寄件者通常規範使用同網域的系統帳號格式
+ * 驗證方式：看最後一行輸出。如果是 TcpTestSucceeded : True，代表防火牆與 DNS 正常放行；如果是 False，代表正式機的 IP 尚未開通到 Relay 主機 Port 25 的防火牆權限。
+步驟 2：修改測試腳本，限縮收件者為自己
+將你手邊的 EAMIL.ps1（或直接貼上以下內容），確認收件人只有你的工號信箱，避免信件誤發給主管或其他人：
 $smtpServer = "relay.taishinbank.com.tw"
 $smtpPort   = 25
-$sender     = "AML@taishinbank.com.tw"
-$recipient  = "1141923@taishinbank.com.tw"  # 請確認或換成你的實際收件信箱
+$sender     = "AML_PROD_TEST@taishinbank.com.tw"
+$recipient  = "1141923@taishinbank.com.tw"  # 請務必填你自己的真實員工信箱
 
 $mail = New-Object System.Net.Mail.MailMessage($sender, $recipient)
-$mail.Subject = "【測試】AMLIS1 系統告警郵件連線測試"
-$mail.Body = "這是一封來自 AMLIS1 主機的測試信件，確認 relay.taishinbank.com.tw 發信正常。"
+$mail.Subject = "【PROD測試】正式機發信功能連線測試"
+$mail.Body = "這是一封來自正式環境 AP 主機的連線測試信件，確認正式機對 Relay 寄信正常。"
 
 $smtp = New-Object System.Net.Mail.SmtpClient($smtpServer, $smtpPort)
-$smtp.Timeout = 10000  # 10 秒逾時
+$smtp.Timeout = 10000
 
 try {
-    Write-Host "正在嘗試寄送測試信..." -ForegroundColor Cyan
+    Write-Host "正在從正式機嘗試寄送測試信..." -ForegroundColor Cyan
     $smtp.Send($mail)
-    Write-Host "? 測試信已成功寄出！請至 Outlook 檢查收件匣。" -ForegroundColor Green
+    Write-Host "測試信已成功送出！請至 Outlook 檢查收件匣。" -ForegroundColor Green
 } catch {
-    Write-Host "? 寄信失敗：" -ForegroundColor Red
+    Write-Host "寄信失敗：" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Yellow
     if ($_.Exception.InnerException) {
         Write-Host "詳細原因: $($_.Exception.InnerException.Message)" -ForegroundColor Gray
@@ -138,3 +33,14 @@ try {
     $mail.Dispose()
     $smtp.Dispose()
 }
+
+ * 驗證方式：
+   * 終端機顯示 測試信已成功送出！。
+   * 打開你的 Outlook，確認有在收件匣（或垃圾郵件匣）收到這封測試信。
+正式區常見的阻擋情況（若測試失敗）：
+ * 5.7.1 Unable to relay / Client host rejected：
+   * 原因：公司的郵件轉信伺服器（Relay Server）通常有設 來源 IP 白名單。如果正式機的 IP 不在郵件伺服器的轉信授權名單中，Relay 就會拒絕代寄。
+   * 解法：需向負責郵件系統的網路/基礎架構團隊申請，將正式機的 IP 加進內部 SMTP Relay 放行白名單。
+ * 寄件者格式被擋（Sender Address Rejected）：
+   * 原因：部分安全機制不允許自訂隨意的寄件者（例如 $sender = "AML_PROD_TEST@..."）。
+   * 解法：將寄件者改回系統正式使用的格式（例如原本 C# 用的 EMAIL_FROM 常數，或是由系統專用帳號送出）。
