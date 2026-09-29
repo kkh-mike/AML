@@ -1,19 +1,15 @@
-已補上截圖中的 Ref. No，簡短回信草稿如下：
-柏龍 你好，
-經確認客戶 MY12000008 於 AML 資料庫中的狀態：
- * 有效性確認：下列 3 筆關聯人於後端資料庫 Status 皆已為 C (Close)，在 AML 系統中不算有效資料，不會參與例行黑名單比對與監控。
-   * Ref. No: 353413465 (LU SHIM-MIN)
-   * Ref. No: 368180861 (LIN, CHIA-HUNG)
-   * Ref. No: 740701015699 (ANG HON KEAT)
- * 畫面顯示原因：系統設計會保留歷史紀錄供調閱，故 UI 仍會列出該資料，但狀態已明確註記為 Close。
-謝謝
+Dear 貫軒,
+
+We would like to seek your clarifications regarding the attached excel report (we have removed the customer details).
+To help us understand how the data is mapped, could you please advise which fields in the AML system [Customer Profile] populate the data under Column J to N of the attached excel report?
+
+Also, is it possible to customize the logic that links these system fields to the generated report?
 
 
+Thank you.
+
+Best regards,
+Zu Er
 
 
-以下提供簡短、精準的重點回信草稿，直接複製即可使用：
-柏龍 你好，
-經確認客戶 MY12000008 於 AML 資料庫中的狀態：
- * 有效性確認：目前後端資料庫 Status 皆已為 C (Close)，在 AML 系統中不算有效資料，不參與例行黑名單比對與監控。
- * 畫面顯示原因：系統設計上會保留歷史異動紀錄供調閱，故畫面上仍看得到資料，但狀態已明確顯示為 Close。
-謝謝
+他要幹嘛
