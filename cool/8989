@@ -1,15 +1,35 @@
-Dear 貫軒,
-
-We would like to seek your clarifications regarding the attached excel report (we have removed the customer details).
-To help us understand how the data is mapped, could you please advise which fields in the AML system [Customer Profile] populate the data under Column J to N of the attached excel report?
-
-Also, is it possible to customize the logic that links these system fields to the generated report?
-
-
-Thank you.
-
-Best regards,
-Zu Er
-
-
-他要幹嘛
+將最新展開的 wf_D_AML_FF 內部子任務 與前面的 wf_D_AML 所有成功項目整合統計如下（已排除 Failed 與 Aborted）：
+一、 wf_D_AML 各成功任務（共 11 筆）
+| 項次 | 任務 / Session 名稱 | 開始時間 | 結束時間 | 執行時間 |
+|---|---|---|---|---|
+| 1 | s_m_D_CUST_MASTER_01 | 2026/9/29 10:01:38 | 2026/9/29 10:42:31 | 40 分 53 秒 |
+| 2 | s_m_D_CUST_MASTER_01_SFA | 2026/9/29 11:12:57 | 2026/9/29 11:15:57 | 03 分 00 秒 |
+| 3 | s_m_D_CUST_MASTER_01_BUSINESS_... | 2026/9/29 11:17:44 | 2026/9/29 11:40:00 | 22 分 16 秒 |
+| 4 | s_m_D_CUST_MASTER_01_DIGI_BANK | 2026/9/29 11:48:50 | 2026/9/29 12:05:37 | 16 分 47 秒 |
+| 5 | s_m_D_CUST_ADDR_UPDATE | 2026/9/29 14:03:59 | 2026/9/29 15:18:03 | 1 小時 14 分 04 秒 |
+| 6 | s_m_D_CUST_MASTER_NCR | 2026/9/29 15:35:37 | 2026/9/29 16:08:55 | 33 分 18 秒 |
+| 7 | s_m_D_AML_ACP_OCCUP_ADDR_UPD... | 2026/9/29 16:27:00 | 2026/9/29 16:40:24 | 13 分 24 秒 |
+| 8 | s_m_D_CUST_MASTER_01_FILTER | 2026/9/29 16:40:46 | 2026/9/29 16:51:37 | 10 分 51 秒 |
+| 9 | s_m_D_CUST_MASTER_03 | 2026/9/29 16:53:24 | 2026/9/29 17:10:38 | 17 分 14 秒 |
+| 10 | s_m_D_CIF_NET_UPDATE | 2026/9/29 17:33:19 | 2026/9/29 17:51:31 | 18 分 12 秒 |
+| 11 | s_m_D_CUST_MASTER_04 | 2026/9/30 08:06:07 | 2026/9/30 08:12:51 | 06 分 44 秒 |
+> wf_D_AML 總計：4 小時 16 分 43 秒（15,403 秒）
+> 
+二、 wf_D_AML_FF 展開明細（共 8 個步驟）
+開始時間：2026/9/30 11:02:23 ｜ 結束時間：2026/9/30 12:21:32
+| 步驟 | 任務 / Session 名稱 | 開始時間 | 結束時間 | 執行時間 |
+|---|---|---|---|---|
+| 1 | s_m_D_CUST_MASTER_FF | 2026/9/30 11:02:23 | 2026/9/30 11:06:38 | 04 分 15 秒 |
+| 2 | s_m_D_TD_MASTER_FF | 2026/9/30 11:06:39 | 2026/9/30 11:06:46 | 00 分 07 秒 |
+| 3 | s_m_D_CASA_MASTER_FF | 2026/9/30 11:06:47 | 2026/9/30 11:14:55 | 08 分 08 秒 |
+| 4 | s_m_D_CASH_MASTER_FF | 2026/9/30 11:14:57 | 2026/9/30 11:15:14 | 00 分 17 秒 |
+| 5 | s_m_D_LOAN_MASTER_FF | 2026/9/30 11:15:15 | 2026/9/30 11:15:20 | 00 分 05 秒 |
+| 6 | s_m_D_RP_MASTER_FF | 2026/9/30 11:15:21 | 2026/9/30 11:17:50 | 02 分 29 秒 |
+| 7 | s_m_D_BRANCH_FF | 2026/9/30 11:17:51 | 2026/9/30 11:17:56 | 00 分 05 秒 |
+| 8 | Command_PUT_CD | 2026/9/30 11:17:57 | 2026/9/30 12:21:32 | 1 小時 03 分 35 秒 |
+> wf_D_AML_FF 整體執行時間：1 小時 19 分 09 秒（4,749 秒）
+> 
+三、 全部總累計
+ * 兩大 Workflow 總執行時間：
+   * 4 小時 16 分 43 秒 (wf_D_AML) ＋ 1 小時 19 分 09 秒 (wf_D_AML_FF)
+   * 合計：5 小時 35 分 52 秒（共 20,152 秒）
