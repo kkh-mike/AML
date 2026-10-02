@@ -1,5 +1,80 @@
-$logPath = "C:\test_log.txt"
-$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-$user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+貫軒
+        試試看用底下將sdf內容匯出csv再攜出。
 
-"[$timestamp] Script executed successfully by: $user" | Out-File -FilePath $logPath -Append -Encoding UTF8
+
+Add-Type -Path "C:\Program Files\GlobalVision Systems\PATRIOT OFFICER CDC Master\System.Data.SqlServerCe.dll"
+
+$conn = New-Object System.Data.SqlServerCe.SqlCeConnection("Data Source=C:\Program Files\GlobalVision Systems\PATRIOT OFFICER CDC Master\DbCheckMasterDataContext.sdf;Password=POCDC")
+
+$conn.Open()
+
+# 取得所有 Table
+$cmd = $conn.CreateCommand()
+$cmd.CommandText = @"
+SELECT TABLE_NAME
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_TYPE='TABLE'
+"@
+
+$tables = @()
+
+$r = $cmd.ExecuteReader()
+
+while($r.Read())
+{
+    $tables += $r["TABLE_NAME"]
+}
+
+$r.Close()
+
+# 逐一匯出
+foreach($table in $tables)
+{
+    Write-Host "Exporting $table ..."
+
+    $cmd = $conn.CreateCommand()
+    $cmd.CommandText = "SELECT * FROM [$table]"
+
+    $da = New-Object System.Data.SqlServerCe.SqlCeDataAdapter($cmd)
+    $dt = New-Object System.Data.DataTable
+
+    $da.Fill($dt) | Out-Null
+
+    $file = "C:\Program Files\GlobalVision Systems\PATRIOT OFFICER CDC Master\$table.csv"
+
+    $dt | Export-Csv `
+        -Path $file `
+        -NoTypeInformation `
+        -Encoding UTF8
+}
+
+$conn.Close()
+
+Write-Host "Done"
+
+這段是給貫軒的 PowerShell，用來把 PATRIOT OFFICER 那顆 SQL Server Compact 資料庫（`.sdf`）整庫倒成 CSV，再把檔案帶走。
+
+它做的事依序是：
+
+1. 載入安裝目錄裡的 `System.Data.SqlServerCe.dll`，才能用 .NET 讀 `.sdf`（一般 Excel / SSMS 打不開這種檔）。
+2. 連到  
+   `C:\Program Files\GlobalVision Systems\PATRIOT OFFICER CDC Master\DbCheckMasterDataContext.sdf`  
+   密碼寫死是 `POCDC`。
+3. 查 `INFORMATION_SCHEMA.TABLES`，列出所有使用者資料表。
+4. 每張表 `SELECT *`，用 `SqlCeDataAdapter` 灌進 `DataTable`，再 `Export-Csv` 成同目錄下的 `表名.csv`（UTF-8、不含型別資訊）。
+5. 關連線，印 `Done`。
+
+所以「攜出」指的是：不用拷貝還可能被程式鎖住的 `.sdf`，改成一堆 CSV 就能複製、寄出、用 Excel 開。
+
+跑之前要注意：
+
+- 要在有裝 PATRIOT OFFICER CDC Master、且那個 `.sdf` 還在的機器上跑（通常要系統管理員，因為寫進 `Program Files`）。
+- 程式如果還開著、檔案被鎖，`Open()` 會失敗；先關程式再跑。
+- 有 binary / image 欄位時，CSV 會很難看或直接壞掉。
+- 大表會整張載進記憶體，表很大可能很慢或記憶體不夠。
+- 密碼寫在腳本裡，寄出去等於把連線密碼一起給對方。
+
+
+
+所以我現在要做什麼?
+
