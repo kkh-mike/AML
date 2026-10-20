@@ -1,1 +1,7 @@
-powershell -c "gci 'D:\apple\jojo' -dir | % { $_.Name + ': ' + [int]((gci $_.FullName -r -file | measure length -s).Sum / 1MB) + ' MB' }"
+KYC_CUST_NB.OCCUPATIONTYPE IS NOT NULL 
+AND KYC_CUST_NB.OCCUPATIONTYPE <> -1 
+AND EXISTS (
+    SELECT 1 
+    FROM ODCIF.BANCS_SK_CUST_INFO b 
+    WHERE b.TS_CUST_ID = KYC_CUST_NB.CUSTOMERID
+)
