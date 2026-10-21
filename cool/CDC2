@@ -1,64 +1,14 @@
-既然你目前是以一般使用者身分執行（非系統管理員），且前面遇到了無法註冊新來源的權限問題，最乾淨、不用 Admin 權限的做法是借用 Windows 原本就已經內建註冊好的事件來源。
-但因為你的監控腳本有檢查 ProviderName: "PATRIOT OFFICER SWIFT Database Service"，依據你的權限狀態，有以下兩種模擬方式：
-方法一：有管理者權限時（完全符合正式環境條件）
-如果能以系統管理員身分開啟一次 PowerShell，請先執行這行註冊指令（終生只需跑一次）：
-New-EventLog -LogName "Application" -Source "PATRIOT OFFICER SWIFT Database Service"
-
-註冊完成後，任何人（即使是一般權限）都可以執行這段模擬寫入腳本：
-$source = "PATRIOT OFFICER SWIFT Database Service"
-
-# 模擬你要監控的真實逾時錯誤
-$mockMsg = @"
-Exception Type : SqlException
-Source : .Net SqlClient Data Provider
-Date : $(Get-Date -Format "yyyy年MM月dd日")
-Time : $(Get-Date -Format "tt hh:mm:ss")
-Message : 執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。
-
-Custom message :
-Message Id :$(New-Guid) does not completed in SWIFT detection
-
-SQL Exception Detail :
-Error Code : -2146232060
-Server : amldb1
-Source : .Net SqlClient Data Provider
-"@
-
-# 寫入 Application Log
-Write-EventLog -LogName "Application" `
-               -Source $source `
-               -EntryType Error `
-               -EventId 0 `
-               -Message $mockMsg
-
-Write-Host "已成功模擬寫入 Event ID 0 錯誤事件！" -ForegroundColor Green
-
-> 驗證方式：執行後在 PowerShell 跑 Get-EventLog -LogName Application -Source "PATRIOT OFFICER SWIFT Database Service" -Newest 1，確認有印出該筆錯誤。
-> 
-方法二：完全沒有 Admin 權限時（免權限測試發信）
-若你在本機完全拿不到 Admin 權限，就無法註冊自訂 Source。此時可以借用系統內建一定存在的來源（例如 .NET Runtime 或 Windows Error Reporting）來做功能驗證：
- 1. 暫時調整 config.json 的 ProviderName
-   測試用
-   將 config.json 裡的 ProviderName 暫時改成現成來源：
-   "ProviderName": ".NET Runtime"
-
- 2. 執行無須權限的模擬寫入
-   直接執行
-   以一般使用者權限直接執行以下 PowerShell 指令：
-   $mockMsg = @"
-Exception Type : SqlException
-Error Code : -2146232060
-Message : 執行逾時到期。在作業完成之前超過逾時等待的時間，或是伺服器未回應。
-"@
-
-Write-EventLog -LogName "Application" `
-               -Source ".NET Runtime" `
-               -EntryType Error `
-               -EventId 0 `
-               -Message $mockMsg
-
-Write-Host "已成功以 .NET Runtime 來源寫入模擬錯誤！" -ForegroundColor Green
-
- 3. 執行監控腳本驗證發信
-   驗證
-   執行監控腳本，確認能成功抓取該事件並把 Email 寄到 1141923@taishinbank.com.tw。測試成功後，正式上線再將 config.json 改回 "PATRIOT OFFICER SWIFT Database Service" 即可。
+可以，OFAC Sanctions List Search（美國財政部海外資產控制辦公室制裁名單查詢系統） 是完全公開且免費的官方工具，不需要帳號或特殊權限就能自己上網查詢並擷取跟你照片中一模一樣的畫面。
+1. 官方查詢網址
+ * 直接進入查詢頁面： [https://sanctionssearch.ofac.treas.gov/](https://sanctionssearch.ofac.treas.gov/)
+ * Google 搜尋關鍵字： OFAC Sanctions List Search（認明 .gov 的美國政府官方網站）
+2. 如何查出照片中的測試畫面
+ * 打開上方網址進入 Sanctions List Search 頁面。
+ * 在 Name 欄位輸入你要測試的對象（例如照片中的 Alaxy），其他欄位保持預設即可。
+   * 小技巧：右邊有一個 Minimum Name Score（模糊比對分數，預設是 100 完全相符），如果要測試拼字相近或模糊比對，可以把拉桿往左調低（例如調到 85～90）。
+ * 點擊中間偏右的 Search 按鈕。
+ * 畫面下方會出現搜尋結果列表（Matching Results），點擊結果清單最左邊的 名稱超連結（例如 ALAXY），就會跳出你照片裡看到的 Details / Identifications / Aliases / Addresses 完整明細頁面。
+3. 進階需求：下載整份名單原始檔（供系統批次/ETL 測試）
+如果你是要看原始資料結構，或是測試後端系統匯入與名單檢核比對，可以直接點選畫面左上角的兩個連結下載完整清單（提供 XML、CSV、TXT 等格式）：
+ * Download the SDN List： 下載「特別指定國民和被封鎖人員」清單（照片中的 ALAXY 就是屬於 SDN 清單）。
+ * Download the Consolidated Non-SDN List： 下載其他非 SDN 的整合制裁名單。
