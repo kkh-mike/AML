@@ -1,31 +1,7 @@
-SELECT 'TYP_02_PARTTIME', COUNT(*)
-FROM [TAS9-T].[TSAAS].[dbo].[TBL_CMPEMPAPP] T 
-JOIN [TAS9-T].[TSAAS].[dbo].[HREMPM_N]      H ON T.EMPCODE = H.EMP_ID 
--- 改為四段式命名呼叫 Linked Server：
-JOIN [MSSQL2022DB05-T].[BatchJobDB].[dbo].[AML_EMP_DEPT_MAP] M 
-  ON T.EMPCODE = M.EMPCODE AND M.TYP = '02'
-WHERE T.EMPCODE = '1128072' 
-  AND H.COMP_CD = 'TSIB' 
-  AND T.APPCODE = 'AML';
+BankNo Path RawUrl Forms HttpMethod ExceptionType DateTime ExceptionMessage StackTrace Application LogType InternalMessage
+ /PatriotOfficer/CIP/CIPReviewQuestionnaire.aspx/GetAssignList /PatriotOfficer/CIP/CIPReviewQuestionnaire.aspx/GetAssignList  POST       NullReferenceException 2026-10-21 15:51:15.9666667 Object reference not set to an instance of an object.    at PatriotOfficer.Services.POCIPService.GetCIPAssignSupervisor(String& Role, String& Type, String QueueID, String UserCIPRole) PATRIOT OFFICER Error 
+ /PatriotOfficer/CIP/CIPReviewQuestionnaire.aspx/GetAssignList /PatriotOfficer/CIP/CIPReviewQuestionnaire.aspx/GetAssignList  POST       NullReferenceException 2026-10-21 15:51:15.4200000 Object reference not set to an instance of an object.    at PatriotOfficer.Services.POCIPService.GetCIPAssignSupervisor(String& Role, String& Type, String QueueID, String UserCIPRole) PATRIOT OFFICER Error 
+ /PatriotOfficer/CIP/CIPReviewQuestionnaire.aspx/GetAssignList /PatriotOfficer/CIP/CIPReviewQuestionnaire.aspx/GetAssignList  POST       NullReferenceException 2026-10-21 15:51:14.0133333 Object reference not set to an instance of an object.    at PatriotOfficer.Services.POCIPService.GetCIPAssignSupervisor(String& Role, String& Type, String QueueID, String UserCIPRole) PATRIOT OFFICER Error 
+ /PatriotOfficer/CIP/CIPReviewQuestionnaire.aspx/GetAssignList /PatriotOfficer/CIP/CIPReviewQuestionnaire.aspx/GetAssignList  POST       HttpException 2026-10-21 15:51:13.7466667 Cannot redirect after HTTP headers have been sent.    at System.Web.HttpResponse.Redirect(String url, Boolean endResponse, Boolean permanent)     at System.Web.Security.FormsAuthenticationModule.OnLeave(Object source, EventArgs eventArgs)     at System.Web.HttpApplication.SyncEventExecutionStep.System.Web.HttpApplication.IExecutionStep.Execute()     at System.Web.HttpApplication.ExecuteStepImpl(IExecutionStep step)     at System.Web.HttpApplication.ExecuteStep(IExecutionStep step, Boolean& completedSynchronously) PATRIOT OFFICER Error Custom message : application error
 
-
-
-USE [BatchJobDB];
-GO
-
--- 1. 查該員編在特殊對應表是否有資料、TYP 是什麼
-SELECT * 
-FROM [dbo].[AML_EMP_DEPT_MAP] 
-WHERE EMPCODE = '1128072';
-
--- 2. 若 TYP 是 '01'，查對應的群組展開有幾筆分行代號
-SELECT N.GRP, N.ACCT_DEPT_CD
-FROM [dbo].[AML_EMP_DEPT_MAP] M
-JOIN [dbo].[AML_RIGHTS_GROUP] N ON M.ACCT_DEPT_CD = N.GRP
-WHERE M.EMPCODE = '1128072' AND M.TYP = '01';
-
--- 3. 查該員在主系統 (TAS9-T) 有幾個 AML 權限代碼
-SELECT EMPCODE, APPCODE, PERMCODE 
-FROM [TAS9-T].[TSAAS].[dbo].[TBL_CMPEMPAPP]
-WHERE EMPCODE = '1128072' AND APPCODE = 'AML';
-
+有三個表格 能幫我整理一下?  因為我要轉給廠商看
