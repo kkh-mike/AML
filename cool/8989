@@ -1,7 +1,8 @@
-KYC_CUST_NB.OCCUPATIONTYPE IS NOT NULL 
-AND KYC_CUST_NB.OCCUPATIONTYPE <> -1 
-AND EXISTS (
-    SELECT 1 
-    FROM ODCIF.BANCS_SK_CUST_INFO b 
-    WHERE b.TS_CUST_ID = KYC_CUST_NB.CUSTOMERID
-)
+不好意思剛剛突然切換成日文了！
+下方的 Advanced（進階設定） 區塊完全不需要調整，維持目前的預設值即可。
+各個欄位維持現狀的原因如下：
+ * Time zone (Select / 未選取)：留空不選時，系統會直接使用 Control-M Server 預設的台灣本地時間，因此不用特別指定。
+ * Activity Period (Always)：這是設定這支 Job 的有效期間。除非這個排程只跑特定幾個月就要停用，否則常駐排程維持 Always 即可。
+ * Active Environment Retention (Keep active For 0 days)：這是決定 Job 在執行區（Active Environment / Monitoring）保留幾天。因為你是每 30 分鐘跑一次的 Cyclic Job，務必維持 0 days。這樣每天換日（New Day）時，系統才會自動把前一天跑完的舊 Job 清掉，不會跟今天新長出來的排程混在一起。
+ * Retroactive order (關閉)：這是「事後補跑」機制（例如系統當機重開後，自動補派當機期間沒跑到的單）。因為這支 Job 每 30 分鐘就會執行一次，不需要事後重複補派，維持關閉（灰色）是最安全的做法。
+直接維持這個畫面儲存（Check-in）就全部設定完成了！
