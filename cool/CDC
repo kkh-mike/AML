@@ -1,1 +1,25 @@
 DEBUG_PARAMS -> Table:[BANCS_SK_CUST_INFO], Src:[SK_CUST_ID], Tgt:[TS_CUST_ID], Flg:[CUST_RE_NO_FLG]
+
+
+
+
+
+        SET NOCOUNT ON;
+
+        -- ==========================================
+        -- 【新增修復】1. 將空字串轉回 NULL，防止 QUOTENAME('') 產生語法破洞
+        -- ==========================================
+        SET @CIFMappingTable        = NULLIF(LTRIM(RTRIM(@CIFMappingTable)), '');
+        SET @CIFMappingSourceColumn = NULLIF(LTRIM(RTRIM(@CIFMappingSourceColumn)), '');
+        SET @CIFMappingTargetColumn = NULLIF(LTRIM(RTRIM(@CIFMappingTargetColumn)), '');
+        SET @CIFMappingFlagColumn   = NULLIF(LTRIM(RTRIM(@CIFMappingFlagColumn)), '');
+
+        -- ==========================================
+        -- 【新增修復】2. 若有傳 Mapping 表但漏傳欄位名稱，自動補齊預設欄位 (依 SP 第 209 行 BANCS_SK_CUST_INFO 結構)
+        -- ==========================================
+        IF @CIFMappingTable IS NOT NULL
+        BEGIN
+            SET @CIFMappingSourceColumn = ISNULL(@CIFMappingSourceColumn, 'SK_CUST_ID');
+            SET @CIFMappingTargetColumn = ISNULL(@CIFMappingTargetColumn, 'TS_CUST_ID');
+            SET @CIFMappingFlagColumn   = ISNULL(@CIFMappingFlagColumn,   'CUST_RE_NO_FLG');
+        END
