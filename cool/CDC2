@@ -1,14 +1,37 @@
-可以，OFAC Sanctions List Search（美國財政部海外資產控制辦公室制裁名單查詢系統） 是完全公開且免費的官方工具，不需要帳號或特殊權限就能自己上網查詢並擷取跟你照片中一模一樣的畫面。
-1. 官方查詢網址
- * 直接進入查詢頁面： [https://sanctionssearch.ofac.treas.gov/](https://sanctionssearch.ofac.treas.gov/)
- * Google 搜尋關鍵字： OFAC Sanctions List Search（認明 .gov 的美國政府官方網站）
-2. 如何查出照片中的測試畫面
- * 打開上方網址進入 Sanctions List Search 頁面。
- * 在 Name 欄位輸入你要測試的對象（例如照片中的 Alaxy），其他欄位保持預設即可。
-   * 小技巧：右邊有一個 Minimum Name Score（模糊比對分數，預設是 100 完全相符），如果要測試拼字相近或模糊比對，可以把拉桿往左調低（例如調到 85～90）。
- * 點擊中間偏右的 Search 按鈕。
- * 畫面下方會出現搜尋結果列表（Matching Results），點擊結果清單最左邊的 名稱超連結（例如 ALAXY），就會跳出你照片裡看到的 Details / Identifications / Aliases / Addresses 完整明細頁面。
-3. 進階需求：下載整份名單原始檔（供系統批次/ETL 測試）
-如果你是要看原始資料結構，或是測試後端系統匯入與名單檢核比對，可以直接點選畫面左上角的兩個連結下載完整清單（提供 XML、CSV、TXT 等格式）：
- * Download the SDN List： 下載「特別指定國民和被封鎖人員」清單（照片中的 ALAXY 就是屬於 SDN 清單）。
- * Download the Consolidated Non-SDN List： 下載其他非 SDN 的整合制裁名單。
+最簡單的反向驗證，就是直接從目標表 OFAC_SPEC 反查回 DJ_Entity，看 GROUPID = 5 有沒有混入死人、GROUPID = 6 有沒有混入活人。
+下面提供兩個極簡寫法，直接貼到 SSMS 執行並截圖即可：
+方法一：抓異常筆數（結果為 0 就代表驗證通過，最簡短！）
+這段直接找「放錯群組」的人，跑出來是 0 筆（或 Count = 0） 就證明百分之百沒放錯：
+-- 反向驗證：檢查 OFAC_SPEC 是否有放錯群組的異常資料 (結果應為 0)
+SELECT 
+    COUNT(*) AS [放錯群組的異常筆數]
+FROM BSADBJP..OFAC_SPEC T WITH (NOLOCK)
+JOIN BSADB.dbo.DJ_Entity E WITH (NOLOCK) ON T.remark = CAST(E.EntityId AS VARCHAR(100))
+WHERE T.DInd = 'N'
+  AND (
+      (T.GROUPID = 5 AND E.Deceased = 1)             -- Group 5 (活人區) 卻出現死人
+   OR (T.GROUPID = 6 AND ISNULL(E.Deceased, 0) = 0)  -- Group 6 (死人區) 卻出現活人
+  );
+
+方法二：同時看「數量」與「死活狀態」（10 行搞定，最適合放報告）
+如果你希望一張小表同時看到 Group 5 與 Group 6 的總數，又同時證明 5 全是活人、6 全是死人，用這段 GROUP BY 最直覺：
+-- 從 OFAC_SPEC 反向串回 DJ_Entity 檢查各群組的死活狀態與數量
+SELECT 
+    T.GROUPID                                      AS [群組(GROUPID)],
+    T.SOURCE                                       AS [名單來源],
+    CASE WHEN E.Deceased = 1 THEN '死人(1)' 
+         ELSE '活人(0)' END                         AS [DJ真實死活狀態],
+    COUNT(*)                                       AS [筆數]
+FROM BSADBJP..OFAC_SPEC T WITH (NOLOCK)
+JOIN BSADB.dbo.DJ_Entity E WITH (NOLOCK) ON T.remark = CAST(E.EntityId AS VARCHAR(100))
+WHERE T.GROUPID IN (5, 6)
+  AND T.DInd = 'N'
+GROUP BY T.GROUPID, T.SOURCE, CASE WHEN E.Deceased = 1 THEN '死人(1)' ELSE '活人(0)' END
+ORDER BY T.GROUPID;
+
+跑出來的畫面只會有乾淨的兩列：
+| 群組(GROUPID) | 名單來源 | DJ真實死活狀態 | 筆數 |
+|---|---|---|---|
+| 5 | MOF Sanction List | 活人(0) | (例如 1200) |
+| 6 | MOF Sanction List (Decease) | 死人(1) | (例如 45) |
+(因為 GROUP BY 了死活狀態，如果 GROUPID = 5 有混入死人，就會多跑出一列 5 | 死人(1)；只要畫面只有這兩列，就同時證明了數量跟沒有混入錯誤狀態！)
