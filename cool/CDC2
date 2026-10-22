@@ -1,126 +1,77 @@
-USE [MESSAGEDATABASE]
-GO
-/****** Object:  StoredProcedure [dbo].[SWIFT_InsertRawMessage]    Script Date: 2026/10/22 上午 11:29:25 ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
+根據這支 Stored Procedure ([dbo].[SWIFT_InsertRawMessage]) 的邏輯，如果執行後 dbo.[SWIFT_MTRAW] 裡面沒有新增資料，主要有 4 個攔截點（或例外錯誤） 會導致 Insert 不執行或失敗。
+你可以直接在 SSMS 執行以下查詢與測試腳本來快速定位原因：
+1. 檢查是否因為「ClientReferenceNo 重複」而被跳過（最常見）
+SP 內有一段防呆：如果 SWIFT_MTRAW 已經存在相同的 @ClientReferenceNo，且狀態 (Progress) 不是 'CANCELED'，它會直接不做事並正常結束（不會報錯，但 @ID 會回傳 NULL）。
+請執行以下 SQL 檢查你剛剛打的 Reference No 是否已經存在：
+SELECT ID, BankNo, ClientReferenceNo, Progress, CreatedDate
+FROM [dbo].[SWIFT_MTRAW] WITH (NOLOCK)
+WHERE ClientReferenceNo = '你傳入的_ClientReferenceNo';
 
-ALTER PROCEDURE [dbo].[SWIFT_InsertRawMessage]
-	@BankNo NVARCHAR(10),
-	@BranchNo NVARCHAR(30),
-	@Message NVARCHAR(MAX),
-	@ClientReferenceNo NVARCHAR(40),
-	@ClientMessageTypeCode NVARCHAR(30),
-	@SourceID NVARCHAR(30),
-	@Channel NVARCHAR(30),
-	@ID UNIQUEIDENTIFIER OUTPUT,
-	@CreatedDate DATETIME2(7) OUTPUT,
-	@CreatedDateUTC DATETIME2(7) OUTPUT,
-	@POBankNo NVARCHAR(10) OUTPUT,
-	@IsMaintenance BIT OUTPUT
-AS
-BEGIN
-	SET NOCOUNT ON;
-	SET @ID = NULL;
-	/*Bank local time*/
-	SET @CreatedDate = NULL;
-	SET @CreatedDateUTC = NULL;
-	SET @POBankNo = NULL;
-	SET @IsMaintenance = 'FALSE';
-	
-	DECLARE @STARTTIME TIME = NULL;
-	DECLARE @ENDTIME TIME = NULL;
-	DECLARE @CURRENTTIME TIME = GETDATE();
-	DECLARE @TimeZoneId NVARCHAR(50) = NULL;
-	DECLARE @HourOffset int = 0;
-	DECLARE @MinuteOffset int = 0;
-	DECLARE @SecondOffset int = 0;
-	
-	SELECT @POBankNo = POBankNo, @STARTTIME = MaintenanceStartTime, 
-	@ENDTIME = MaintenanceEndTime, @TimeZoneId = TimeZoneName
-	FROM dbo.BankNoMappings WITH(NOLOCK)
-	WHERE ClientBankNo = @BankNo
-	
-	--workaround for start time and end time cross day
-	SET @HourOffset = DATEPART(hour, @STARTTIME);
-	SET @MinuteOffset = DATEPART(minute, @STARTTIME);
-	SET @SecondOffset = DATEPART(second, @STARTTIME);
-	SET @STARTTIME = DATEADD(second, -@Secondoffset, (DATEADD(minute, -@Minuteoffset, (DATEADD(hour, -@Houroffset, @STARTTIME)))));
-	SET @ENDTIME = DATEADD(second, -@Secondoffset, (DATEADD(minute, -@Minuteoffset, (DATEADD(hour, -@Houroffset, @ENDTIME)))));
-	SET @CURRENTTIME = DATEADD(second, -@Secondoffset, (DATEADD(minute, -@Minuteoffset, (DATEADD(hour, -@Houroffset, @CURRENTTIME)))));
-	
-	/*
-		Check for maintenance period. Proceed if now 
-		is not under maintenance perioud
-	*/
-	IF @STARTTIME IS NOT NULL AND 
-		@ENDTIME IS NOT NULL AND
-		@CURRENTTIME BETWEEN @STARTTIME AND @ENDTIME
-	BEGIN
-		SET @IsMaintenance = 'TRUE';
-	END
-	
-	IF @IsMaintenance = 'FALSE'
-	BEGIN
-	
-		/*
-			Temporary table to store the inserted ID and created date
-		*/
-		DECLARE @TEMP TABLE ( 
-			ID UNIQUEIDENTIFIER, 
-			CreatedDate DATETIME2(7) 
-		);
-		
-		/*
-			@POBankNo should not be null. Exception will occur if the 
-			@POBankNo is null. This will happened when XB is sending a message
-			with unknown bank no in BankNoMappings table.
-		*/
-		
-		DECLARE @NOW DATETIME = GETUTCDATE();
-		DECLARE @BankLocalTime DATETIME = NULL;
-		
-		/*
-			@TimeZoneId IS NULL when @BankNo does not found in dbo.BankNoMappings table
-		*/
-		IF @TimeZoneId IS NOT NULL
-			SELECT @BankLocalTime = dbo.ConvertTimeFromUtc(@NOW, @TimeZoneId)
-		
-		IF NOT EXISTS(SELECT NULL FROM [dbo].[SWIFT_MTRAW]
-		WHERE [ClientReferenceNo] = @ClientReferenceNo AND [Progress] <> 'CANCELED')
-		BEGIN
-			INSERT INTO dbo.[SWIFT_MTRAW] (BankNo, BranchNo, RawMessage, ClientReferenceNo, 
-				ClientMessageTypeCode, SourceID, Channel, Progress, CreatedDate) 
-			OUTPUT INSERTED.ID, INSERTED.CreatedDate 
-			INTO @TEMP(ID, [CreatedDate])
-			VALUES (@POBankNo, @BranchNo, @Message, @ClientReferenceNo, 
-				@ClientMessageTypeCode, @SourceID, @Channel, 'NEW', @NOW)
-			
-			SELECT TOP 1 
-				@ID = ID, 
-				@CreatedDate = @BankLocalTime, 
-				@CreatedDateUTC = CreatedDate
-			FROM @TEMP
+ * 判斷方式： 如果查得出資料且 Progress 不是 'CANCELED'（或是 NULL 也會需要注意 ANSI_NULLS 行為，後面會提），SP 就會直接跳過 INSERT。
+2. 檢查是否卡在「系統維護時間 (@IsMaintenance = 'TRUE')」
+SP 會去查 dbo.BankNoMappings 的 MaintenanceStartTime 與 MaintenanceEndTime，並用位移演算法判斷當前資料庫時間 (GETDATE()) 是否落在維護區間內。如果落在維護時間內，SP 會把 @IsMaintenance 設為 1 並直接略過 INSERT。
+請執行以下 SQL 檢查該銀行的設定與目前計算出的維護狀態：
+DECLARE @BankNo NVARCHAR(10) = '你傳入的_BankNo';
 
-			/*
-				Insert the new SWIFT message into SWIFT Parser Queue.
-			*/
-			IF	@ID IS NOT NULL
-			BEGIN
-				IF NOT EXISTS(SELECT NULL FROM dbo.[SwiftParserModelQueue] WITH (NOLOCK) WHERE RawID = @ID)
-				BEGIN
-					INSERT INTO dbo.[SwiftParserModelQueue] (RawID) VALUES (@ID)
-				END
-			END
-			
-		END
-	END
-END
+SELECT 
+    ClientBankNo,
+    POBankNo,
+    MaintenanceStartTime,
+    MaintenanceEndTime,
+    TimeZoneName,
+    CAST(GETDATE() AS TIME) AS CurrentDBTime
+FROM dbo.BankNoMappings WITH (NOLOCK)
+WHERE ClientBankNo = @BankNo;
 
+ * 判斷方式：
+   * 如果完全查不到資料：代表 ClientBankNo 沒有對應設定，這會導致 @POBankNo 為 NULL。如果 SWIFT_MTRAW.BankNo 欄位設定為 NOT NULL，執行到 INSERT 時會直接拋出 Exception 中斷（見第 3 點）。
+   * 如果有查到資料：請看 CurrentDBTime 是否落在 MaintenanceStartTime 與 MaintenanceEndTime 之間（注意：如果起迄時間設成相等，例如都是 00:00:00，在特定秒數也可能會誤觸）。
+3. 直接在 SSMS 模擬呼叫 SP，印出 OUTPUT 參數與錯誤訊息
+最快抓出真兇的方法，是用你實際打進去的參數在 SSMS 手動跑一次（或把 INSERT 改在 Transaction 內測試後 ROLLBACK），直接看它回傳的 OUTPUT 參數是什麼，或是有沒有噴 SQL Error：
+DECLARE @ID UNIQUEIDENTIFIER,
+        @CreatedDate DATETIME2(7),
+        @CreatedDateUTC DATETIME2(7),
+        @POBankNo NVARCHAR(10),
+        @IsMaintenance BIT;
 
+BEGIN TRY
+    EXEC [dbo].[SWIFT_InsertRawMessage]
+        @BankNo = N'你的BankNo',
+        @BranchNo = N'你的BranchNo',
+        @Message = N'測試電文內容',
+        @ClientReferenceNo = N'你的ClientReferenceNo',
+        @ClientMessageTypeCode = N'你的TypeCode',
+        @SourceID = N'你的SourceID',
+        @Channel = N'你的Channel',
+        @ID = @ID OUTPUT,
+        @CreatedDate = @CreatedDate OUTPUT,
+        @CreatedDateUTC = @CreatedDateUTC OUTPUT,
+        @POBankNo = @POBankNo OUTPUT,
+        @IsMaintenance = @IsMaintenance OUTPUT;
 
+    SELECT 
+        @ID AS Inserted_ID,
+        @POBankNo AS Mapped_POBankNo,
+        @IsMaintenance AS Is_Maintenance_Mode,
+        @CreatedDate AS BankLocalTime,
+        @CreatedDateUTC AS CreatedDateUTC;
+END TRY
+BEGIN CATCH
+    SELECT 
+        ERROR_NUMBER() AS ErrorNumber,
+        ERROR_LINE() AS ErrorLine,
+        ERROR_MESSAGE() AS ErrorMessage;
+END CATCH
 
-
-
-因為我打了MT 但MTRAW 都沒資料 我該怎麼查原因
+根據上面跑出來的結果對照：
+| 執行結果現象 | 真實原因 |
+|---|---|
+| Is_Maintenance_Mode = 1 | 被 dbo.BankNoMappings 的維護時間擋掉了。 |
+| Is_Maintenance_Mode = 0 且 Inserted_ID = NULL | 被 IF NOT EXISTS (... WHERE ClientReferenceNo = ...) 擋掉了，代表 DB 裡已經有一筆相同 ClientReferenceNo 且 Progress <> 'CANCELED' 的紀錄。 |
+| 跳進 CATCH 顯示 Cannot insert the value NULL into column 'BankNo' | @BankNo 在 dbo.BankNoMappings 找不到對應的 POBankNo（SP 註解也有寫：Exception will occur if the @POBankNo is null）。 |
+| 跳進 CATCH 顯示 String or binary data would be truncated | 傳入的欄位長度超過 SWIFT_MTRAW 資料表定義的欄位長度（例如 BranchNo、ClientMessageTypeCode 在 Table 裡定義比 SP 參數還短）。 |
+| 跳進 CATCH 顯示 dbo.ConvertTimeFromUtc 相關錯誤 | BankNoMappings.TimeZoneName 設定的時區字串無效，導致 UDF 轉換失敗。 |
+4. 如果手動跑 SP 可以進，但從 AP/電文端打卻沒進
+如果上面的測試腳本可以成功寫入，但你從程式或上游打 MT 電文卻沒進 SWIFT_MTRAW，請檢查以下兩點：
+ * 外層 Transaction Rollback： 呼叫這支 SP 的應用程式（或更外層的 SP）是否在拿到 @ID 後做其他處理時發生錯誤，導致整個 Transaction 被 Rollback？（可用 SQL Server Profiler 或 Extended Events 監控 RPC:Completed 與 SQL:BatchCompleted 是否有收到呼叫這支 SP）。
+ * 連錯 DB 環境： 確認發送端 AP 的 Connection String 指到的 Server / Database ([MESSAGEDATABASE]) 是否與你查詢的 SSMS 環境一致。
