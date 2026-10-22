@@ -1,7 +1,126 @@
-BankNo Path RawUrl Forms HttpMethod ExceptionType DateTime ExceptionMessage StackTrace Application LogType InternalMessage
- /PatriotOfficer/CIP/CIPReviewQuestionnaire.aspx/GetAssignList /PatriotOfficer/CIP/CIPReviewQuestionnaire.aspx/GetAssignList  POST       NullReferenceException 2026-10-21 15:51:15.9666667 Object reference not set to an instance of an object.    at PatriotOfficer.Services.POCIPService.GetCIPAssignSupervisor(String& Role, String& Type, String QueueID, String UserCIPRole) PATRIOT OFFICER Error 
- /PatriotOfficer/CIP/CIPReviewQuestionnaire.aspx/GetAssignList /PatriotOfficer/CIP/CIPReviewQuestionnaire.aspx/GetAssignList  POST       NullReferenceException 2026-10-21 15:51:15.4200000 Object reference not set to an instance of an object.    at PatriotOfficer.Services.POCIPService.GetCIPAssignSupervisor(String& Role, String& Type, String QueueID, String UserCIPRole) PATRIOT OFFICER Error 
- /PatriotOfficer/CIP/CIPReviewQuestionnaire.aspx/GetAssignList /PatriotOfficer/CIP/CIPReviewQuestionnaire.aspx/GetAssignList  POST       NullReferenceException 2026-10-21 15:51:14.0133333 Object reference not set to an instance of an object.    at PatriotOfficer.Services.POCIPService.GetCIPAssignSupervisor(String& Role, String& Type, String QueueID, String UserCIPRole) PATRIOT OFFICER Error 
- /PatriotOfficer/CIP/CIPReviewQuestionnaire.aspx/GetAssignList /PatriotOfficer/CIP/CIPReviewQuestionnaire.aspx/GetAssignList  POST       HttpException 2026-10-21 15:51:13.7466667 Cannot redirect after HTTP headers have been sent.    at System.Web.HttpResponse.Redirect(String url, Boolean endResponse, Boolean permanent)     at System.Web.Security.FormsAuthenticationModule.OnLeave(Object source, EventArgs eventArgs)     at System.Web.HttpApplication.SyncEventExecutionStep.System.Web.HttpApplication.IExecutionStep.Execute()     at System.Web.HttpApplication.ExecuteStepImpl(IExecutionStep step)     at System.Web.HttpApplication.ExecuteStep(IExecutionStep step, Boolean& completedSynchronously) PATRIOT OFFICER Error Custom message : application error
+function Execute-SOAPRequest 
+( 
+        [Xml]    $SOAPRequest, 
+        [String] $URL 
+        ) 
+{ 
+        $soapWebRequest = [System.Net.WebRequest]::Create($URL) 
+        $soapWebRequest.Headers.Add("SOAPAction","SubmitRequest")
+        $soapWebRequest.ContentType = "text/xml;charset=`"utf-8`" "
+        $soapWebRequest.Accept      = "text/xml" 
+        $soapWebRequest.Method      = "POST" 
+        $requestStream = $soapWebRequest.GetRequestStream() 
+        $SOAPRequest.Save($requestStream) 
+        $requestStream.Close() 
+        $resp = $soapWebRequest.GetResponse() 
+        $responseStream = $resp.GetResponseStream() 
+        $soapReader = [System.IO.StreamReader]($responseStream) 
+        $ReturnXml = $soapReader.ReadToEnd() 
+        $responseStream.Close() 
+        return $ReturnXml 
+}
 
-有三個表格 能幫我整理一下?  因為我要轉給廠商看
+$url = 'http://localhost:8082/SwiftProcessor.svc?wsdl'
+
+
+$soap1 = [xml]@'
+<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Body>
+    <SubmitRequest xmlns="http://patriotofficer.net/SwiftService">
+      <Params>
+        <ActionCode>SCAN_SWIFT</ActionCode>
+        <BankNo>TW</BankNo>
+        <BranchNo>0001</BranchNo>
+        <Channel>SWIFT</Channel>
+        <Message>{1:F01TSIBTWTPAXXX5356135117}{2:O1030831210315TSIBTWTPXXXX12341234560510170831N}{4:
+:20:E-T115-082_5
+:23B:CRED
+:32A:210315USD0,
+:33B:USD0,
+:50K:/21031592170
+Huntsman Investments Company Lim\ited
+:53A:HSBCGB2L
+:54A:CRESCHZZ
+:56A:CHASUS33
+:57A:SWHQBEBB
+:59A:DEUTDEFF
+:70:Marieil
+:71A:SHA
+-}
+</Message>
+        <MessageTypeCode>MT</MessageTypeCode>
+        <ReferenceNumber>E-T115-082_5</ReferenceNumber>
+        <SourceID>TSID</SourceID>
+      </Params>
+    </SubmitRequest>
+  </soap:Body>
+</soap:Envelope>
+
+'@
+
+
+
+
+
+	$sw = [System.Diagnostics.Stopwatch]::startNew()
+
+	$sw.Reset()
+	$sw.Start()
+
+
+Execute-SOAPRequest $soap1  $url
+
+
+
+
+
+
+
+
+
+
+
+
+#$sw.Elapsed
+#$count = $count + 1
+
+
+
+
+
+參考上面幫我修改
+DECLARE @ID UNIQUEIDENTIFIER,
+        @CreatedDate DATETIME2(7),
+        @CreatedDateUTC DATETIME2(7),
+        @POBankNo NVARCHAR(10),
+        @IsMaintenance BIT;
+
+BEGIN TRY
+    EXEC [dbo].[SWIFT_InsertRawMessage]
+        @BankNo = N'TW',
+        @BranchNo = N'你的BranchNo',
+        @Message = N'測試電文內容',
+        @ClientReferenceNo = N'你的ClientReferenceNo',
+        @ClientMessageTypeCode = N'你的TypeCode',
+        @SourceID = N'你的SourceID',
+        @Channel = N'你的Channel',
+        @ID = @ID OUTPUT,
+        @CreatedDate = @CreatedDate OUTPUT,
+        @CreatedDateUTC = @CreatedDateUTC OUTPUT,
+        @POBankNo = @POBankNo OUTPUT,
+        @IsMaintenance = @IsMaintenance OUTPUT;
+
+    SELECT 
+        @ID AS Inserted_ID,
+        @POBankNo AS Mapped_POBankNo,
+        @IsMaintenance AS Is_Maintenance_Mode,
+        @CreatedDate AS BankLocalTime,
+        @CreatedDateUTC AS CreatedDateUTC;
+END TRY
+BEGIN CATCH
+    SELECT 
+        ERROR_NUMBER() AS ErrorNumber,
+        ERROR_LINE() AS ErrorLine,
+        ERROR_MESSAGE() AS ErrorMessage;
+END CATCH
