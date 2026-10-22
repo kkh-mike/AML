@@ -1,108 +1,47 @@
-要放在測試報告（TC報告）裡當作佐證截圖，最清楚的做法是寫一段 「來源表（DJ） vs 目標表（OFAC_SPEC）筆數與狀態交叉比對」 的 SQL。
-以下提供兩段驗證 SQL，第一段（最推薦） 執行後只會產生乾淨的 2 列結果，直接截圖貼進 Word 報告就能同時證明「數量完全一致」且「沒有混入錯誤狀態的人」：
-方案一：一表搞定版（最適合截圖貼進測試報告）
-這段 SQL 會同時算出 DJ 原始筆數、OFAC_SPEC 實際筆數，並直接串聯 DJ_Entity.Deceased 統計裡面有幾個活人、幾個死人：
-WITH DJ_Source AS (
-    -- 1. 計算 DJ 原始死亡名單筆數 (應對應 GROUPID = 6)
-    SELECT 6 AS GroupId, COUNT(*) AS Source_Cnt
-    FROM (
-        SELECT A.EntityId, A.FullName
-        FROM BSADB.dbo.DJ_Entity A WITH (NOLOCK)
-        JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) ON A.EntityId = B.EntityId
-        WHERE A.Deceased = 1
-          AND B.SanctionListReference LIKE '%Japanese Finance%'
-        GROUP BY A.EntityId, A.FullName
-    ) D6
+在 SQL Server 中，如果你想要把圖片中條件約束（Constraint）與索引（Index）名稱後面的 _20261016 拿掉（重新命名），同時把重複建立的 CHECK 條件約束刪除，可以透過以下 T-SQL 指令處理：
+1. 整理清單與注意事項（重要！）
+從你的 sp_help 結果來看，目前有以下幾個項目帶有日期（或疑似被截斷的日期）：
+ * chk_SWIFT_MTRAW_Progress_20261016 (CHECK Constraint)：
+   * ⚠️ 注意：表格上已經有一個完全相同的 chk_SWIFT_MTRAW_Progress（都是檢查 Progress 欄位）。如果直接把 _20261016 拿掉改名，會因為名稱重複而報錯。這個項目應該直接 DROP（刪除） 即可。
+ * df_SWIFT_MTRAW_FeedBackSend_20261016 (DEFAULT Constraint)：
+   * 可以直接透過 sp_rename 改名為 df_SWIFT_MTRAW_FeedBackSend。
+ * pk_SWIFT_MTRAW_ID_20261016 (PRIMARY KEY / Clustered Index)：
+   * 可以直接透過 sp_rename 改名為 pk_SWIFT_MTRAW_ID（改名後，index_name 與 constraint_name 會同步更新）。
+ * 最下方三個被截斷的 DEFAULT Constraint：
+   * 畫面上第 5、6、7 列的名稱尾端有 _2026... 或 _2（例如 SWIFT_MTRAW_DEFAULT_RAWID_2026...），因為欄位寬度關係被切掉了。
+2. 執行腳本（刪除重複 + 重新命名）
+請在 SSMS 開啟查詢視窗，確認資料庫正確後執行以下語法：
+-- 1. 刪除重複的 CHECK Constraint (因為已經有 chk_SWIFT_MTRAW_Progress 了)
+ALTER TABLE dbo.SWIFT_MTRAW 
+DROP CONSTRAINT chk_SWIFT_MTRAW_Progress_20261016;
+GO
 
-    UNION ALL
+-- 2. 將 DEFAULT Constraint 拿掉 _20261016 (重新命名)
+EXEC sp_rename 
+    @objname = N'dbo.df_SWIFT_MTRAW_FeedBackSend_20261016', 
+    @newname = N'df_SWIFT_MTRAW_FeedBackSend', 
+    @objtype = N'OBJECT';
+GO
 
-    -- 2. 計算 DJ 原始一般(活人)名單筆數 (應對應 GROUPID = 5)
-    SELECT 5 AS GroupId, COUNT(*) AS Source_Cnt
-    FROM (
-        SELECT A.EntNum, A.SdnName
-        FROM BSADB.dbo.DJ_List_Data_A A WITH (NOLOCK)
-        JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) ON A.EntNum = B.EntityId
-        WHERE A.NamePropertyBitCode & 1 > 0
-          AND B.SanctionListReference LIKE '%Japanese Finance%'
-          AND NOT EXISTS (
-              SELECT 1 FROM BSADB.dbo.DJ_Entity E WITH (NOLOCK)
-              WHERE E.EntityId = A.EntNum AND E.Deceased = 1
-          )
-        GROUP BY A.EntNum, A.SdnName
-    ) D5
-),
-Target_Spec AS (
-    -- 3. 計算 OFAC_SPEC 目標表筆數，並串回 DJ_Entity 驗證死活狀態
-    SELECT 
-        T.GROUPID AS GroupId,
-        MAX(T.SOURCE) AS SourceName,
-        COUNT(*) AS Target_Total_Cnt,
-        SUM(CASE WHEN ISNULL(E.Deceased, 0) = 0 THEN 1 ELSE 0 END) AS Alive_Cnt,   -- 活人數量
-        SUM(CASE WHEN E.Deceased = 1 THEN 1 ELSE 0 END)            AS Deceased_Cnt -- 死人數量
-    FROM BSADBJP..OFAC_SPEC T WITH (NOLOCK)
-    LEFT JOIN BSADB.dbo.DJ_Entity E WITH (NOLOCK) ON T.remark = CAST(E.EntityId AS VARCHAR(100))
-    WHERE T.GROUPID IN (5, 6)
-      AND T.DInd = 'N' -- 只看有效名單
-    GROUP BY T.GROUPID
-)
+-- 3. 將 PRIMARY KEY 拿掉 _20261016 (重新命名，會連同上方 Index 名稱一起改變)
+EXEC sp_rename 
+    @objname = N'dbo.pk_SWIFT_MTRAW_ID_20261016', 
+    @newname = N'pk_SWIFT_MTRAW_ID', 
+    @objtype = N'OBJECT';
+GO
+
+3. 處理最下方三個被截斷的 DEFAULT 名稱
+因為截圖最下方第 5、6、7 列的完整名稱沒有顯示出來，你可以先執行這段查詢，它會直接幫你自動產出改名語法：
+-- 查詢該表所有包含 2026 的 Constraint，並自動產生改名指令
 SELECT 
-    S.GroupId                                 AS [群組(GROUPID)],
-    T.SourceName                              AS [名單來源(SOURCE)],
-    S.Source_Cnt                              AS [DJ原始筆數],
-    ISNULL(T.Target_Total_Cnt, 0)             AS [OFAC_SPEC筆數],
-    ISNULL(T.Alive_Cnt, 0)                    AS [裡面活人數量(Deceased=0)],
-    ISNULL(T.Deceased_Cnt, 0)                 AS [裡面死人數量(Deceased=1)],
-    CASE 
-        WHEN S.GroupId = 5 AND S.Source_Cnt = T.Target_Total_Cnt AND T.Deceased_Cnt = 0 THEN 'OK (全數為活人且數量一致)'
-        WHEN S.GroupId = 6 AND S.Source_Cnt = T.Target_Total_Cnt AND T.Alive_Cnt = 0    THEN 'OK (全數為死人且數量一致)'
-        ELSE '不一致，請檢查'
-    END                                       AS [驗證結果]
-FROM DJ_Source S
-LEFT JOIN Target_Spec T ON S.GroupId = T.GroupId
-ORDER BY S.GroupId;
+    name AS [目前名稱],
+    REPLACE(name, '_20261016', '') AS [預計新名稱],
+    'EXEC sp_rename N''dbo.' + name + ''', N''' + REPLACE(name, '_20261016', '') + ''', N''OBJECT'';' AS [執行語法]
+FROM sys.objects
+WHERE parent_object_id = OBJECT_ID('dbo.SWIFT_MTRAW')
+  AND name LIKE '%2026%';
 
-跑出來的結果畫面會長這樣（一目了然）：
-| 群組(GROUPID) | 名單來源(SOURCE) | DJ原始筆數 | OFAC_SPEC筆數 | 裡面活人數量(Deceased=0) | 裡面死人數量(Deceased=1) | 驗證結果 |
-|---|---|---|---|---|---|---|
-| 5 | MOF Sanction List | (例如 1200) | (例如 1200) | 1200 | 0 | OK (全數為活人且數量一致) |
-| 6 | MOF Sanction List (Decease) | (例如 45) | (例如 45) | 0 | 45 | OK (全數為死人且數量一致) |
- * 怎麼看結果：
-   * [DJ原始筆數] = [OFAC_SPEC筆數] \rightarrow 證明同步後總數完全一致。
-   * GROUPID = 5 的 [裡面死人數量] 為 0、GROUPID = 6 的 [裡面活人數量] 為 0 \rightarrow 證明百分之百純淨，沒有混入錯誤狀態。
-方案二：極簡分開查詢版（如果你不想在報告貼太長的 SQL）
-如果報告裡面需要附上 SQL 語法，且你希望語法看起來越短越好，可以用下面這段極簡版直接查 OFAC_SPEC 與 DJ 的數量對照：
--- 1. 檢查 OFAC_SPEC 內 Group 5 與 6 各自的死活人數量
-SELECT 
-    T.GROUPID,
-    T.SOURCE,
-    ISNULL(E.Deceased, 0) AS IsDeceased, -- 0:活人, 1:死人
-    COUNT(*) AS Spec_Count
-FROM BSADBJP..OFAC_SPEC T WITH (NOLOCK)
-JOIN BSADB.dbo.DJ_Entity E WITH (NOLOCK) ON T.remark = CAST(E.EntityId AS VARCHAR(100))
-WHERE T.GROUPID IN (5, 6) 
-  AND T.DInd = 'N'
-GROUP BY T.GROUPID, T.SOURCE, ISNULL(E.Deceased, 0)
-ORDER BY T.GROUPID;
-
--- 2. 檢查 DJ 原始名單的死人與活人數量
-SELECT 
-    'DJ_Deceased (應對照 Group 6)' AS Category, 
-    COUNT(DISTINCT A.EntityId) AS DJ_Count
-FROM BSADB.dbo.DJ_Entity A WITH (NOLOCK)
-JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) ON A.EntityId = B.EntityId
-WHERE A.Deceased = 1 AND B.SanctionListReference LIKE '%Japanese Finance%'
-UNION ALL
-SELECT 
-    'DJ_Alive (應對照 Group 5)' AS Category, 
-    COUNT(*) AS DJ_Count
-FROM (
-    SELECT A.EntNum, A.SdnName
-    FROM BSADB.dbo.DJ_List_Data_A A WITH (NOLOCK)
-    JOIN BSADB.dbo.DJ_SanctionListReference B WITH (NOLOCK) ON A.EntNum = B.EntityId
-    JOIN BSADB.dbo.DJ_Entity E WITH (NOLOCK) ON A.EntNum = E.EntityId
-    WHERE A.NamePropertyBitCode & 1 > 0
-      AND B.SanctionListReference LIKE '%Japanese Finance%'
-      AND ISNULL(E.Deceased, 0) = 0
-    GROUP BY A.EntNum, A.SdnName
-) X;
-
+你可以把上面查詢結果的 [執行語法] 欄位複製出來執行，就能一次把所有殘留的 _20261016 後綴全部清乾淨了！
+💡 補充：如果報錯「名稱已存在於資料庫中」怎麼辦？
+在 SQL Server 中，Constraint 的名稱在整個資料庫（Schema）內必須是唯一的。
+如果你這個資料庫裡原本有一張舊表被改名成備份表（例如 SWIFT_MTRAW_BAK），而舊表上面還佔用著 pk_SWIFT_MTRAW_ID 這個名字，你在改名時就會報錯。這時只要先把舊備份表上的 Constraint 改名或刪除，就可以順利拿掉 _20261016 了。
