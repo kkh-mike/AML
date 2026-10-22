@@ -1,16 +1,60 @@
 USE [MESSAGEDATABASE]
 GO
 
-SELECT 
-    OBJECT_NAME(parent_object_id) AS TableName,
-    name AS ConstraintName,
-    type_desc AS ConstraintType
-FROM sys.objects
-WHERE name IN (
-    'pk_SWIFT_MTRAW_ID',
-    'SWIFT_MTRAW_DEFAULT_RAWID',
-    'SWIFT_MTRAW_DEFAULT_PROGRESS',
-    'SWIFT_MTRAW_DEFAULT_CREATED_DATE',
-    'df_SWIFT_MTRAW_FeedBackSend',
-    'chk_SWIFT_MTRAW_Progress'
-);
+/****** Object:  Table [dbo].[SWIFT_MTRAW]    Script Date: 2026/10/22 上午 11:40:27 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [dbo].[SWIFT_MTRAW](
+	[ID] [uniqueidentifier] NOT NULL,
+	[BankNo] [nvarchar](3) NOT NULL,
+	[BranchNo] [nvarchar](30) NULL,
+	[ClientReferenceNo] [nvarchar](40) NOT NULL,
+	[ClientMessageTypeCode] [nvarchar](30) NULL,
+	[RawMessage] [nvarchar](max) NULL,
+	[SourceID] [nvarchar](30) NOT NULL,
+	[Channel] [nvarchar](30) NULL,
+	[Progress] [varchar](20) NOT NULL,
+	[CreatedDate] [datetime2](7) NOT NULL,
+	[LastModifiedDate] [datetime] NULL,
+	[Format] [nvarchar](3) NULL,
+	[Priority] [char](1) NULL,
+	[Block4_UserReference] [nvarchar](max) NULL,
+	[FeedBackSend] [bit] NULL,
+	[FeedBackSendDate] [datetime] NULL,
+	[ParseStartDt] [datetime2](7) NULL,
+	[SplitStartDt] [datetime2](7) NULL,
+	[DetectionStartDt] [datetime2](7) NULL,
+ CONSTRAINT [pk_SWIFT_MTRAW_ID] PRIMARY KEY CLUSTERED 
+(
+	[ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
+
+GO
+
+ALTER TABLE [dbo].[SWIFT_MTRAW_20261016] ADD  CONSTRAINT [SWIFT_MTRAW_DEFAULT_RAWID]  DEFAULT (newsequentialid()) FOR [ID]
+GO
+
+ALTER TABLE [dbo].[SWIFT_MTRAW_20261016] ADD  CONSTRAINT [SWIFT_MTRAW_DEFAULT_PROGRESS]  DEFAULT ('NEW') FOR [Progress]
+GO
+
+ALTER TABLE [dbo].[SWIFT_MTRAW_20261016] ADD  CONSTRAINT [SWIFT_MTRAW_DEFAULT_CREATED_DATE]  DEFAULT (getutcdate()) FOR [CreatedDate]
+GO
+
+ALTER TABLE [dbo].[SWIFT_MTRAW_20261016] ADD  CONSTRAINT [df_SWIFT_MTRAW_FeedBackSend]  DEFAULT ('FALSE') FOR [FeedBackSend]
+GO
+
+ALTER TABLE [dbo].[SWIFT_MTRAW_20261016]  WITH CHECK ADD  CONSTRAINT [chk_SWIFT_MTRAW_Progress] CHECK  (([Progress]='CANCELED' OR [Progress]='REJECT' OR [Progress]='RELEASE2' OR [Progress]='HOLD' OR [Progress]='RELEASE1' OR [Progress]='INVALID_FORMAT' OR [Progress]='SPLIT' OR [Progress]='PARSED' OR [Progress]='NEW'))
+GO
+
+ALTER TABLE [dbo].[SWIFT_MTRAW_20261016] CHECK CONSTRAINT [chk_SWIFT_MTRAW_Progress]
+GO
+
+
+
+
+幫我都改名稱吧
