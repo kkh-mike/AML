@@ -1,4 +1,6 @@
-
+對，這一段目前是直接將 LEFT(B.AddressCountry, 100)（道瓊原始的國家全名）寫入 Country，沒有經過 COUNTRY_DIM 轉換成 ISO 二碼國別代碼（ISO_2_CountryCode）。
+這一段因為原本就已經有 TempAddress 的 CTE 了，修改起來最簡單，只要在 INSERT INTO #tempDJBlacklistDetails 的最後加上 OUTER APPLY COUNTRY_DIM，並把 SELECT 裡的國家欄位改成 COALESCE(F.ISO_2_CountryCode, LEFT(B.AddressCountry, 100)) 即可。
+修改後的完整程式碼（第一段：Primary Sanctions List）
     /*
         ============================================================
         第一段：主要黑名單同步（Primary Sanctions List）
@@ -19,7 +21,6 @@
         UpdatedDate VARCHAR(8) NOT NULL
     );
 
-
     CREATE TABLE #tempDJBlacklistDetails
     (
         EntNum       INT NOT NULL,
@@ -36,7 +37,7 @@
     -- 取得主要名稱資料
     INSERT INTO #tempDJBlacklist (EntNum, SdnName, UpdatedDate)
     SELECT 
-		A.EntNum, 
+        A.EntNum, 
         A.SdnName, 
         MAX(A.UpdatedDate) AS UpdatedDate
     FROM BSADB.dbo.DJ_List_Data_A A
@@ -89,7 +90,8 @@
         A.UpdatedDate,
         B.Address,
         LEFT(B.City, 100),
-        LEFT(B.AddressCountry, 100),
+        -- 【修改】優先取 COUNTRY_DIM 的二碼國別代碼，比對不到才退回原始 AddressCountry
+        COALESCE(F.ISO_2_CountryCode, LEFT(B.AddressCountry, 100)) AS Country,
         C.IdentificationType,
         LEFT(C.IdentificationNumber, 44),
         CASE 
@@ -100,10 +102,22 @@
     FROM #tempDJBlacklist A
     LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1
     LEFT JOIN TempIdent   C ON A.EntNum = C.EntityId AND C.RowId = 1
-    LEFT JOIN TempDOB     D ON A.EntNum = D.EntityId AND D.RowId = 1;
+    LEFT JOIN TempDOB     D ON A.EntNum = D.EntityId AND D.RowId = 1
+    -- 【新增】關聯 COUNTRY_DIM 轉換國別代碼
+    OUTER APPLY (
+        SELECT TOP 1 CD.ISO_2_CountryCode
+        FROM COUNTRY_DIM CD WITH (NOLOCK)
+        WHERE B.AddressCountry IS NOT NULL
+          AND B.AddressCountry IN (
+              CD.ISO_CountryDescription,
+              CD.ISO_CountryDescription_zh_TW,
+              CD.ISO_CountryDescription_zh_CN,
+              CD.ISO_CountryDescription_Default
+          )
+    ) F;
 
 
-   -- MERGE 主表
+    -- MERGE 主表
     ;WITH TargetTable AS
     (
         SELECT 
@@ -158,7 +172,7 @@
             T.IDNUM = S.IdentNumber,
             T.DOB = S.DOB
 
-  OUTPUT 
+    OUTPUT 
         CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ent_num ELSE Deleted.ent_num END,
         CASE WHEN $ACTION IN ('INSERT') THEN Inserted.spec_name ELSE Deleted.spec_name END,
         CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date ELSE Deleted.updated_date END,
@@ -198,7 +212,14 @@
          ApproveDelDate, CreationDate, updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC,
          CreationDate_UTC, ActionCD, ActionDt);
 
+順便幫你檢查到的兩個小細節：
+ * WHEN NOT MATCHED BY TARGET 的刪除欄位預設值：
+   注意看這一段的 INSERT VALUES 裡面：
+   DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, creDate, updated_date_UTC...
+VALUES (..., 'System Admin', GETDATE(), 'System Admin', GETDATE(), GETDATE(), GETDATE(), ...)
 
+   在其他幾段程式中，新增資料（DInd = 'N'）時，DelUserID、DelDate、ApproveDelUserID、ApproveDelDate 都是放 NULL，且 updated_date_UTC 是放 GETUTCDATE()；但這一段原本寫成了 'System Admin' 和 GETDATE()。如果不希望剛新增的有效名單上帶有刪除人員與刪除時間，建議一併改回 NULL 與 GETUTCDATE()。
+ * 舊資料國別刷新：
+   因為這一段原本已經把英文國家全名（例如 United States）寫進 OFAC_GLSpec.COUNTRY 了，如果希望下次執行時直接把資料庫裡既有的英文全名洗成二碼代碼（例如 US），可以把 WHEN MATCHED 條件改為：
+   WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date OR ISNULL(T.COUNTRY, '') <> ISNULL(S.Country, '')) THEN
 
-
-我這邊的國家是不是也要修改一下
