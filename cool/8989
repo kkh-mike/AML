@@ -1,3 +1,4 @@
+
     /*
         ============================================================
         第二段：日本金融制裁名單同步（Japanese Finance）
@@ -250,3 +251,6 @@
          creUserID, UserID, ActionDT, ActionCD, Address, State, Country, GROUPID, SOURCE, EnterFlag,
          ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, ActionDT_UTC,
          ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, DOB);
+
+
+那我這段可以加入一個檢查 如果group6 有活人就幫忙移去group5 ?
