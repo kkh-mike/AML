@@ -1,74 +1,48 @@
-USE [MESSAGEDATABASE]
-GO
+DECLARE @ID UNIQUEIDENTIFIER,
+        @CreatedDate DATETIME2(7),
+        @CreatedDateUTC DATETIME2(7),
+        @POBankNo NVARCHAR(10),
+        @IsMaintenance BIT;
 
-/****** Object:  Table [dbo].[SWIFT_MTRAW]    Script Date: 2026/10/22 上午 11:40:27 ******/
-SET ANSI_NULLS ON
-GO
+BEGIN TRY
+    EXEC [dbo].[SWIFT_InsertRawMessage]
+        @BankNo = N'TW',
+        @BranchNo = N'0001',
+        @Message = N'{1:F01TSIBTWTPAXXX5356135117}{2:O1030831210315TSIBTWTPXXXX12341234560510170831N}{4:
+:20:E-T115-082_5
+:23B:CRED
+:32A:210315USD0,
+:33B:USD0,
+:50K:/21031592170
+Huntsman Investments Company Lim\ited
+:53A:HSBCGB2L
+:54A:CRESCHZZ
+:56A:CHASUS33
+:57A:SWHQBEBB
+:59A:DEUTDEFF
+:70:Marieil
+:71A:SHA
+-}',
+        @ClientReferenceNo = N'E-T115-082_5',
+        @ClientMessageTypeCode = N'MT',
+        @SourceID = N'TSID',
+        @Channel = N'SWIFT',
+        @ID = @ID OUTPUT,
+        @CreatedDate = @CreatedDate OUTPUT,
+        @CreatedDateUTC = @CreatedDateUTC OUTPUT,
+        @POBankNo = @POBankNo OUTPUT,
+        @IsMaintenance = @IsMaintenance OUTPUT;
 
-SET QUOTED_IDENTIFIER ON
-GO
-
-CREATE TABLE [dbo].[SWIFT_MTRAW](
-	[ID] [uniqueidentifier] NOT NULL,
-	[BankNo] [nvarchar](3) NOT NULL,
-	[BranchNo] [nvarchar](30) NULL,
-	[ClientReferenceNo] [nvarchar](40) NOT NULL,
-	[ClientMessageTypeCode] [nvarchar](30) NULL,
-	[RawMessage] [nvarchar](max) NULL,
-	[SourceID] [nvarchar](30) NOT NULL,
-	[Channel] [nvarchar](30) NULL,
-	[Progress] [varchar](20) NOT NULL,
-	[CreatedDate] [datetime2](7) NOT NULL,
-	[LastModifiedDate] [datetime] NULL,
-	[Format] [nvarchar](3) NULL,
-	[Priority] [char](1) NULL,
-	[Block4_UserReference] [nvarchar](max) NULL,
-	[FeedBackSend] [bit] NULL,
-	[FeedBackSendDate] [datetime] NULL,
-	[ParseStartDt] [datetime2](7) NULL,
-	[SplitStartDt] [datetime2](7) NULL,
-	[DetectionStartDt] [datetime2](7) NULL,
- CONSTRAINT [pk_SWIFT_MTRAW_ID] PRIMARY KEY CLUSTERED 
-(
-	[ID] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
-) ON [PRIMARY] TEXTIMAGE_ON [PRIMARY]
-
-GO
-
-ALTER TABLE [dbo].[SWIFT_MTRAW_20261016] ADD  CONSTRAINT [SWIFT_MTRAW_DEFAULT_RAWID]  DEFAULT (newsequentialid()) FOR [ID]
-GO
-
-ALTER TABLE [dbo].[SWIFT_MTRAW_20261016] ADD  CONSTRAINT [SWIFT_MTRAW_DEFAULT_PROGRESS]  DEFAULT ('NEW') FOR [Progress]
-GO
-
-ALTER TABLE [dbo].[SWIFT_MTRAW_20261016] ADD  CONSTRAINT [SWIFT_MTRAW_DEFAULT_CREATED_DATE]  DEFAULT (getutcdate()) FOR [CreatedDate]
-GO
-
-ALTER TABLE [dbo].[SWIFT_MTRAW_20261016] ADD  CONSTRAINT [df_SWIFT_MTRAW_FeedBackSend]  DEFAULT ('FALSE') FOR [FeedBackSend]
-GO
-
-ALTER TABLE [dbo].[SWIFT_MTRAW_20261016]  WITH CHECK ADD  CONSTRAINT [chk_SWIFT_MTRAW_Progress] CHECK  (([Progress]='CANCELED' OR [Progress]='REJECT' OR [Progress]='RELEASE2' OR [Progress]='HOLD' OR [Progress]='RELEASE1' OR [Progress]='INVALID_FORMAT' OR [Progress]='SPLIT' OR [Progress]='PARSED' OR [Progress]='NEW'))
-GO
-
-ALTER TABLE [dbo].[SWIFT_MTRAW_20261016] CHECK CONSTRAINT [chk_SWIFT_MTRAW_Progress]
-GO
-
-
-訊息 1781，層級 16，狀態 1，行 39
-資料行已經有了 DEFAULT 繫結。
-訊息 1750，層級 16，狀態 0，行 39
-無法建立條件約束或索引。請查看先前的錯誤。
-訊息 1781，層級 16，狀態 1，行 42
-資料行已經有了 DEFAULT 繫結。
-訊息 1750，層級 16，狀態 0，行 42
-無法建立條件約束或索引。請查看先前的錯誤。
-訊息 1781，層級 16，狀態 1，行 45
-資料行已經有了 DEFAULT 繫結。
-訊息 1750，層級 16，狀態 0，行 45
-無法建立條件約束或索引。請查看先前的錯誤。
-訊息 1781，層級 16，狀態 1，行 48
-資料行已經有了 DEFAULT 繫結。
-訊息 1750，層級 16，狀態 0，行 48
-無法建立條件約束或索引。請查看先前的錯誤。
-
+    SELECT 
+        @ID AS Inserted_ID,
+        @POBankNo AS Mapped_POBankNo,
+        @IsMaintenance AS Is_Maintenance_Mode,
+        @CreatedDate AS BankLocalTime,
+        @CreatedDateUTC AS CreatedDateUTC;
+END TRY
+BEGIN CATCH
+    SELECT 
+        ERROR_NUMBER() AS ErrorNumber,
+        ERROR_LINE() AS ErrorLine,
+        ERROR_MESSAGE() AS ErrorMessage;
+END CATCH
