@@ -46,3 +46,9 @@ BEGIN CATCH
         ERROR_LINE() AS ErrorLine,
         ERROR_MESSAGE() AS ErrorMessage;
 END CATCH
+
+
+這是結果
+515	86	無法插入 NULL 值到資料行 'ID'，資料表 'MESSAGEDATABASE.dbo.SWIFT_MTRAW'; 資料行不得有 Null。INSERT 失敗。
+
+所以為什麼阿
