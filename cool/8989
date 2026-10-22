@@ -1,4 +1,3 @@
-
     /*
         ============================================================
         第二段：日本金融制裁名單同步（Japanese Finance）
@@ -78,7 +77,50 @@
       AND NOT EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE X.EntNum = A.EntNum)
     GROUP BY A.EntNum, A.SdnName;
 
+    /*
+        ============================================================
+        3. 【新增】自動檢查：若 OFAC_SPEC 的 GROUPID = 6 混入活人，先移去 GROUPID = 5
+        （判斷依據：在 GROUPID = 6 中，但在 DJ_Entity 為活人，或本次被歸類在 #tempDJBlacklistJP 的 GroupId = 5）
+        ============================================================
+    */
+    UPDATE T
+    SET 
+        T.GROUPID          = 5,
+        T.SOURCE           = 'MOF Sanction List',
+        T.EnterFlag        = 'D',
+        T.updated_date_UTC = GETUTCDATE()
+    OUTPUT 
+        Inserted.ent_num, Inserted.spec_name, Inserted.updated_date, Inserted.remark,
+        Inserted.TaxID, Inserted.IDENT, Inserted.IDENTO, Inserted.TaxIDCD, Inserted.IDNUM,
+        Inserted.IssBy, Inserted.DInd, Inserted.creUserID, 'System Admin', GETUTCDATE(),
+        '02', -- ActionCD = '02' (修改群組)
+        Inserted.ADDRESS, Inserted.STATE, Inserted.COUNTRY, Inserted.GROUPID, Inserted.SOURCE,
+        Inserted.EnterFlag, Inserted.ApprovedBy, Inserted.ApprovedDate, Inserted.DelUserID,
+        Inserted.DelDate, Inserted.ApproveDelUserID, Inserted.ApproveDelDate, GETUTCDATE(),
+        Inserted.ApprovedDate_UTC, Inserted.DelDate_UTC, Inserted.ApproveDelDate_UTC, Inserted.DOB
+    INTO BSADBJP.dbo.OFAC_SPEC_LOG
+        (ent_num, spec_name, updated_date, remark, TaxID, IDENT, IDENTO, TaxIDCD, IDNUM,
+         IssBy, DInd, creUserID, UserID, ActionDT, ActionCD, Address, State, Country, GROUPID, SOURCE,
+         EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate,
+         ActionDT_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, DOB)
+    FROM BSADBJP..OFAC_SPEC T
+    JOIN BSADB.dbo.DJ_Entity E ON T.remark = CAST(E.EntityId AS VARCHAR(100))
+    WHERE T.GROUPID = 6
+      AND ISNULL(E.Deceased, 0) = 0  -- 在來源表確認為活人（非死亡）
+      -- 防呆：確保 GROUPID = 5 裡面還沒有同一筆紀錄，避免變更後產生重複資料
+      AND NOT EXISTS (
+          SELECT 1 FROM BSADBJP..OFAC_SPEC G5
+          WHERE G5.GROUPID = 5
+            AND G5.spec_name = T.spec_name
+            AND G5.remark = T.remark
+      );
 
+
+    /*
+        ============================================================
+        4. 組裝明細與比對現有 ent_num（此時活人已位於 GROUPID = 5）
+        ============================================================
+    */
     ;WITH TempAddress AS
     (
         SELECT A.EntityId, A.Address, A.City, A.AddressCountry,
@@ -158,6 +200,11 @@
         Num = @MAXNo
     WHERE Num IS NULL;
 
+    /*
+        ============================================================
+        5. MERGE 同步至 BSADBJP..OFAC_SPEC
+        ============================================================
+    */
     ;WITH TargetTable AS
     (
         -- 目標表同時涵蓋 GROUPID 5 與 6
@@ -251,6 +298,3 @@
          creUserID, UserID, ActionDT, ActionCD, Address, State, Country, GROUPID, SOURCE, EnterFlag,
          ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, ActionDT_UTC,
          ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, DOB);
-
-
-那我這段可以加入一個檢查 如果group6 有活人就幫忙移去group5 ?
