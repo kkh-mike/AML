@@ -1,54 +1,22 @@
-DECLARE @ID UNIQUEIDENTIFIER,
-        @CreatedDate DATETIME2(7),
-        @CreatedDateUTC DATETIME2(7),
-        @POBankNo NVARCHAR(10),
-        @IsMaintenance BIT;
+USE [MESSAGEDATABASE]
+GO
 
-BEGIN TRY
-    EXEC [dbo].[SWIFT_InsertRawMessage]
-        @BankNo = N'TW',
-        @BranchNo = N'0001',
-        @Message = N'{1:F01TSIBTWTPAXXX5356135117}{2:O1030831210315TSIBTWTPXXXX12341234560510170831N}{4:
-:20:E-T115-082_5
-:23B:CRED
-:32A:210315USD0,
-:33B:USD0,
-:50K:/21031592170
-Huntsman Investments Company Lim\ited
-:53A:HSBCGB2L
-:54A:CRESCHZZ
-:56A:CHASUS33
-:57A:SWHQBEBB
-:59A:DEUTDEFF
-:70:Marieil
-:71A:SHA
--}',
-        @ClientReferenceNo = N'E-T115-082_5',
-        @ClientMessageTypeCode = N'MT',
-        @SourceID = N'TSID',
-        @Channel = N'SWIFT',
-        @ID = @ID OUTPUT,
-        @CreatedDate = @CreatedDate OUTPUT,
-        @CreatedDateUTC = @CreatedDateUTC OUTPUT,
-        @POBankNo = @POBankNo OUTPUT,
-        @IsMaintenance = @IsMaintenance OUTPUT;
+-- 將舊表上的主鍵與條件約束改名，加上 _20261016 後綴
+IF OBJECT_ID('dbo.pk_SWIFT_MTRAW_ID', 'PK') IS NOT NULL
+    EXEC sp_rename N'dbo.pk_SWIFT_MTRAW_ID', N'pk_SWIFT_MTRAW_ID_20261016', N'OBJECT';
 
-    SELECT 
-        @ID AS Inserted_ID,
-        @POBankNo AS Mapped_POBankNo,
-        @IsMaintenance AS Is_Maintenance_Mode,
-        @CreatedDate AS BankLocalTime,
-        @CreatedDateUTC AS CreatedDateUTC;
-END TRY
-BEGIN CATCH
-    SELECT 
-        ERROR_NUMBER() AS ErrorNumber,
-        ERROR_LINE() AS ErrorLine,
-        ERROR_MESSAGE() AS ErrorMessage;
-END CATCH
+IF OBJECT_ID('dbo.SWIFT_MTRAW_DEFAULT_RAWID', 'D') IS NOT NULL
+    EXEC sp_rename N'dbo.SWIFT_MTRAW_DEFAULT_RAWID', N'SWIFT_MTRAW_DEFAULT_RAWID_20261016', N'OBJECT';
 
+IF OBJECT_ID('dbo.SWIFT_MTRAW_DEFAULT_PROGRESS', 'D') IS NOT NULL
+    EXEC sp_rename N'dbo.SWIFT_MTRAW_DEFAULT_PROGRESS', N'SWIFT_MTRAW_DEFAULT_PROGRESS_20261016', N'OBJECT';
 
-這是結果
-515	86	無法插入 NULL 值到資料行 'ID'，資料表 'MESSAGEDATABASE.dbo.SWIFT_MTRAW'; 資料行不得有 Null。INSERT 失敗。
+IF OBJECT_ID('dbo.SWIFT_MTRAW_DEFAULT_CREATED_DATE', 'D') IS NOT NULL
+    EXEC sp_rename N'dbo.SWIFT_MTRAW_DEFAULT_CREATED_DATE', N'SWIFT_MTRAW_DEFAULT_CREATED_DATE_20261016', N'OBJECT';
 
-所以為什麼阿
+IF OBJECT_ID('dbo.df_SWIFT_MTRAW_FeedBackSend', 'D') IS NOT NULL
+    EXEC sp_rename N'dbo.df_SWIFT_MTRAW_FeedBackSend', N'df_SWIFT_MTRAW_FeedBackSend_20261016', N'OBJECT';
+
+IF OBJECT_ID('dbo.chk_SWIFT_MTRAW_Progress', 'C') IS NOT NULL
+    EXEC sp_rename N'dbo.chk_SWIFT_MTRAW_Progress', N'chk_SWIFT_MTRAW_Progress_20261016', N'OBJECT';
+GO
