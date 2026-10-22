@@ -1,22 +1,117 @@
-USE [MESSAGEDATABASE]
+要讓廠商心服口服，最快的方法是在 SSMS (SQL Server Management Studio) 裡直接寫一段測試腳本，重現一模一樣的 「第 94 行、接近 ',' 之處的語法不正確」 報錯，並把組出來的殘缺 SQL 印在畫面上截圖給他們看。
+為什麼錯誤剛好在 Line 94？
+我們算一下妳貼的 SP 程式碼：從第 69 行 SET @sql = CAST(N'' AS NVARCHAR(MAX)) + N' 開始起算第 1 行，往下數到 第 94 行，剛好就是 ELSE 區塊裡面的這一段：
+INSERT INTO dbo.Customer_Migrate_Exception_Table (                                
+     ' + QUOTENAME(@CIFMappingSourceColumn) + ',   -- <--- 動態 SQL 的第 37 行
+     ' + QUOTENAME(@CIFMappingTargetColumn) + ',   -- <--- 動態 SQL 的第 38 行
+...
+SELECT 
+     Y.' + QUOTENAME(@CIFMappingSourceColumn) + ', -- <--- 動態 SQL 的第 59 行
+...
+
+(註：加上前面或中間換行，最後會在第 94 行附近因為參數是 NULL 導致整個 @sql 斷裂，或是組出 Y., 這種語法)。
+方法一：在 SSMS 執行「動態 SQL 照妖鏡」腳本（最推薦，不需改動 DB）
+請打開 SSMS，開一個新增查詢視窗，貼上以下這段專門測試該段邏輯的腳本。這段腳本會模擬 AMLDataMigrator.exe 少傳參數（或傳入空值） 時，SP 內部組出來的壞掉語法：
+USE [BSADBTW]
 GO
 
--- 將舊表上的主鍵與條件約束改名，加上 _20261016 後綴
-IF OBJECT_ID('dbo.pk_SWIFT_MTRAW_ID', 'PK') IS NOT NULL
-    EXEC sp_rename N'dbo.pk_SWIFT_MTRAW_ID', N'pk_SWIFT_MTRAW_ID_20261016', N'OBJECT';
+-- ==========================================
+-- 模擬狀況 1：廠商程式漏傳 TargetColumn 或 FlagColumn (傳入空字串或 NULL)
+-- ==========================================
+SET CONCAT_NULL_YIELDS_NULL OFF; -- 模擬 NULL 被當成空字串串接的狀況
 
-IF OBJECT_ID('dbo.SWIFT_MTRAW_DEFAULT_RAWID', 'D') IS NOT NULL
-    EXEC sp_rename N'dbo.SWIFT_MTRAW_DEFAULT_RAWID', N'SWIFT_MTRAW_DEFAULT_RAWID_20261016', N'OBJECT';
+DECLARE @CIFMappingTable NVARCHAR(100) = 'BANCS_SK_CUST_INFO',
+        @CIFMappingSourceColumn NVARCHAR(100) = 'SK_CUST_ID',
+        @CIFMappingTargetColumn NVARCHAR(100) = NULL, -- <--- 模擬廠商這裡沒傳值或解析失敗！
+        @CIFMappingFlagColumn NVARCHAR(100) = 'CUST_RE_NO_FLG',
+        @sql NVARCHAR(MAX);
 
-IF OBJECT_ID('dbo.SWIFT_MTRAW_DEFAULT_PROGRESS', 'D') IS NOT NULL
-    EXEC sp_rename N'dbo.SWIFT_MTRAW_DEFAULT_PROGRESS', N'SWIFT_MTRAW_DEFAULT_PROGRESS_20261016', N'OBJECT';
+SET @sql = CAST(N'' AS NVARCHAR(MAX)) + N'
+   IF OBJECT_ID(''dbo.Customer_Migrate_Exception_Table'', ''U'') IS NULL
+   BEGIN       
+        SELECT                                    
+             Y.' + QUOTENAME(@CIFMappingSourceColumn) + ',
+             Y.' + QUOTENAME(@CIFMappingTargetColumn) + ',                                
+             ''Excluded in merging'' AS Reason,
+             A.* 
+        INTO dbo.Customer_Migrate_Exception_Table
+        FROM dbo.Customer_Migrate_buffer A
+        LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' Y
+            ON Y.' + QUOTENAME(@CIFMappingSourceColumn) + ' = A.CustomerNo 
+   END
+   ELSE
+   BEGIN       
+        INSERT INTO dbo.Customer_Migrate_Exception_Table (                                
+             ' + QUOTENAME(@CIFMappingSourceColumn) + ',
+             ' + QUOTENAME(@CIFMappingTargetColumn) + ',
+             Reason
+        )
+        SELECT 
+             Y.' + QUOTENAME(@CIFMappingSourceColumn) + ',
+             Y.' + QUOTENAME(@CIFMappingTargetColumn) + ',
+             ''Excluded in merging'' AS Reason
+        FROM dbo.Customer_Migrate_buffer A
+        LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' Y
+             ON Y.' + QUOTENAME(@CIFMappingSourceColumn) + ' = A.CustomerNo
+   END;'
 
-IF OBJECT_ID('dbo.SWIFT_MTRAW_DEFAULT_CREATED_DATE', 'D') IS NOT NULL
-    EXEC sp_rename N'dbo.SWIFT_MTRAW_DEFAULT_CREATED_DATE', N'SWIFT_MTRAW_DEFAULT_CREATED_DATE_20261016', N'OBJECT';
+-- 1. 印出組裝後的 SQL 讓廠商看破洞在哪裡
+PRINT '=== 組裝出來的壞掉 SQL ===';
+PRINT @sql;
 
-IF OBJECT_ID('dbo.df_SWIFT_MTRAW_FeedBackSend', 'D') IS NOT NULL
-    EXEC sp_rename N'dbo.df_SWIFT_MTRAW_FeedBackSend', N'df_SWIFT_MTRAW_FeedBackSend_20261016', N'OBJECT';
+-- 2. 實際執行，觸發一模一樣的「接近 ',' 之處的語法不正確」
+EXEC sp_executesql @sql;
 
-IF OBJECT_ID('dbo.chk_SWIFT_MTRAW_Progress', 'C') IS NOT NULL
-    EXEC sp_rename N'dbo.chk_SWIFT_MTRAW_Progress', N'chk_SWIFT_MTRAW_Progress_20261016', N'OBJECT';
-GO
+執行後會看到什麼？（直接截圖這畫面給廠商）
+在 SSMS 的「訊息 (Messages)」頁籤會印出：
+        INSERT INTO dbo.Customer_Migrate_Exception_Table (                                
+             [SK_CUST_ID],
+             ,               -- <--- 破洞在這裡！欄位不見了，只剩逗號！
+             Reason
+        )
+        SELECT 
+             Y.[SK_CUST_ID],
+             Y.,             -- <--- 破洞在這裡！Y. 後面直接接逗號！
+             'Excluded in merging' AS Reason
+
+緊接著下面就會跳出紅字錯誤：
+> 訊息 102，層級 15，狀態 1，行 18
+> 接近 ',' 之處的語法不正確。
+> 
+方法二：暫時在 SP 埋設「參數攔截 Log」，跑一次 .exe 抓現行犯
+如果廠商嘴硬說：「我們的 .exe 絕對有把 4 個參數傳進去，不可能傳空值！」
+那妳可以直接在 DataMigrator_Integrate 的第 53 行（IF @ModuleName = 'CIF' 下方）暫時插入一行 Log，把 .exe 實際傳進來的參數值活逮下來：
+        BEGIN TRY                
+            IF @ModuleName = 'CIF'
+                BEGIN
+                    -- 【新增這段抓鬼 Log】把 .exe 傳進來的參數原封不動寫進 Log 表
+                    INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG)
+                    VALUES (
+                        @Time, 
+                        'DEBUG_PARAMS -> Table:[' + ISNULL(@CIFMappingTable, 'NULL') + '], ' +
+                        'Src:[' + ISNULL(@CIFMappingSourceColumn, 'NULL') + '], ' +
+                        'Tgt:[' + ISNULL(@CIFMappingTargetColumn, 'NULL') + '], ' +
+                        'Flg:[' + ISNULL(@CIFMappingFlagColumn, 'NULL') + ']', 
+                        'D'
+                    );
+
+修改完 SP 後，再跑一次 AMLDataMigrator.exe TW I CIF，然後去查 SELECT * FROM dbo.Migrator_LOG。
+妳一定會看到 DEBUG_PARAMS 那一筆裡面，某個 [ ] 中間是空的或是 NULL，甚至某個欄位名稱裡夾帶了多餘的逗號！
+方法三：直接貼給廠商的 Bug 回報範本（Email / 通訊軟體直接複製）
+妳可以把下面這段話連同截圖直接丟給廠商工程師，他們一看就會馬上懂了：
+> 【問題回報：AMLDataMigrator 執行 CIF 模組發生 SQL 語法錯誤】
+> 1. 錯誤現象：
+> 執行 AMLDataMigrator.exe TW I CIF 時，CSV 匯入 Customer_Migrate_buffer 成功，但隨後在呼叫 SP [dbo].[DataMigrator_Integrate] 時拋出例外：
+>  * Message : 接近 ',' 之處的語法不正確。
+>  * Migrator_LOG 紀錄錯誤發生於 Line 94。
+> 2. 原因定位：
+> 經查 SP [dbo].[DataMigrator_Integrate]，Line 94 對應的是 @ModuleName = 'CIF' 內部第二段動態 SQL（寫入 dbo.Customer_Migrate_Exception_Table 的 EXEC sp_executesql @sql）。
+> 該段動態 SQL 大量使用：
+>  * Y.' + QUOTENAME(@CIFMappingSourceColumn) + ','
+>  * Y.' + QUOTENAME(@CIFMappingTargetColumn) + ','
+>  * ISNULL(Y.' + QUOTENAME(@CIFMappingFlagColumn) + ', 0)
+> 當 AMLDataMigrator.exe 解析設定檔的 CIFMapping 參數並傳入 SP 時，因其中部分欄位參數（SourceColumn / TargetColumn / FlagColumn）傳入空值或解析異常，QUOTENAME() 回傳 NULL，導致動態組裝出的 SQL 變成 SELECT Y., 或 INSERT INTO ... ( [Col1], , Reason ) 的殘缺語法，在逗號 , 處直接觸發 SQL Parser 語法錯誤。
+> 3. 請協助確認：
+>  * 請確認 AMLDataMigrator.exe 讀取 CIFMapping 設定值的拆解邏輯（Split 格式與預期傳入 SP 的四個參數格式）。
+>  * SP 第 56 行目前僅判斷 IF @CIFMappingTable IS NOT NULL，建議補上對 @CIFMappingSourceColumn、@CIFMappingTargetColumn、@CIFMappingFlagColumn 的非空防呆檢查。
+> 
