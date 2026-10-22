@@ -1,37 +1,126 @@
-最簡單的反向驗證，就是直接從目標表 OFAC_SPEC 反查回 DJ_Entity，看 GROUPID = 5 有沒有混入死人、GROUPID = 6 有沒有混入活人。
-下面提供兩個極簡寫法，直接貼到 SSMS 執行並截圖即可：
-方法一：抓異常筆數（結果為 0 就代表驗證通過，最簡短！）
-這段直接找「放錯群組」的人，跑出來是 0 筆（或 Count = 0） 就證明百分之百沒放錯：
--- 反向驗證：檢查 OFAC_SPEC 是否有放錯群組的異常資料 (結果應為 0)
-SELECT 
-    COUNT(*) AS [放錯群組的異常筆數]
-FROM BSADBJP..OFAC_SPEC T WITH (NOLOCK)
-JOIN BSADB.dbo.DJ_Entity E WITH (NOLOCK) ON T.remark = CAST(E.EntityId AS VARCHAR(100))
-WHERE T.DInd = 'N'
-  AND (
-      (T.GROUPID = 5 AND E.Deceased = 1)             -- Group 5 (活人區) 卻出現死人
-   OR (T.GROUPID = 6 AND ISNULL(E.Deceased, 0) = 0)  -- Group 6 (死人區) 卻出現活人
-  );
+USE [MESSAGEDATABASE]
+GO
+/****** Object:  StoredProcedure [dbo].[SWIFT_InsertRawMessage]    Script Date: 2026/10/22 上午 11:29:25 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
 
-方法二：同時看「數量」與「死活狀態」（10 行搞定，最適合放報告）
-如果你希望一張小表同時看到 Group 5 與 Group 6 的總數，又同時證明 5 全是活人、6 全是死人，用這段 GROUP BY 最直覺：
--- 從 OFAC_SPEC 反向串回 DJ_Entity 檢查各群組的死活狀態與數量
-SELECT 
-    T.GROUPID                                      AS [群組(GROUPID)],
-    T.SOURCE                                       AS [名單來源],
-    CASE WHEN E.Deceased = 1 THEN '死人(1)' 
-         ELSE '活人(0)' END                         AS [DJ真實死活狀態],
-    COUNT(*)                                       AS [筆數]
-FROM BSADBJP..OFAC_SPEC T WITH (NOLOCK)
-JOIN BSADB.dbo.DJ_Entity E WITH (NOLOCK) ON T.remark = CAST(E.EntityId AS VARCHAR(100))
-WHERE T.GROUPID IN (5, 6)
-  AND T.DInd = 'N'
-GROUP BY T.GROUPID, T.SOURCE, CASE WHEN E.Deceased = 1 THEN '死人(1)' ELSE '活人(0)' END
-ORDER BY T.GROUPID;
+ALTER PROCEDURE [dbo].[SWIFT_InsertRawMessage]
+	@BankNo NVARCHAR(10),
+	@BranchNo NVARCHAR(30),
+	@Message NVARCHAR(MAX),
+	@ClientReferenceNo NVARCHAR(40),
+	@ClientMessageTypeCode NVARCHAR(30),
+	@SourceID NVARCHAR(30),
+	@Channel NVARCHAR(30),
+	@ID UNIQUEIDENTIFIER OUTPUT,
+	@CreatedDate DATETIME2(7) OUTPUT,
+	@CreatedDateUTC DATETIME2(7) OUTPUT,
+	@POBankNo NVARCHAR(10) OUTPUT,
+	@IsMaintenance BIT OUTPUT
+AS
+BEGIN
+	SET NOCOUNT ON;
+	SET @ID = NULL;
+	/*Bank local time*/
+	SET @CreatedDate = NULL;
+	SET @CreatedDateUTC = NULL;
+	SET @POBankNo = NULL;
+	SET @IsMaintenance = 'FALSE';
+	
+	DECLARE @STARTTIME TIME = NULL;
+	DECLARE @ENDTIME TIME = NULL;
+	DECLARE @CURRENTTIME TIME = GETDATE();
+	DECLARE @TimeZoneId NVARCHAR(50) = NULL;
+	DECLARE @HourOffset int = 0;
+	DECLARE @MinuteOffset int = 0;
+	DECLARE @SecondOffset int = 0;
+	
+	SELECT @POBankNo = POBankNo, @STARTTIME = MaintenanceStartTime, 
+	@ENDTIME = MaintenanceEndTime, @TimeZoneId = TimeZoneName
+	FROM dbo.BankNoMappings WITH(NOLOCK)
+	WHERE ClientBankNo = @BankNo
+	
+	--workaround for start time and end time cross day
+	SET @HourOffset = DATEPART(hour, @STARTTIME);
+	SET @MinuteOffset = DATEPART(minute, @STARTTIME);
+	SET @SecondOffset = DATEPART(second, @STARTTIME);
+	SET @STARTTIME = DATEADD(second, -@Secondoffset, (DATEADD(minute, -@Minuteoffset, (DATEADD(hour, -@Houroffset, @STARTTIME)))));
+	SET @ENDTIME = DATEADD(second, -@Secondoffset, (DATEADD(minute, -@Minuteoffset, (DATEADD(hour, -@Houroffset, @ENDTIME)))));
+	SET @CURRENTTIME = DATEADD(second, -@Secondoffset, (DATEADD(minute, -@Minuteoffset, (DATEADD(hour, -@Houroffset, @CURRENTTIME)))));
+	
+	/*
+		Check for maintenance period. Proceed if now 
+		is not under maintenance perioud
+	*/
+	IF @STARTTIME IS NOT NULL AND 
+		@ENDTIME IS NOT NULL AND
+		@CURRENTTIME BETWEEN @STARTTIME AND @ENDTIME
+	BEGIN
+		SET @IsMaintenance = 'TRUE';
+	END
+	
+	IF @IsMaintenance = 'FALSE'
+	BEGIN
+	
+		/*
+			Temporary table to store the inserted ID and created date
+		*/
+		DECLARE @TEMP TABLE ( 
+			ID UNIQUEIDENTIFIER, 
+			CreatedDate DATETIME2(7) 
+		);
+		
+		/*
+			@POBankNo should not be null. Exception will occur if the 
+			@POBankNo is null. This will happened when XB is sending a message
+			with unknown bank no in BankNoMappings table.
+		*/
+		
+		DECLARE @NOW DATETIME = GETUTCDATE();
+		DECLARE @BankLocalTime DATETIME = NULL;
+		
+		/*
+			@TimeZoneId IS NULL when @BankNo does not found in dbo.BankNoMappings table
+		*/
+		IF @TimeZoneId IS NOT NULL
+			SELECT @BankLocalTime = dbo.ConvertTimeFromUtc(@NOW, @TimeZoneId)
+		
+		IF NOT EXISTS(SELECT NULL FROM [dbo].[SWIFT_MTRAW]
+		WHERE [ClientReferenceNo] = @ClientReferenceNo AND [Progress] <> 'CANCELED')
+		BEGIN
+			INSERT INTO dbo.[SWIFT_MTRAW] (BankNo, BranchNo, RawMessage, ClientReferenceNo, 
+				ClientMessageTypeCode, SourceID, Channel, Progress, CreatedDate) 
+			OUTPUT INSERTED.ID, INSERTED.CreatedDate 
+			INTO @TEMP(ID, [CreatedDate])
+			VALUES (@POBankNo, @BranchNo, @Message, @ClientReferenceNo, 
+				@ClientMessageTypeCode, @SourceID, @Channel, 'NEW', @NOW)
+			
+			SELECT TOP 1 
+				@ID = ID, 
+				@CreatedDate = @BankLocalTime, 
+				@CreatedDateUTC = CreatedDate
+			FROM @TEMP
 
-跑出來的畫面只會有乾淨的兩列：
-| 群組(GROUPID) | 名單來源 | DJ真實死活狀態 | 筆數 |
-|---|---|---|---|
-| 5 | MOF Sanction List | 活人(0) | (例如 1200) |
-| 6 | MOF Sanction List (Decease) | 死人(1) | (例如 45) |
-(因為 GROUP BY 了死活狀態，如果 GROUPID = 5 有混入死人，就會多跑出一列 5 | 死人(1)；只要畫面只有這兩列，就同時證明了數量跟沒有混入錯誤狀態！)
+			/*
+				Insert the new SWIFT message into SWIFT Parser Queue.
+			*/
+			IF	@ID IS NOT NULL
+			BEGIN
+				IF NOT EXISTS(SELECT NULL FROM dbo.[SwiftParserModelQueue] WITH (NOLOCK) WHERE RawID = @ID)
+				BEGIN
+					INSERT INTO dbo.[SwiftParserModelQueue] (RawID) VALUES (@ID)
+				END
+			END
+			
+		END
+	END
+END
+
+
+
+
+
+
+因為我打了MT 但MTRAW 都沒資料 我該怎麼查原因
