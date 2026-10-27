@@ -1,48 +1,82 @@
-DECLARE @ID UNIQUEIDENTIFIER,
-        @CreatedDate DATETIME2(7),
-        @CreatedDateUTC DATETIME2(7),
-        @POBankNo NVARCHAR(10),
-        @IsMaintenance BIT;
+function Execute-SOAPRequest 
+( 
+        [Xml]    $SOAPRequest, 
+        [String] $URL 
+        ) 
+{ 
+        $soapWebRequest = [System.Net.WebRequest]::Create($URL) 
+        $soapWebRequest.Headers.Add("SOAPAction","SubmitRequest")
+        $soapWebRequest.ContentType = "text/xml;charset=`"utf-8`"" 
+        $soapWebRequest.Accept      = "text/xml" 
+        $soapWebRequest.Method      = "POST" 
+        $requestStream = $soapWebRequest.GetRequestStream() 
+        $SOAPRequest.Save($requestStream) 
+        $requestStream.Close() 
+        $resp = $soapWebRequest.GetResponse() 
+        $responseStream = $resp.GetResponseStream() 
+        $soapReader = [System.IO.StreamReader]($responseStream) 
+        $ReturnXml = $soapReader.ReadToEnd() 
+        $responseStream.Close() 
+        return $ReturnXml 
+}
 
-BEGIN TRY
-    EXEC [dbo].[SWIFT_InsertRawMessage]
-        @BankNo = N'TW',
-        @BranchNo = N'0001',
-        @Message = N'{1:F01TSIBTWTPAXXX5356135117}{2:O1030831210315TSIBTWTPXXXX12341234560510170831N}{4:
-:20:E-T115-082_5
+$url = 'http://localhost:8082/SwiftProcessor.svc?wsdl'
+
+
+
+$soap1 = [xml]@'
+<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Body>
+    <SubmitRequest xmlns="http://patriotofficer.net/SwiftService">
+      <Params>
+        <ActionCode>SCAN_SWIFT</ActionCode>
+        <BankNo>TW</BankNo>
+        <BranchNo>0001</BranchNo>
+        <Channel>SWIFT</Channel>
+        <Message>{1:F01TSIBTWTPAXXX5356135117}{2:O1030831210315TSIBTWTPXXXX12341234560510170831N}{4:
+:20:E-T130-066_2
 :23B:CRED
 :32A:210315USD0,
 :33B:USD0,
 :50K:/21031592170
-Huntsman Investments Company Lim\ited
+TARTOUS
 :53A:HSBCGB2L
 :54A:CRESCHZZ
 :56A:CHASUS33
 :57A:SWHQBEBB
 :59A:DEUTDEFF
-:70:Marieil
 :71A:SHA
--}',
-        @ClientReferenceNo = N'E-T115-082_5',
-        @ClientMessageTypeCode = N'MT',
-        @SourceID = N'TSID',
-        @Channel = N'SWIFT',
-        @ID = @ID OUTPUT,
-        @CreatedDate = @CreatedDate OUTPUT,
-        @CreatedDateUTC = @CreatedDateUTC OUTPUT,
-        @POBankNo = @POBankNo OUTPUT,
-        @IsMaintenance = @IsMaintenance OUTPUT;
+-}
+</Message>
+        <MessageTypeCode>MT</MessageTypeCode>
+        <ReferenceNumber>E-T130-0123123123</ReferenceNumber>
+        <SourceID>TSID</SourceID>
+      </Params>
+    </SubmitRequest>
+  </soap:Body>
+</soap:Envelope>
 
-    SELECT 
-        @ID AS Inserted_ID,
-        @POBankNo AS Mapped_POBankNo,
-        @IsMaintenance AS Is_Maintenance_Mode,
-        @CreatedDate AS BankLocalTime,
-        @CreatedDateUTC AS CreatedDateUTC;
-END TRY
-BEGIN CATCH
-    SELECT 
-        ERROR_NUMBER() AS ErrorNumber,
-        ERROR_LINE() AS ErrorLine,
-        ERROR_MESSAGE() AS ErrorMessage;
-END CATCH
+'@
+
+
+
+
+	$sw = [System.Diagnostics.Stopwatch]::startNew()
+
+	$sw.Reset()
+	$sw.Start()
+
+
+
+Execute-SOAPRequest $soap1  $url
+
+
+
+
+#$sw.Elapsed
+#$count = $count + 1
+
+
+
+幫我整理我的電文
