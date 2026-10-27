@@ -1,5 +1,66 @@
-這裡為你整理好已經修正好分號的完整程式碼。請直接複製以下內容並替換掉原本的預存程序內容：
-               BEGIN                                                                                                                                        
+PROC_DATE	MSG_LOG	FLAG	LINE
+2026-10-27 11:28:23.390	CIF migrate error -------> Message :MERGE 陳述式必須以分號 (;) 結束。	Y	90
+
+
+
+
+
+USE [BSADBTW]
+GO
+/****** Object:  StoredProcedure [dbo].[DataMigrator_Integrate]    Script Date: 2026/2/26 上午 11:00:08 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER PROCEDURE [dbo].[DataMigrator_Integrate]
+    @ModuleName NVARCHAR(100) , --values=CIF, ACCT, TRXN, CUST_NP, RP_NP
+    @CIFMappingTable NVARCHAR(100) = NULL ,
+    @CIFMappingSourceColumn NVARCHAR(100) = NULL ,
+    @CIFMappingTargetColumn NVARCHAR(100) = NULL ,
+    @CIFMappingFlagColumn NVARCHAR(100) = NULL ,
+    @AcctMappingTable NVARCHAR(100) = NULL ,
+    @AcctMappingSourceColumn NVARCHAR(100) = NULL ,
+    @AcctMappingTargetColumn NVARCHAR(100) = NULL ,
+    @Prefix NVARCHAR(50) = NULL
+AS
+    BEGIN
+        DECLARE @sql NVARCHAR(MAX) ,
+            @BNK_NBR VARCHAR(10) = REPLACE(DB_NAME(), 'BSADB', '') ,
+            @UserId NVARCHAR(40) = 'System Admin' ,
+            @Date AS DATETIME ,
+            @DateUTC AS DATETIME = GETUTCDATE(),
+            @Time VARCHAR(30)
+              
+              SET @TIME=CONVERT(VARCHAR, dbo.ConvertToBankLocalTime(GETUTCDATE()), 109)
+     
+        SELECT  @Date = dbo.ConvertToBankLocalTime(@DateUTC);
+
+        SET NOCOUNT ON;
+    
+        IF OBJECT_ID('dbo.CIF_Migrate_Mapping_TEMP', 'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.CIF_Migrate_Mapping_TEMP
+                    (
+                      ACTION NVARCHAR(10) NOT NULL ,
+                      SOURCE_CIF_KEY NVARCHAR(100) NOT NULL ,
+                      NEW_CIF_KEY NVARCHAR(100) NOT NULL
+                    );
+            END;
+     
+        IF OBJECT_ID('dbo.lowrisklistgroups_Migrate_Mapping_TEMP', 'U') IS NULL
+            BEGIN
+                CREATE TABLE dbo.lowrisklistgroups_Migrate_Mapping_TEMP
+                    (
+                      OldGroupID INT NOT NULL ,
+                      NewGroupID INT NOT NULL ,
+                      specType INT NOT NULL
+                    );
+            END;
+
+        BEGIN TRY                
+          
+     IF @ModuleName = 'CIF'
+     BEGIN                                                                                                                                        
                     TRUNCATE TABLE dbo.CIF_Migrate_Mapping_TEMP;
 
                     IF @CIFMappingTable IS NOT NULL
@@ -356,4 +417,3 @@
                        INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG) 
                        SELECT @Time, @ModuleName + ' migrate completed -------> '  , 'N';
                 END;
-
