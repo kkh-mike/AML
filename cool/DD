@@ -80,3 +80,5 @@ Execute-SOAPRequest $soap1  $url
 
 
 幫我整理我的電文
+ReferenceNumber 可以自動填寫為日期時間
+然後整理一下排版給我
