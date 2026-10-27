@@ -1,27 +1,43 @@
-你看圖片裡跳出的錯誤訊息：
-> Error importing AML_Cust.csv: MERGE 陳述式必須以分號 (;) 結束。
-> 
-這是因為在 SQL Server 中，MERGE 陳述式後面必須強制加上分號 (;) 作為結尾，否則在執行時會被視為語法錯誤。
-我們剛才貼給你的版本 B 裡面，有兩個 MERGE 陳述式結尾（分別是有 @CIFMappingTable 的動態 SQL 裡面，以及沒有 @CIFMappingTable 的靜態 SQL 裡麵）漏掉了這個分號。
-請直接套用下方幫你把 MERGE ...; 結尾分號全部補齊的最終完整程式碼：
-BEGIN TRY                
-            IF @ModuleName = 'CIF'
-                BEGIN															                     
+D:\AML_Source\20251114_新光資轉\EXE>AMLDataMigrator.exe TW I CIF
+10/27/2026 10:37:05: Cust - Begin Import
+10/27/2026 10:37:05: Cust - Import - CustomerImportData
+10/27/2026 10:41:02 : Import of AML_Cust.csv completed successfully.
+Error importing AML_Cust.csv: MERGE 陳述式必須以分號 (;) 結束。
+10/27/2026 10:49:51: Cust - Import Failed
+10/27/2026 10:49:51: Process Done
+
+
+
+
+
+
+
+
+
+
+
+
+     IF @ModuleName = 'CIF'
+                BEGIN                                                                                                                                        
                     TRUNCATE TABLE dbo.CIF_Migrate_Mapping_TEMP;
+
+
 
                     IF @CIFMappingTable IS NOT NULL
                        BEGIN                                                                       
                     
                             SET @sql = N'
-								        INSERT INTO dbo.CIF_Migrate_Mapping_TEMP (ACTION, SOURCE_CIF_KEY, NEW_CIF_KEY)
-								        SELECT ''UPDATE'' AS Action, B.CIF_KEY, F.CIF_KEY
-								        FROM ' + QUOTENAME(@CIFMappingTable) + ' A 
-								        JOIN Customer_Migrate_buffer B ON A.' + QUOTENAME(@CIFMappingSourceColumn) + ' = B.CustomerNo
-								        JOIN BSA_SUB_CUST_FACT F ON F.CustomerNo = A.' + QUOTENAME(@CIFMappingTargetColumn) + '
-								        WHERE A.' + QUOTENAME(@CIFMappingFlagColumn) + ' = 1
-								        ';
+                                                                        INSERT INTO dbo.CIF_Migrate_Mapping_TEMP (ACTION, SOURCE_CIF_KEY, NEW_CIF_KEY)
+                                                                        SELECT ''UPDATE'' AS Action, B.CIF_KEY, F.CIF_KEY
+                                                                        FROM ' + QUOTENAME(@CIFMappingTable) + ' A 
+                                                                        JOIN Customer_Migrate_buffer B ON A.' + QUOTENAME(@CIFMappingSourceColumn) + ' = B.CustomerNo
+                                                                        JOIN BSA_SUB_CUST_FACT F ON F.CustomerNo = A.' + QUOTENAME(@CIFMappingTargetColumn) + '
+                                                                        WHERE A.' + QUOTENAME(@CIFMappingFlagColumn) + ' = 1
+                                                                        ';
                          
                                    EXEC sp_executesql @sql;  
+
+
 
                        SET @sql = CAST(N'' AS NVARCHAR(MAX)) + N'
                            -- Check if table exists
@@ -187,6 +203,8 @@ BEGIN TRY
                        ) AS SOURCE
                        ON TARGET.CustomerNo = SOURCE.CustomerNo
 
+
+
                        WHEN MATCHED THEN
                            UPDATE SET 
                                CustomerNo = TARGET.CustomerNo,
@@ -194,6 +212,8 @@ BEGIN TRY
                                    WHEN TARGET.Cust_With_Bearer_Shares = ''1'' OR SOURCE.Cust_With_Bearer_Shares = ''1'' THEN ''1''
                                    ELSE ''0''
                                END                                                  
+
+
 
                        WHEN NOT MATCHED BY TARGET THEN
                            INSERT (
@@ -210,6 +230,8 @@ BEGIN TRY
                                 SOURCE.CUST_TYPE_CDE,
                                 SOURCE.Cust_With_Bearer_Shares
                            )
+
+
 
                        OUTPUT 
                            $action, 
@@ -320,27 +342,27 @@ BEGIN TRY
                                                         AND Z.CODE = F.Value )
                                     AND ISNULL(A.CustPurposeOfAcc, '') <> '';
                                     
-					IF @CIFMappingTable IS NOT NULL
+                                        IF @CIFMappingTable IS NOT NULL
                        BEGIN                                       
-						   SET @sql = N'INSERT INTO SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source(Cif_key, Internal_Cif_Key, LoadTimeKey)
-										 SELECT COALESCE(C.' + QUOTENAME(@CIFMappingTargetColumn) + ', B.CustomerNo) AS CustomerNo, A.NEW_CIF_KEY, B.time_key
-										 FROM dbo.CIF_Migrate_Mapping_TEMP A JOIN dbo.Customer_Migrate_buffer B ON A.SOURCE_CIF_KEY = B.CIF_KEY
-										 LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' C WITH (NOLOCK) ON C.' + QUOTENAME(@CIFMappingSourceColumn) + ' = B.CustomerNo   
-										 WHERE A.ACTION = ''INSERT''
-										 AND NOT EXISTS(SELECT 1 FROM SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source Z WHERE Z.Cif_key = COALESCE(C.' + QUOTENAME(@CIFMappingTargetColumn) + ', B.CustomerNo))';                               
-	              
-							EXEC sp_executesql @sql;   
-						END     
-					ELSE					
-						BEGIN
-							SET @sql = N'INSERT INTO SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source(Cif_key, Internal_Cif_Key, LoadTimeKey)
-										 SELECT B.CustomerNo, A.NEW_CIF_KEY, B.time_key
-										 FROM dbo.CIF_Migrate_Mapping_TEMP A JOIN dbo.Customer_Migrate_buffer B ON A.SOURCE_CIF_KEY = B.CIF_KEY
-										 WHERE A.ACTION = ''INSERT''
-										 AND NOT EXISTS(SELECT 1 FROM SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source Z WHERE Z.Cif_key = B.CustomerNo)';                               
-	              
-							EXEC sp_executesql @sql;  
-						END 
+                                                   SET @sql = N'INSERT INTO SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source(Cif_key, Internal_Cif_Key, LoadTimeKey)
+                                                                                 SELECT COALESCE(C.' + QUOTENAME(@CIFMappingTargetColumn) + ', B.CustomerNo) AS CustomerNo, A.NEW_CIF_KEY, B.time_key
+                                                                                 FROM dbo.CIF_Migrate_Mapping_TEMP A JOIN dbo.Customer_Migrate_buffer B ON A.SOURCE_CIF_KEY = B.CIF_KEY
+                                                                                 LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' C WITH (NOLOCK) ON C.' + QUOTENAME(@CIFMappingSourceColumn) + ' = B.CustomerNo   
+                                                                                 WHERE A.ACTION = ''INSERT''
+                                                                                 AND NOT EXISTS(SELECT 1 FROM SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source Z WHERE Z.Cif_key = COALESCE(C.' + QUOTENAME(@CIFMappingTargetColumn) + ', B.CustomerNo))';                               
+                      
+                                                        EXEC sp_executesql @sql;   
+                                                END     
+                                        ELSE                                    
+                                                BEGIN
+                                                        SET @sql = N'INSERT INTO SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source(Cif_key, Internal_Cif_Key, LoadTimeKey)
+                                                                                 SELECT B.CustomerNo, A.NEW_CIF_KEY, B.time_key
+                                                                                 FROM dbo.CIF_Migrate_Mapping_TEMP A JOIN dbo.Customer_Migrate_buffer B ON A.SOURCE_CIF_KEY = B.CIF_KEY
+                                                                                 WHERE A.ACTION = ''INSERT''
+                                                                                 AND NOT EXISTS(SELECT 1 FROM SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source Z WHERE Z.Cif_key = B.CustomerNo)';                               
+                      
+                                                        EXEC sp_executesql @sql;  
+                                                END 
                         
                      IF @CIFMappingTable IS NOT NULL
                         BEGIN
@@ -359,8 +381,10 @@ BEGIN TRY
                          
                             EXEC sp_executesql @sql;
                         END
-	                              
+                                      
                        INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG) 
                        SELECT @Time, @ModuleName + ' migrate completed -------> '  , 'N';
                 END;
 
+
+哪裡錯了
