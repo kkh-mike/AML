@@ -1,83 +1,155 @@
-   IF @ModuleName = 'TRXN'
-   BEGIN
-        --CREATE CLUSTERED INDEX IX_LoadTrxn_CIF 
-        --ON dbo.LoadTrxn_Migrate_buffer (CIF_KEY);
-        
-        --CREATE INDEX IX_LoadTrxn_YYYYMM
-        --ON dbo.LoadTrxn_Migrate_buffer (YYYYMM);	
-        
-        --CREATE INDEX IX_LoadTrxn_ACCT_KEY 
-        --ON dbo.LoadTrxn_Migrate_buffer (ACCT_KEY);	
-        
-        IF OBJECT_ID('tempdb..#TrxnAcctFinalMapping') IS NOT NULL
-            DROP TABLE #TrxnAcctFinalMapping;
 
-        CREATE TABLE #TrxnAcctFinalMapping
-            (
-              SourceAcctKey NVARCHAR(100) ,
-              FinalAcctKey NVARCHAR(100)
-            );
-        
-        IF ISNULL(@AcctMappingTable, '') <> ''
-        BEGIN
-            -- 解析多段式名稱（如 BSADBTW..XREF），避免 QUOTENAME 將整段包成單一名稱
-            DECLARE @SafeMappingTable NVARCHAR(500);
-            SET @SafeMappingTable = 
-                CASE 
-                    WHEN PARSENAME(@AcctMappingTable, 4) IS NOT NULL THEN QUOTENAME(PARSENAME(@AcctMappingTable, 4)) + '.' ELSE '' END +
-                CASE 
-                    WHEN PARSENAME(@AcctMappingTable, 3) IS NOT NULL THEN QUOTENAME(PARSENAME(@AcctMappingTable, 3)) + '.' 
-                    WHEN PARSENAME(@AcctMappingTable, 4) IS NOT NULL THEN '.' ELSE '' END +
-                CASE 
-                    WHEN PARSENAME(@AcctMappingTable, 2) IS NOT NULL THEN QUOTENAME(PARSENAME(@AcctMappingTable, 2)) + '.' 
-                    WHEN PARSENAME(@AcctMappingTable, 3) IS NOT NULL OR PARSENAME(@AcctMappingTable, 4) IS NOT NULL THEN '.' ELSE '' END +
-                QUOTENAME(PARSENAME(@AcctMappingTable, 1));
+function Execute-SOAPRequest {
+    param (
+        [xml]    $SOAPRequest,
+        [string] $URL
+    )
 
-            SET @sql = N'
-            WITH MappedAccounts AS (
-                SELECT
-                    A.ACCT_KEY AS SourceAcctKey,
-                    -- 若有匹配到目標欄位則使用，否則補上前綴
-                    COALESCE(M.' + QUOTENAME(@AcctMappingTargetColumn) + N', 
-                             ISNULL(@Prefix, '''') + A.ACCT_KEY) AS FinalAcctKey,
-                    ROW_NUMBER() OVER (PARTITION BY A.ACCT_KEY ORDER BY (SELECT 1)) as rn
-                FROM dbo.LoadTrxn_Migrate_buffer A
-                LEFT JOIN ' + @SafeMappingTable + N' M
-                    ON M.' + QUOTENAME(@AcctMappingSourceColumn) + N' = (
-                        CASE 
-                            WHEN LEN(A.ACCT_KEY) < 25 
-                            THEN RIGHT(REPLICATE(''0'', 25) + A.ACCT_KEY, 25) 
-                            ELSE A.ACCT_KEY 
-                        END)
-            )
-            INSERT INTO #TrxnAcctFinalMapping (SourceAcctKey, FinalAcctKey)
-            SELECT
-                SourceAcctKey,
-                FinalAcctKey
-            FROM MappedAccounts
-            WHERE rn = 1 
-              AND ISNULL(SourceAcctKey, '''') <> '''';';
+    $soapWebRequest = [System.Net.WebRequest]::Create($URL)
+    $soapWebRequest.Headers.Add("SOAPAction", "SubmitRequest")
+    $soapWebRequest.ContentType = 'text/xml; charset=utf-8'
+    $soapWebRequest.Accept = "text/xml"
+    $soapWebRequest.Method = "POST"
 
-            EXEC sp_executesql @sql, N'@Prefix NVARCHAR(50)', @Prefix = @Prefix;
-        END
-        ELSE
-        BEGIN
-            WITH PrefixedAccounts AS (
-                SELECT 
-                    ACCT_KEY AS SourceAcctKey,
-                    ISNULL(@Prefix, '') + ACCT_KEY AS FinalAcctKey,
-                    ROW_NUMBER() OVER (PARTITION BY ACCT_KEY ORDER BY (SELECT 1)) AS rn
-                FROM dbo.LoadTrxn_Migrate_buffer
-            )
-            INSERT INTO #TrxnAcctFinalMapping (SourceAcctKey, FinalAcctKey)
-            SELECT 
-                SourceAcctKey,
-                FinalAcctKey
-            FROM PrefixedAccounts
-            WHERE rn = 1
-              AND ISNULL(SourceAcctKey, '') <> '';                        
-        END
+    $requestStream = $soapWebRequest.GetRequestStream()
 
-        CREATE CLUSTERED INDEX IX_SourceAcctKey ON #TrxnAcctFinalMapping(SourceAcctKey);
-        -- WIRE MTHLY FACT
-   END
+    try {
+        $SOAPRequest.Save($requestStream)
+    }
+    finally {
+        $requestStream.Close()
+    }
+
+    $resp = $soapWebRequest.GetResponse()
+
+    try {
+        $responseStream = $resp.GetResponseStream()
+        $soapReader = [System.IO.StreamReader]::new($responseStream)
+
+        try {
+            return $soapReader.ReadToEnd()
+        }
+        finally {
+            $soapReader.Close()
+        }
+    }
+    finally {
+        $resp.Close()
+    }
+}
+
+
+# ============================================================
+# 1. SOAP Service 設定
+# ============================================================
+
+$url = 'http://localhost:8082/SwiftProcessor.svc?wsdl'
+
+
+# ============================================================
+# 2. 自動產生 ReferenceNumber
+#    格式：yyyyMMddHHmmssfff
+#    範例：20261027130325123
+# ============================================================
+
+$referenceNumber = Get-Date -Format 'yyyyMMddHHmmssfff'
+
+
+# ============================================================
+# 3. SWIFT 電文
+# ============================================================
+
+$swiftMessage = @'
+{1:F01TSIBTWTPAXXX5356135117}{2:O1030831210315TSIBTWTPXXXX12341234560510170831N}{4:
+:20:E-T130-066_2
+:23B:CRED
+:32A:210315USD0,
+:33B:USD0,
+:50K:/21031592170
+TARTOUS
+:53A:HSBCGB2L
+:54A:CRESCHZZ
+:56A:CHASUS33
+:57A:SWHQBEBB
+:59A:DEUTDEFF
+:71A:SHA
+-}
+'@
+
+
+# ============================================================
+# 4. 建立 SOAP Request
+# ============================================================
+
+$soapXml = @"
+<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+
+    <soap:Body>
+        <SubmitRequest xmlns="http://patriotofficer.net/SwiftService">
+            <Params>
+                <ActionCode>SCAN_SWIFT</ActionCode>
+                <BankNo>TW</BankNo>
+                <BranchNo>0001</BranchNo>
+                <Channel>SWIFT</Channel>
+                <Message><![CDATA[$swiftMessage]]></Message>
+                <MessageTypeCode>MT</MessageTypeCode>
+                <ReferenceNumber>$referenceNumber</ReferenceNumber>
+                <SourceID>TSID</SourceID>
+            </Params>
+        </SubmitRequest>
+    </soap:Body>
+</soap:Envelope>
+"@
+
+$soap1 = [xml]$soapXml
+
+
+# ============================================================
+# 5. 執行 SOAP Request 並計算耗時
+# ============================================================
+
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+try {
+    $response = Execute-SOAPRequest -SOAPRequest $soap1 -URL $url
+
+    $sw.Stop()
+
+    Write-Host "ReferenceNumber : $referenceNumber"
+    Write-Host "Elapsed Time    : $($sw.Elapsed.TotalMilliseconds) ms"
+    Write-Host "`nSOAP Response:"
+    Write-Output $response
+}
+catch {
+    $sw.Stop()
+
+    Write-Host "SOAP Request Failed" -ForegroundColor Red
+    Write-Host "ReferenceNumber : $referenceNumber"
+    Write-Host "Elapsed Time    : $($sw.Elapsed.TotalMilliseconds) ms"
+    Write-Host "Error           : $($_.Exception.Message)" -ForegroundColor Red
+}
+
+
+
+可不可以$swiftMessage   改成讀取.txt 來帶入訊息 一次打多筆
+我的txt內容會是
+{1:F01TSIBTWTPAXXX0000000000}{2:I104TWIPTW2PXXXXN}{3:{119:RFDD}}{4:  :20:I10180321000001  :23E:RFDD  :21E:/A02//2DBU  :30:180321  :50L:84703052  :50K:/068750053682  FARGLORY LIFE INSURANCE CO LTD  :52A:TSIBTWTP  :26T:I10  :21:21  :23E:AUTH  :21D:S200416775  :32B:USD16979,  :57A:BKTWTWTP  :59:/159007011212  S200416775  CHIEN CHANG CHU SUI  :70:FGLIFEN  :21:22  :23E:AUTH  :21D:D122210031  :32B:USD3241,  :57A:APBKTWTH  :59:/0116280024306  D122210031  LI CHENG HAO  :70:FGLIFEN  :21:26  :23E:AUTH  :21D:F225381666  :32B:USD1969,  :57A:SINOTWTP  :59:/01400800480916  F225381666  LO YU SHAN  :70:FGLIFEN  -}
+{1:F01TSIBTWTPAXXX0000000000}{2:I104TWIPTW2PXXXXN}{3:{119:RFDD}}{4:  :20:I10180321000001  :23E:RFDD  :21E:/A02//2DBU  :30:180321  :50L:84703052  :50K:/068750053682  FARGLORY LIFE INSURANCE CO LTD  :52A:TSIBTWTP  :26T:I10  :21:21  :23E:AUTH  :21D:S200416775  :32B:USD16979,  :57A:BKTWTWTP  :59:/159007011212  S200416775  CHIEN CHANG CHU SUI  :70:FGLIFEN  :21:22  :23E:AUTH  :21D:D122210031  :32B:USD3241,  :57A:APBKTWTH  :59:/0116280024306  D122210031  LI CHENG HAO  :70:FGLIFEN  :21:26  :23E:AUTH  :21D:F225381666  :32B:USD1969,  :57A:SINOTWTP  :59:/01400800480916  F225381666  LO YU SHAN  :70:FGLIFEN  -}
+{1:F01TSIBTWT0AXXX0000000000}{2:I103TSIBTWT0XXXXN}{4:  :20:NHAH181250020090  :23B:CRED  :32A:180319USD150,  :33B:USD150,  :50K:/001756085019  NAME  ADDRESS  :52A:TSIBTWTPXXX  :57A:SENFLKLX  :59:/00000099129077  ABABA  :71A:SHA  :72:/ACC/UNITED STATES  -}
+{1:F01TSIBTWT0AXXX0000000000}{2:I103TSIBTWT0XXXXN}{4:  :20:NHAH181250020090  :23B:CRED  :32A:180319USD150,  :33B:USD150,  :50K:/001756085019  NAME  ADDRESS  :52A:TSIBTWTPXXX  :57A:SENFLKLX  :59:/00000099129077  ABABA  :71A:SHA  :72:/ACC/UNITED STATES  -}
+{1:F01TSIBTWT0AXXX0000000000}{2:I103TSIBTWT0XXXXN}{4:  :20:NHAH181250020090  :23B:CRED  :32A:180319USD150,  :33B:USD150,  :50K:/001756085019  NAME  ADDRESS  :52A:TSIBTWTPXXX  :57A:SENFLKLX  :59:/00000099129077  ABABA  :71A:SHA  :72:/ACC/UNITED STATES  -}
+{1:F01TSIBTWT0AXXX0000000000}{2:I103TSIBTWT0XXXXN}{3:{103:TWP}}{4:  :20:NHAH18T00161-068  :23B:CRED  :32A:180321USD1,  :33B:USD1,  :50K:/063756049077  CHIANG SOO TAI XXX  0F NO22 LN00 TIENMU E RD TAIPEI  TW  :52A:TSIBTWTPXXX  :57A:SCSBTWTP069  :59:/000000000000000  SHIYAO INTERNATIONAL TRADING CO LTD  :71A:SHA  :72:/ACC/2DBU  //EAST KAOHSIUNG BR  -}
+{1:F01TSIBTWT0AXXX0000000000}{2:I104TSIBTWT0XXXXN}{3:{119:RFDD}}{4:  :20:I10180322000001  :23E:RFDD  :21E:/A02//XA2D  :30:180322  :50L:14053111  :50K:/068710030302  NAN SHAN INSURANCE CO LTD.  :52A:TSIBTWTP  :26T:I10  :21:00000037  :23E:AUTH  :21D:1234567898  :32B:USD50,1  :57A:BKTWTWTP  :59:/069168152233  A147257369  WONG Q Q  -}
+{1:F01TSIBTWT0AXXX0000000000}{2:I104TSIBTWT0XXXXN}{3:{119:RFDD}}{4:  :20:I10180322000002  :23E:RFDD  :21E:/A02//2DBU  :30:180322  :50L:14053111  :50K:/068710030302  NAN SHAN INSURANCE CO LTD.  :52A:TSIBTWTP  :26T:I10  :21:00000025  :23E:AUTH  :21D:1234567899  :32B:USD40,1  :57A:FCBKTWTP  :59:/210661001235  C112225344  LIN XXX OOO  -}
+{1:F01TSIBTWT0AXXX0000000000}{2:I103TSIBTWT0XXXXN}{3:{103:TWP}}{4:  :20:NHAH18T00162-068  :23B:CRED  :32A:180322USD1,  :33B:USD1,  :50K:/063756049077  CHIANG SOO TAI  0F NO00 LN00 TIENMU E RD TAIPEI  TW  :52A:TSIBTWTPXXX  :57A:SCSBTWTP069  :59:/000000000000000000000000  XX SHIYAO INTERNATIONAL TRADING CO  LTD  :71A:SHA  :72:/ACC/2DBU  -}
+{1:F01TSIBTWT0AXXX0000000000}{2:I103TSIBTWT0XXXXN}{3:{103:TWP}}{4:  :20:NHAH18T00162-068  :23B:CRED  :32A:180322USD1,  :33B:USD1,  :50K:/063756049077  CHIANG SOO TAI  0F NO00 LN00 TIENMU E RD TAIPEI  TW  :52A:TSIBTWTPXXX  :57A:SCSBTWTP069  :59:/000000000000000000000000  XX SHIYAO INTERNATIONAL TRADING CO  LTD  :71A:SHA  :72:/ACC/2DBU  -}
+
+甚至更多
+
+我的ps1 可以怎麼改
+
+給我完整的ps1
