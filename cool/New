@@ -1,36 +1,109 @@
 
+#requires -Version 5.1
+
+# ============================================================
+# Send-SwiftFromTxt.ps1
+# TXT 多筆 SWIFT 電文 -> SOAP API
+#
+# TXT 格式：一行一筆 SWIFT 電文
+# 功能：逐筆送出、記錄耗時、錯誤處理、輸出 CSV
+# ============================================================
+
+$ErrorActionPreference = 'Stop'
+
+# ============================================================
+# 1. 基本設定
+# ============================================================
+
+$url = 'http://localhost:8082/SwiftProcessor.svc?wsdl'
+
+# TXT 電文檔案路徑：請依實際位置修改
+$InputFile = 'C:\SWIFT\swift_messages.txt'
+
+# 批次結果 CSV 路徑
+$OutputCsv = 'C:\SWIFT\swift_results.csv'
+
+# SOAP 固定參數
+$ActionCode     = 'SCAN_SWIFT'
+$BankNo         = 'TW'
+$BranchNo       = '0001'
+$Channel        = 'SWIFT'
+$MessageTypeCode = 'MT'
+$SourceID       = 'TSID'
+
+# HTTP Timeout（毫秒）
+$TimeoutMs = 60000
+
+# ============================================================
+# 2. SOAP Request 函式
+# ============================================================
+
 function Execute-SOAPRequest {
     param (
-        [xml]    $SOAPRequest,
+        [Parameter(Mandatory = $true)]
+        [xml] $SOAPRequest,
+
+        [Parameter(Mandatory = $true)]
         [string] $URL
     )
 
     $soapWebRequest = [System.Net.WebRequest]::Create($URL)
-    $soapWebRequest.Headers.Add("SOAPAction", "SubmitRequest")
-    $soapWebRequest.ContentType = 'text/xml; charset=utf-8'
-    $soapWebRequest.Accept = "text/xml"
-    $soapWebRequest.Method = "POST"
 
+    $soapWebRequest.Headers.Add('SOAPAction', 'SubmitRequest')
+    $soapWebRequest.ContentType = 'text/xml; charset=utf-8'
+    $soapWebRequest.Accept = 'text/xml'
+    $soapWebRequest.Method = 'POST'
+    $soapWebRequest.Timeout = $TimeoutMs
+    $soapWebRequest.ReadWriteTimeout = $TimeoutMs
+
+    # 送出 Request
     $requestStream = $soapWebRequest.GetRequestStream()
 
     try {
-        $SOAPRequest.Save($requestStream)
+        # 使用 UTF-8 編碼送出 XML
+        $settings = New-Object System.Xml.XmlWriterSettings
+        $settings.Encoding = New-Object System.Text.UTF8Encoding($false)
+        $settings.Indent = $false
+        $settings.CloseOutput = $false
+
+        $writer = [System.Xml.XmlWriter]::Create(
+            $requestStream,
+            $settings
+        )
+
+        try {
+            $SOAPRequest.Save($writer)
+            $writer.Flush()
+        }
+        finally {
+            $writer.Close()
+        }
     }
     finally {
         $requestStream.Close()
     }
 
+    # 接收 Response
     $resp = $soapWebRequest.GetResponse()
 
     try {
         $responseStream = $resp.GetResponseStream()
-        $soapReader = [System.IO.StreamReader]::new($responseStream)
 
         try {
-            return $soapReader.ReadToEnd()
+            $reader = New-Object System.IO.StreamReader(
+                $responseStream,
+                [System.Text.Encoding]::UTF8
+            )
+
+            try {
+                return $reader.ReadToEnd()
+            }
+            finally {
+                $reader.Close()
+            }
         }
         finally {
-            $soapReader.Close()
+            $responseStream.Close()
         }
     }
     finally {
@@ -38,118 +111,317 @@ function Execute-SOAPRequest {
     }
 }
 
-
 # ============================================================
-# 1. SOAP Service 設定
-# ============================================================
-
-$url = 'http://localhost:8082/SwiftProcessor.svc?wsdl'
-
-
-# ============================================================
-# 2. 自動產生 ReferenceNumber
-#    格式：yyyyMMddHHmmssfff
-#    範例：20261027130325123
+# 3. 建立 SOAP XML
 # ============================================================
 
-$referenceNumber = Get-Date -Format 'yyyyMMddHHmmssfff'
+function New-SOAPRequest {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string] $SwiftMessage,
 
+        [Parameter(Mandatory = $true)]
+        [string] $ReferenceNumber
+    )
 
-# ============================================================
-# 3. SWIFT 電文
-# ============================================================
+    $soapNs = 'http://schemas.xmlsoap.org/soap/envelope/'
+    $serviceNs = 'http://patriotofficer.net/SwiftService'
 
-$swiftMessage = @'
-{1:F01TSIBTWTPAXXX5356135117}{2:O1030831210315TSIBTWTPXXXX12341234560510170831N}{4:
-:20:E-T130-066_2
-:23B:CRED
-:32A:210315USD0,
-:33B:USD0,
-:50K:/21031592170
-TARTOUS
-:53A:HSBCGB2L
-:54A:CRESCHZZ
-:56A:CHASUS33
-:57A:SWHQBEBB
-:59A:DEUTDEFF
-:71A:SHA
--}
-'@
+    $xml = New-Object System.Xml.XmlDocument
+    $xml.PreserveWhitespace = $true
 
+    # XML Declaration
+    $declaration = $xml.CreateXmlDeclaration(
+        '1.0',
+        'utf-8',
+        $null
+    )
+    [void] $xml.AppendChild($declaration)
 
-# ============================================================
-# 4. 建立 SOAP Request
-# ============================================================
+    # Envelope
+    $envelope = $xml.CreateElement(
+        'soap',
+        'Envelope',
+        $soapNs
+    )
+    [void] $xml.AppendChild($envelope)
 
-$soapXml = @"
-<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope
-    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    # Body
+    $body = $xml.CreateElement(
+        'soap',
+        'Body',
+        $soapNs
+    )
+    [void] $envelope.AppendChild($body)
 
-    <soap:Body>
-        <SubmitRequest xmlns="http://patriotofficer.net/SwiftService">
-            <Params>
-                <ActionCode>SCAN_SWIFT</ActionCode>
-                <BankNo>TW</BankNo>
-                <BranchNo>0001</BranchNo>
-                <Channel>SWIFT</Channel>
-                <Message><![CDATA[$swiftMessage]]></Message>
-                <MessageTypeCode>MT</MessageTypeCode>
-                <ReferenceNumber>$referenceNumber</ReferenceNumber>
-                <SourceID>TSID</SourceID>
-            </Params>
-        </SubmitRequest>
-    </soap:Body>
-</soap:Envelope>
-"@
+    # SubmitRequest
+    $submit = $xml.CreateElement(
+        '',
+        'SubmitRequest',
+        $serviceNs
+    )
+    [void] $body.AppendChild($submit)
 
-$soap1 = [xml]$soapXml
+    # Params
+    $params = $xml.CreateElement(
+        '',
+        'Params',
+        $serviceNs
+    )
+    [void] $submit.AppendChild($params)
 
+    # 固定欄位
+    $fields = [ordered]@{
+        ActionCode      = $ActionCode
+        BankNo          = $BankNo
+        BranchNo        = $BranchNo
+        Channel         = $Channel
+    }
 
-# ============================================================
-# 5. 執行 SOAP Request 並計算耗時
-# ============================================================
+    foreach ($field in $fields.GetEnumerator()) {
+        $element = $xml.CreateElement(
+            '',
+            $field.Key,
+            $serviceNs
+        )
+        $element.InnerText = [string]$field.Value
+        [void] $params.AppendChild($element)
+    }
 
-$sw = [System.Diagnostics.Stopwatch]::StartNew()
+    # Message 使用 CDATA，保留 SWIFT 電文內容
+    $messageElement = $xml.CreateElement(
+        '',
+        'Message',
+        $serviceNs
+    )
 
-try {
-    $response = Execute-SOAPRequest -SOAPRequest $soap1 -URL $url
+    # CDATA 不能直接包含 ]]>；遇到時改成一般文字節點，
+    # 由 XML 自動處理特殊字元
+    if ($SwiftMessage.Contains(']]>')) {
+        $messageElement.InnerText = $SwiftMessage
+    }
+    else {
+        $cdata = $xml.CreateCDataSection($SwiftMessage)
+        [void] $messageElement.AppendChild($cdata)
+    }
 
-    $sw.Stop()
+    [void] $params.AppendChild($messageElement)
 
-    Write-Host "ReferenceNumber : $referenceNumber"
-    Write-Host "Elapsed Time    : $($sw.Elapsed.TotalMilliseconds) ms"
-    Write-Host "`nSOAP Response:"
-    Write-Output $response
+    # 剩餘欄位
+    $remainingFields = [ordered]@{
+        MessageTypeCode = $MessageTypeCode
+        ReferenceNumber = $ReferenceNumber
+        SourceID        = $SourceID
+    }
+
+    foreach ($field in $remainingFields.GetEnumerator()) {
+        $element = $xml.CreateElement(
+            '',
+            $field.Key,
+            $serviceNs
+        )
+        $element.InnerText = [string]$field.Value
+        [void] $params.AppendChild($element)
+    }
+
+    return $xml
 }
-catch {
-    $sw.Stop()
 
-    Write-Host "SOAP Request Failed" -ForegroundColor Red
-    Write-Host "ReferenceNumber : $referenceNumber"
-    Write-Host "Elapsed Time    : $($sw.Elapsed.TotalMilliseconds) ms"
-    Write-Host "Error           : $($_.Exception.Message)" -ForegroundColor Red
+# ============================================================
+# 4. 檢查輸入檔案
+# ============================================================
+
+if (-not (Test-Path -LiteralPath $InputFile -PathType Leaf)) {
+    throw "找不到 TXT 檔案：$InputFile"
 }
 
+$outputDirectory = Split-Path -Parent $OutputCsv
 
+if ($outputDirectory -and
+    -not (Test-Path -LiteralPath $outputDirectory)) {
 
-可不可以$swiftMessage   改成讀取.txt 來帶入訊息 一次打多筆
-我的txt內容會是
-{1:F01TSIBTWTPAXXX0000000000}{2:I104TWIPTW2PXXXXN}{3:{119:RFDD}}{4:  :20:I10180321000001  :23E:RFDD  :21E:/A02//2DBU  :30:180321  :50L:84703052  :50K:/068750053682  FARGLORY LIFE INSURANCE CO LTD  :52A:TSIBTWTP  :26T:I10  :21:21  :23E:AUTH  :21D:S200416775  :32B:USD16979,  :57A:BKTWTWTP  :59:/159007011212  S200416775  CHIEN CHANG CHU SUI  :70:FGLIFEN  :21:22  :23E:AUTH  :21D:D122210031  :32B:USD3241,  :57A:APBKTWTH  :59:/0116280024306  D122210031  LI CHENG HAO  :70:FGLIFEN  :21:26  :23E:AUTH  :21D:F225381666  :32B:USD1969,  :57A:SINOTWTP  :59:/01400800480916  F225381666  LO YU SHAN  :70:FGLIFEN  -}
-{1:F01TSIBTWTPAXXX0000000000}{2:I104TWIPTW2PXXXXN}{3:{119:RFDD}}{4:  :20:I10180321000001  :23E:RFDD  :21E:/A02//2DBU  :30:180321  :50L:84703052  :50K:/068750053682  FARGLORY LIFE INSURANCE CO LTD  :52A:TSIBTWTP  :26T:I10  :21:21  :23E:AUTH  :21D:S200416775  :32B:USD16979,  :57A:BKTWTWTP  :59:/159007011212  S200416775  CHIEN CHANG CHU SUI  :70:FGLIFEN  :21:22  :23E:AUTH  :21D:D122210031  :32B:USD3241,  :57A:APBKTWTH  :59:/0116280024306  D122210031  LI CHENG HAO  :70:FGLIFEN  :21:26  :23E:AUTH  :21D:F225381666  :32B:USD1969,  :57A:SINOTWTP  :59:/01400800480916  F225381666  LO YU SHAN  :70:FGLIFEN  -}
-{1:F01TSIBTWT0AXXX0000000000}{2:I103TSIBTWT0XXXXN}{4:  :20:NHAH181250020090  :23B:CRED  :32A:180319USD150,  :33B:USD150,  :50K:/001756085019  NAME  ADDRESS  :52A:TSIBTWTPXXX  :57A:SENFLKLX  :59:/00000099129077  ABABA  :71A:SHA  :72:/ACC/UNITED STATES  -}
-{1:F01TSIBTWT0AXXX0000000000}{2:I103TSIBTWT0XXXXN}{4:  :20:NHAH181250020090  :23B:CRED  :32A:180319USD150,  :33B:USD150,  :50K:/001756085019  NAME  ADDRESS  :52A:TSIBTWTPXXX  :57A:SENFLKLX  :59:/00000099129077  ABABA  :71A:SHA  :72:/ACC/UNITED STATES  -}
-{1:F01TSIBTWT0AXXX0000000000}{2:I103TSIBTWT0XXXXN}{4:  :20:NHAH181250020090  :23B:CRED  :32A:180319USD150,  :33B:USD150,  :50K:/001756085019  NAME  ADDRESS  :52A:TSIBTWTPXXX  :57A:SENFLKLX  :59:/00000099129077  ABABA  :71A:SHA  :72:/ACC/UNITED STATES  -}
-{1:F01TSIBTWT0AXXX0000000000}{2:I103TSIBTWT0XXXXN}{3:{103:TWP}}{4:  :20:NHAH18T00161-068  :23B:CRED  :32A:180321USD1,  :33B:USD1,  :50K:/063756049077  CHIANG SOO TAI XXX  0F NO22 LN00 TIENMU E RD TAIPEI  TW  :52A:TSIBTWTPXXX  :57A:SCSBTWTP069  :59:/000000000000000  SHIYAO INTERNATIONAL TRADING CO LTD  :71A:SHA  :72:/ACC/2DBU  //EAST KAOHSIUNG BR  -}
-{1:F01TSIBTWT0AXXX0000000000}{2:I104TSIBTWT0XXXXN}{3:{119:RFDD}}{4:  :20:I10180322000001  :23E:RFDD  :21E:/A02//XA2D  :30:180322  :50L:14053111  :50K:/068710030302  NAN SHAN INSURANCE CO LTD.  :52A:TSIBTWTP  :26T:I10  :21:00000037  :23E:AUTH  :21D:1234567898  :32B:USD50,1  :57A:BKTWTWTP  :59:/069168152233  A147257369  WONG Q Q  -}
-{1:F01TSIBTWT0AXXX0000000000}{2:I104TSIBTWT0XXXXN}{3:{119:RFDD}}{4:  :20:I10180322000002  :23E:RFDD  :21E:/A02//2DBU  :30:180322  :50L:14053111  :50K:/068710030302  NAN SHAN INSURANCE CO LTD.  :52A:TSIBTWTP  :26T:I10  :21:00000025  :23E:AUTH  :21D:1234567899  :32B:USD40,1  :57A:FCBKTWTP  :59:/210661001235  C112225344  LIN XXX OOO  -}
-{1:F01TSIBTWT0AXXX0000000000}{2:I103TSIBTWT0XXXXN}{3:{103:TWP}}{4:  :20:NHAH18T00162-068  :23B:CRED  :32A:180322USD1,  :33B:USD1,  :50K:/063756049077  CHIANG SOO TAI  0F NO00 LN00 TIENMU E RD TAIPEI  TW  :52A:TSIBTWTPXXX  :57A:SCSBTWTP069  :59:/000000000000000000000000  XX SHIYAO INTERNATIONAL TRADING CO  LTD  :71A:SHA  :72:/ACC/2DBU  -}
-{1:F01TSIBTWT0AXXX0000000000}{2:I103TSIBTWT0XXXXN}{3:{103:TWP}}{4:  :20:NHAH18T00162-068  :23B:CRED  :32A:180322USD1,  :33B:USD1,  :50K:/063756049077  CHIANG SOO TAI  0F NO00 LN00 TIENMU E RD TAIPEI  TW  :52A:TSIBTWTPXXX  :57A:SCSBTWTP069  :59:/000000000000000000000000  XX SHIYAO INTERNATIONAL TRADING CO  LTD  :71A:SHA  :72:/ACC/2DBU  -}
+    New-Item -ItemType Directory -Path $outputDirectory -Force |
+        Out-Null
+}
 
-甚至更多
+# UTF-8 讀取，每一行視為一筆電文
+$allLines = @(
+    Get-Content -LiteralPath $InputFile -Encoding UTF8
+)
 
-我的ps1 可以怎麼改
+$messages = @(
+    foreach ($line in $allLines) {
+        $message = $line.Trim()
 
-給我完整的ps1
+        if ([string]::IsNullOrWhiteSpace($message)) {
+            continue
+        }
+
+        $message
+    }
+)
+
+$total = $messages.Count
+
+if ($total -eq 0) {
+    throw "TXT 沒有可處理的 SWIFT 電文：$InputFile"
+}
+
+Write-Host ''
+Write-Host '============================================================'
+Write-Host 'SWIFT SOAP Batch Processing'
+Write-Host '============================================================'
+Write-Host "Input File : $InputFile"
+Write-Host "SOAP URL   : $url"
+Write-Host "Total      : $total"
+Write-Host "Output CSV : $OutputCsv"
+Write-Host '============================================================'
+Write-Host ''
+
+# ============================================================
+# 5. 逐筆送出 SOAP Request
+# ============================================================
+
+$results = New-Object System.Collections.Generic.List[object]
+$batchWatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+$referenceNumbers = @{}
+
+for ($i = 0; $i -lt $total; $i++) {
+
+    $seq = $i + 1
+    $swiftMessage = $messages[$i]
+
+    # ReferenceNumber 格式：yyyyMMddHHmmssfff
+    # 避免同一毫秒產生重複編號
+    do {
+        $referenceNumber = Get-Date -Format 'yyyyMMddHHmmssfff'
+
+        if ($referenceNumbers.ContainsKey($referenceNumber)) {
+            Start-Sleep -Milliseconds 2
+        }
+    }
+    while ($referenceNumbers.ContainsKey($referenceNumber))
+
+    $referenceNumbers[$referenceNumber] = $true
+
+    $status = 'SUCCESS'
+    $responseText = ''
+    $errorMessage = ''
+    $elapsedMs = 0
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+    Write-Host "[$seq/$total] Sending..." -ForegroundColor Cyan
+    Write-Host "ReferenceNumber : $referenceNumber"
+
+    try {
+        # 建立 XML
+        $soapRequest = New-SOAPRequest `
+            -SwiftMessage $swiftMessage `
+            -ReferenceNumber $referenceNumber
+
+        # 送出 SOAP
+        $responseText = Execute-SOAPRequest `
+            -SOAPRequest $soapRequest `
+            -URL $url
+
+        $sw.Stop()
+        $elapsedMs = [math]::Round(
+            $sw.Elapsed.TotalMilliseconds, 2
+        )
+
+        Write-Host "Status          : SUCCESS" -ForegroundColor Green
+        Write-Host "Elapsed Time    : $elapsedMs ms"
+    }
+    catch {
+        $sw.Stop()
+        $elapsedMs = [math]::Round(
+            $sw.Elapsed.TotalMilliseconds, 2
+        )
+
+        $status = 'FAILED'
+        $errorMessage = $_.Exception.Message
+
+        # 嘗試取得 HTTP 錯誤 Response 內容
+        if ($_.Exception.Response) {
+            try {
+                $errorStream = $_.Exception.Response.GetResponseStream()
+
+                if ($errorStream) {
+                    try {
+                        $errorReader = New-Object System.IO.StreamReader(
+                            $errorStream,
+                            [System.Text.Encoding]::UTF8
+                        )
+
+                        try {
+                            $responseText = $errorReader.ReadToEnd()
+                        }
+                        finally {
+                            $errorReader.Close()
+                        }
+                    }
+                    finally {
+                        $errorStream.Close()
+                    }
+                }
+            }
+            catch {
+                # 保留原始錯誤，不中斷後續電文
+            }
+        }
+
+        Write-Host "Status          : FAILED" -ForegroundColor Red
+        Write-Host "Elapsed Time    : $elapsedMs ms"
+        Write-Host "Error           : $errorMessage" -ForegroundColor Red
+    }
+
+    # 每筆結果
+    $results.Add([PSCustomObject]@{
+        Sequence        = $seq
+        ReferenceNumber = $referenceNumber
+        Status          = $status
+        ElapsedMs       = $elapsedMs
+        ErrorMessage    = $errorMessage
+        Response        = $responseText
+        Message         = $swiftMessage
+    })
+
+    Write-Host '------------------------------------------------------------'
+}
+
+$batchWatch.Stop()
+
+# ============================================================
+# 6. 輸出 CSV 結果報表
+# ============================================================
+
+$results |
+    Export-Csv -LiteralPath $OutputCsv `
+        -NoTypeInformation `
+        -Encoding UTF8
+
+$successCount = @(
+    $results | Where-Object { $_.Status -eq 'SUCCESS' }
+).Count
+
+$failedCount = @(
+    $results | Where-Object { $_.Status -eq 'FAILED' }
+).Count
+
+# ============================================================
+# 7. 批次執行摘要
+# ============================================================
+
+Write-Host ''
+Write-Host '============================================================'
+Write-Host 'Batch Summary'
+Write-Host '============================================================'
+Write-Host "Total Messages : $total"
+Write-Host "Success        : $successCount" -ForegroundColor Green
+Write-Host "Failed         : $failedCount" -ForegroundColor Red
+Write-Host "Total Time     : $([math]::Round($batchWatch.Elapsed.TotalSeconds, 2)) sec"
+Write-Host "Average Time   : $([math]::Round($batchWatch.Elapsed.TotalMilliseconds / $total, 2)) ms/message"
+Write-Host "Result CSV     : $OutputCsv"
+Write-Host '============================================================'
