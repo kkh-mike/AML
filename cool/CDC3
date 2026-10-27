@@ -1,122 +1,366 @@
-修復 AML 資轉 Stored Procedure 語法異常：優化動態 SQL 組合邏輯與參數檢核，解決批次匯入時的解析錯誤，確保客戶資料順利完成遷移與驗證。
-
-
-
-
-要讓廠商心服口服，最快的方法是在 SSMS (SQL Server Management Studio) 裡直接寫一段測試腳本，重現一模一樣的 「第 94 行、接近 ',' 之處的語法不正確」 報錯，並把組出來的殘缺 SQL 印在畫面上截圖給他們看。
-為什麼錯誤剛好在 Line 94？
-我們算一下妳貼的 SP 程式碼：從第 69 行 SET @sql = CAST(N'' AS NVARCHAR(MAX)) + N' 開始起算第 1 行，往下數到 第 94 行，剛好就是 ELSE 區塊裡面的這一段：
-INSERT INTO dbo.Customer_Migrate_Exception_Table (                                
-     ' + QUOTENAME(@CIFMappingSourceColumn) + ',   -- <--- 動態 SQL 的第 37 行
-     ' + QUOTENAME(@CIFMappingTargetColumn) + ',   -- <--- 動態 SQL 的第 38 行
-...
-SELECT 
-     Y.' + QUOTENAME(@CIFMappingSourceColumn) + ', -- <--- 動態 SQL 的第 59 行
-...
-
-(註：加上前面或中間換行，最後會在第 94 行附近因為參數是 NULL 導致整個 @sql 斷裂，或是組出 Y., 這種語法)。
-方法一：在 SSMS 執行「動態 SQL 照妖鏡」腳本（最推薦，不需改動 DB）
-請打開 SSMS，開一個新增查詢視窗，貼上以下這段專門測試該段邏輯的腳本。這段腳本會模擬 AMLDataMigrator.exe 少傳參數（或傳入空值） 時，SP 內部組出來的壞掉語法：
-USE [BSADBTW]
-GO
-
--- ==========================================
--- 模擬狀況 1：廠商程式漏傳 TargetColumn 或 FlagColumn (傳入空字串或 NULL)
--- ==========================================
-SET CONCAT_NULL_YIELDS_NULL OFF; -- 模擬 NULL 被當成空字串串接的狀況
-
-DECLARE @CIFMappingTable NVARCHAR(100) = 'BANCS_SK_CUST_INFO',
-        @CIFMappingSourceColumn NVARCHAR(100) = 'SK_CUST_ID',
-        @CIFMappingTargetColumn NVARCHAR(100) = NULL, -- <--- 模擬廠商這裡沒傳值或解析失敗！
-        @CIFMappingFlagColumn NVARCHAR(100) = 'CUST_RE_NO_FLG',
-        @sql NVARCHAR(MAX);
-
-SET @sql = CAST(N'' AS NVARCHAR(MAX)) + N'
-   IF OBJECT_ID(''dbo.Customer_Migrate_Exception_Table'', ''U'') IS NULL
-   BEGIN       
-        SELECT                                    
-             Y.' + QUOTENAME(@CIFMappingSourceColumn) + ',
-             Y.' + QUOTENAME(@CIFMappingTargetColumn) + ',                                
-             ''Excluded in merging'' AS Reason,
-             A.* 
-        INTO dbo.Customer_Migrate_Exception_Table
-        FROM dbo.Customer_Migrate_buffer A
-        LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' Y
-            ON Y.' + QUOTENAME(@CIFMappingSourceColumn) + ' = A.CustomerNo 
-   END
-   ELSE
-   BEGIN       
-        INSERT INTO dbo.Customer_Migrate_Exception_Table (                                
-             ' + QUOTENAME(@CIFMappingSourceColumn) + ',
-             ' + QUOTENAME(@CIFMappingTargetColumn) + ',
-             Reason
-        )
-        SELECT 
-             Y.' + QUOTENAME(@CIFMappingSourceColumn) + ',
-             Y.' + QUOTENAME(@CIFMappingTargetColumn) + ',
-             ''Excluded in merging'' AS Reason
-        FROM dbo.Customer_Migrate_buffer A
-        LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' Y
-             ON Y.' + QUOTENAME(@CIFMappingSourceColumn) + ' = A.CustomerNo
-   END;'
-
--- 1. 印出組裝後的 SQL 讓廠商看破洞在哪裡
-PRINT '=== 組裝出來的壞掉 SQL ===';
-PRINT @sql;
-
--- 2. 實際執行，觸發一模一樣的「接近 ',' 之處的語法不正確」
-EXEC sp_executesql @sql;
-
-執行後會看到什麼？（直接截圖這畫面給廠商）
-在 SSMS 的「訊息 (Messages)」頁籤會印出：
-        INSERT INTO dbo.Customer_Migrate_Exception_Table (                                
-             [SK_CUST_ID],
-             ,               -- <--- 破洞在這裡！欄位不見了，只剩逗號！
-             Reason
-        )
-        SELECT 
-             Y.[SK_CUST_ID],
-             Y.,             -- <--- 破洞在這裡！Y. 後面直接接逗號！
-             'Excluded in merging' AS Reason
-
-緊接著下面就會跳出紅字錯誤：
-> 訊息 102，層級 15，狀態 1，行 18
-> 接近 ',' 之處的語法不正確。
+你看圖片裡跳出的錯誤訊息：
+> Error importing AML_Cust.csv: MERGE 陳述式必須以分號 (;) 結束。
 > 
-方法二：暫時在 SP 埋設「參數攔截 Log」，跑一次 .exe 抓現行犯
-如果廠商嘴硬說：「我們的 .exe 絕對有把 4 個參數傳進去，不可能傳空值！」
-那妳可以直接在 DataMigrator_Integrate 的第 53 行（IF @ModuleName = 'CIF' 下方）暫時插入一行 Log，把 .exe 實際傳進來的參數值活逮下來：
-        BEGIN TRY                
+這是因為在 SQL Server 中，MERGE 陳述式後面必須強制加上分號 (;) 作為結尾，否則在執行時會被視為語法錯誤。
+我們剛才貼給你的版本 B 裡面，有兩個 MERGE 陳述式結尾（分別是有 @CIFMappingTable 的動態 SQL 裡面，以及沒有 @CIFMappingTable 的靜態 SQL 裡麵）漏掉了這個分號。
+請直接套用下方幫你把 MERGE ...; 結尾分號全部補齊的最終完整程式碼：
+BEGIN TRY                
             IF @ModuleName = 'CIF'
-                BEGIN
-                    -- 【新增這段抓鬼 Log】把 .exe 傳進來的參數原封不動寫進 Log 表
-                    INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG)
-                    VALUES (
-                        @Time, 
-                        'DEBUG_PARAMS -> Table:[' + ISNULL(@CIFMappingTable, 'NULL') + '], ' +
-                        'Src:[' + ISNULL(@CIFMappingSourceColumn, 'NULL') + '], ' +
-                        'Tgt:[' + ISNULL(@CIFMappingTargetColumn, 'NULL') + '], ' +
-                        'Flg:[' + ISNULL(@CIFMappingFlagColumn, 'NULL') + ']', 
-                        'D'
-                    );
+                BEGIN															                     
+                    TRUNCATE TABLE dbo.CIF_Migrate_Mapping_TEMP;
 
-修改完 SP 後，再跑一次 AMLDataMigrator.exe TW I CIF，然後去查 SELECT * FROM dbo.Migrator_LOG。
-妳一定會看到 DEBUG_PARAMS 那一筆裡面，某個 [ ] 中間是空的或是 NULL，甚至某個欄位名稱裡夾帶了多餘的逗號！
-方法三：直接貼給廠商的 Bug 回報範本（Email / 通訊軟體直接複製）
-妳可以把下面這段話連同截圖直接丟給廠商工程師，他們一看就會馬上懂了：
-> 【問題回報：AMLDataMigrator 執行 CIF 模組發生 SQL 語法錯誤】
-> 1. 錯誤現象：
-> 執行 AMLDataMigrator.exe TW I CIF 時，CSV 匯入 Customer_Migrate_buffer 成功，但隨後在呼叫 SP [dbo].[DataMigrator_Integrate] 時拋出例外：
->  * Message : 接近 ',' 之處的語法不正確。
->  * Migrator_LOG 紀錄錯誤發生於 Line 94。
-> 2. 原因定位：
-> 經查 SP [dbo].[DataMigrator_Integrate]，Line 94 對應的是 @ModuleName = 'CIF' 內部第二段動態 SQL（寫入 dbo.Customer_Migrate_Exception_Table 的 EXEC sp_executesql @sql）。
-> 該段動態 SQL 大量使用：
->  * Y.' + QUOTENAME(@CIFMappingSourceColumn) + ','
->  * Y.' + QUOTENAME(@CIFMappingTargetColumn) + ','
->  * ISNULL(Y.' + QUOTENAME(@CIFMappingFlagColumn) + ', 0)
-> 當 AMLDataMigrator.exe 解析設定檔的 CIFMapping 參數並傳入 SP 時，因其中部分欄位參數（SourceColumn / TargetColumn / FlagColumn）傳入空值或解析異常，QUOTENAME() 回傳 NULL，導致動態組裝出的 SQL 變成 SELECT Y., 或 INSERT INTO ... ( [Col1], , Reason ) 的殘缺語法，在逗號 , 處直接觸發 SQL Parser 語法錯誤。
-> 3. 請協助確認：
->  * 請確認 AMLDataMigrator.exe 讀取 CIFMapping 設定值的拆解邏輯（Split 格式與預期傳入 SP 的四個參數格式）。
->  * SP 第 56 行目前僅判斷 IF @CIFMappingTable IS NOT NULL，建議補上對 @CIFMappingSourceColumn、@CIFMappingTargetColumn、@CIFMappingFlagColumn 的非空防呆檢查。
-> 
+                    IF @CIFMappingTable IS NOT NULL
+                       BEGIN                                                                       
+                    
+                            SET @sql = N'
+								        INSERT INTO dbo.CIF_Migrate_Mapping_TEMP (ACTION, SOURCE_CIF_KEY, NEW_CIF_KEY)
+								        SELECT ''UPDATE'' AS Action, B.CIF_KEY, F.CIF_KEY
+								        FROM ' + QUOTENAME(@CIFMappingTable) + ' A 
+								        JOIN Customer_Migrate_buffer B ON A.' + QUOTENAME(@CIFMappingSourceColumn) + ' = B.CustomerNo
+								        JOIN BSA_SUB_CUST_FACT F ON F.CustomerNo = A.' + QUOTENAME(@CIFMappingTargetColumn) + '
+								        WHERE A.' + QUOTENAME(@CIFMappingFlagColumn) + ' = 1
+								        ';
+                         
+                                   EXEC sp_executesql @sql;  
+
+                       SET @sql = CAST(N'' AS NVARCHAR(MAX)) + N'
+                           -- Check if table exists
+                           IF OBJECT_ID(''dbo.Customer_Migrate_Exception_Table'', ''U'') IS NULL
+                           BEGIN       
+                                SELECT                                    
+                                     Y.' + QUOTENAME(@CIFMappingSourceColumn) + ',
+                                     Y.' + QUOTENAME(@CIFMappingTargetColumn) + ',                                
+                                     ''Excluded in merging'' AS Reason,
+                                     A.* 
+                                INTO dbo.Customer_Migrate_Exception_Table
+                                FROM dbo.Customer_Migrate_buffer A
+                                LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' Y 
+                                    ON Y.' + QUOTENAME(@CIFMappingSourceColumn) + ' = A.CustomerNo 
+                                WHERE 
+                                     -- 情況 A: 目標 ID 已經存在於 DB
+                                     EXISTS (
+                                         SELECT 1 
+                                         FROM dbo.BSA_SUB_CUST_FACT Z
+                                         WHERE Z.CustomerNo = COALESCE(Y.' + QUOTENAME(@CIFMappingTargetColumn) + ', A.CustomerNo)
+                                     )
+                                     OR
+                                     -- 情況 B: 批次內衝突
+                                     EXISTS (
+                                         SELECT 1
+                                         FROM dbo.Customer_Migrate_buffer X
+                                         INNER JOIN ' + QUOTENAME(@CIFMappingTable) + ' MapX 
+                                            ON MapX.' + QUOTENAME(@CIFMappingSourceColumn) + ' = X.CustomerNo
+                                         WHERE MapX.' + QUOTENAME(@CIFMappingTargetColumn) + ' = A.CustomerNo 
+                                         AND X.CustomerNo <> A.CustomerNo 
+                                         AND ISNULL(Y.'+QUOTENAME(@CIFMappingFlagColumn) + ', 0) <> 1
+                                         AND (ISNULL(Y.'+QUOTENAME(@CIFMappingSourceColumn) + ', '''') ='''' OR ISNULL(Y.'+QUOTENAME(@CIFMappingTargetColumn) + ', '''') ='''')
+                                     );
+                           END
+                           ELSE
+                           BEGIN       
+                                INSERT INTO dbo.Customer_Migrate_Exception_Table (                                
+                                     ' + QUOTENAME(@CIFMappingSourceColumn) + ',
+                                     ' + QUOTENAME(@CIFMappingTargetColumn) + ',
+                                     Reason,
+                                     time_key,
+                                     CIF_KEY,
+                                     CustomerNo,
+                                     CUST_NME,
+                                     NATIVE_CUST_NME,
+                                     Alias_Name,
+                                     C_CTRYCD,
+                                     NATIONALITY_1,
+                                     NATIONALITY_2,
+                                     Cust_Method_Of_Opening,
+                                     Cust_Product_Service,                                     
+                                     OPEN_DTE,
+                                     CustProdAndServicesUsed,
+                                     CustPurposeOfAcc,
+                                     RecordStatus,
+                                     Customer_Segment,
+                                     CUST_TYPE_CDE,
+                                     Cust_With_Bearer_Shares
+                                )
+                                SELECT 
+                                     Y.' + QUOTENAME(@CIFMappingSourceColumn) + ',
+                                     Y.' + QUOTENAME(@CIFMappingTargetColumn) + ',
+                                     ''Excluded in merging'' AS Reason ,
+                                     A.time_key,
+                                     A.CIF_KEY,
+                                     A.CustomerNo,
+                                     A.CUST_NME,
+                                     A.NATIVE_CUST_NME,
+                                     A.Alias_Name,
+                                     A.C_CTRYCD,
+                                     A.NATIONALITY_1,
+                                     A.NATIONALITY_2,
+                                     A.Cust_Method_Of_Opening,
+                                     A.Cust_Product_Service,                                     
+                                     A.OPEN_DTE,
+                                     A.CustProdAndServicesUsed,
+                                     A.CustPurposeOfAcc,
+                                     A.RecordStatus,
+                                     A.Customer_Segment,
+                                     A.CUST_TYPE_CDE,
+                                     A.Cust_With_Bearer_Shares
+                                FROM dbo.Customer_Migrate_buffer A
+                                LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' Y 
+                                     ON Y.' + QUOTENAME(@CIFMappingSourceColumn) + ' = A.CustomerNo 
+                                WHERE 
+                                     -- 情況 A: 目標 ID 已經存在於 DB
+                                     EXISTS (SELECT 1 FROM dbo.BSA_SUB_CUST_FACT Z WHERE Z.CustomerNo = COALESCE(Y.' + QUOTENAME(@CIFMappingTargetColumn) + ', A.CustomerNo))
+                                     OR
+                                     -- 情況 B: 批次內衝突
+                                     EXISTS (
+                                         SELECT 1
+                                         FROM dbo.Customer_Migrate_buffer X
+                                         INNER JOIN ' + QUOTENAME(@CIFMappingTable) + ' MapX 
+                                            ON MapX.' + QUOTENAME(@CIFMappingSourceColumn) + ' = X.CustomerNo
+                                         WHERE MapX.' + QUOTENAME(@CIFMappingTargetColumn) + ' = A.CustomerNo
+                                         AND X.CustomerNo <> A.CustomerNo
+                                         AND ISNULL(Y.'+QUOTENAME(@CIFMappingFlagColumn) + ', 0) <> 1
+                                         AND (ISNULL(Y.'+QUOTENAME(@CIFMappingSourceColumn) + ', '''') ='''' OR ISNULL(Y.'+QUOTENAME(@CIFMappingTargetColumn) + ', '''') ='''')
+                                     );
+                           END;'
+                                                   EXEC sp_executesql @sql;
+              
+                    SET @sql = CAST(N'' AS NVARCHAR(MAX)) + N'
+                    MERGE dbo.BSA_SUB_CUST_FACT AS TARGET
+                       USING (
+                           SELECT 
+                                A.CIF_KEY,
+                                COALESCE(B.' + QUOTENAME(@CIFMappingTargetColumn) + ', A.CustomerNo) AS CustomerNo,
+                                A.CUST_NME,
+                                A.NATIVE_CUST_NME,
+                                A.Alias_Name,
+                                A.C_CTRYCD,
+                                A.NATIONALITY_1,
+                                A.NATIONALITY_2,
+                                A.Cust_Method_Of_Opening,
+                                A.Cust_Product_Service,                                
+                                A.OPEN_DTE,
+                                A.time_key,
+                                A.CUST_TYPE_CDE,
+                                A.Cust_With_Bearer_Shares
+                           FROM dbo.Customer_Migrate_buffer A WITH (NOLOCK)
+                           LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' B WITH (NOLOCK) ON B.' + QUOTENAME(@CIFMappingSourceColumn) + ' = A.CustomerNo                    
+                           WHERE ISNULL(B.' + QUOTENAME(@CIFMappingFlagColumn) + ', 0) <> 1 AND 
+                           NOT EXISTS(
+                                SELECT 1 FROM dbo.Customer_Migrate_Exception_Table Z WHERE Z.CIF_KEY = A.CIF_KEY
+                           ) AND
+                           NOT EXISTS (
+                                              SELECT 1
+                                              FROM dbo.Customer_Migrate_buffer X WITH (NOLOCK)
+                                              INNER JOIN ' + QUOTENAME(@CIFMappingTable) + ' Y WITH (NOLOCK)
+                                                  ON X.CustomerNo = Y.' + QUOTENAME(@CIFMappingSourceColumn) + '
+                                              WHERE Y.' + QUOTENAME(@CIFMappingTargetColumn) + ' = A.CustomerNo
+                                              AND X.CustomerNo <> A.CustomerNo
+                                              AND ISNULL(Y.'+QUOTENAME(@CIFMappingFlagColumn) + ', 0) <> 1
+                                         )
+                                                        UNION 
+                                         
+                                                        SELECT 
+                                                                B.CIF_KEY,                                                              
+                                                                COALESCE(s.TS_CUST_ID, B.CustomerNo) AS CustomerNo,
+                                                                B.CUST_NME,
+                                                                B.NATIVE_CUST_NME,
+                                                                B.Alias_Name,
+                                                                B.C_CTRYCD,
+                                                                B.NATIONALITY_1,
+                                                                B.NATIONALITY_2,
+                                                                B.Cust_Method_Of_Opening,
+                                                                B.Cust_Product_Service,                                                                
+                                                                B.OPEN_DTE,
+                                                                B.time_key,
+                                                                B.CUST_TYPE_CDE,
+                                                                B.Cust_With_Bearer_Shares
+                                                        FROM dbo.BANCS_SK_CUST_INFO s
+                                                        INNER JOIN dbo.Customer_Migrate_buffer b 
+                                                                ON s.SK_CUST_ID = b.CustomerNo
+                                                        LEFT JOIN dbo.CIF_Migrate_Mapping_TEMP m 
+                                                                ON b.CIF_KEY = m.SOURCE_CIF_KEY
+                                                        LEFT JOIN dbo.Customer_Migrate_Exception_Table e 
+                                                                ON b.CIF_KEY = e.CIF_KEY
+                                                        WHERE s.CUST_RE_NO_FLG <> ''1''
+                                                          AND m.SOURCE_CIF_KEY IS NULL  
+                                                          AND e.CIF_KEY IS NULL 
+                       ) AS SOURCE
+                       ON TARGET.CustomerNo = SOURCE.CustomerNo
+
+                       WHEN MATCHED THEN
+                           UPDATE SET 
+                               CustomerNo = TARGET.CustomerNo,
+                               Cust_With_Bearer_Shares = CASE
+                                   WHEN TARGET.Cust_With_Bearer_Shares = ''1'' OR SOURCE.Cust_With_Bearer_Shares = ''1'' THEN ''1''
+                                   ELSE ''0''
+                               END                                                  
+
+                       WHEN NOT MATCHED BY TARGET THEN
+                           INSERT (
+                                CIF_KEY, CustomerNo, Alias_Name, Cust_Method_Of_Opening, 
+                                Cust_Product_Service, time_key, CUST_TYPE_CDE, Cust_With_Bearer_Shares
+                           )
+                           VALUES (
+                                NEWID(),
+                                SOURCE.CustomerNo,
+                                SOURCE.Alias_Name,
+                                SOURCE.Cust_Method_Of_Opening,
+                                SOURCE.Cust_Product_Service,                                
+                                SOURCE.time_key,
+                                SOURCE.CUST_TYPE_CDE,
+                                SOURCE.Cust_With_Bearer_Shares
+                           )
+
+                       OUTPUT 
+                           $action, 
+                           SOURCE.CIF_KEY, 
+                           INSERTED.CIF_KEY
+                       INTO dbo.CIF_Migrate_Mapping_TEMP (ACTION, SOURCE_CIF_KEY, NEW_CIF_KEY);';                                                
+                       
+                       EXEC sp_executesql @sql;
+                       END
+                       ELSE
+                       BEGIN
+                           MERGE dbo.BSA_SUB_CUST_FACT AS TARGET
+                    USING
+                        ( SELECT    CIF_KEY ,
+                                    CustomerNo ,
+                                    CUST_NME ,
+                                    NATIVE_CUST_NME ,
+                                    Alias_Name ,
+                                    C_CTRYCD ,
+                                    NATIONALITY_1 ,
+                                    NATIONALITY_2 ,
+                                    Cust_Method_Of_Opening ,
+                                    Cust_Product_Service ,                                    
+                                    OPEN_DTE,
+                                    time_key,
+                                    CUST_TYPE_CDE,
+                                    Cust_With_Bearer_Shares
+                          FROM      dbo.Customer_Migrate_buffer
+                        ) AS SOURCE
+                    ON TARGET.CustomerNo = SOURCE.CustomerNo
+                    WHEN MATCHED THEN
+                        UPDATE SET 
+                            CustomerNo = TARGET.CustomerNo,
+                            Cust_With_Bearer_Shares = CASE
+                                WHEN TARGET.Cust_With_Bearer_Shares = '1' OR SOURCE.Cust_With_Bearer_Shares = '1' THEN '1'
+                                ELSE '0'
+                            END
+                    WHEN NOT MATCHED BY TARGET THEN
+                        INSERT ( CIF_KEY, CustomerNo, Alias_Name, Cust_Method_Of_Opening, 
+                                Cust_Product_Service, time_key, CUST_TYPE_CDE, Cust_With_Bearer_Shares
+                               )
+                        VALUES ( NEWID() ,
+                                 SOURCE.CustomerNo,
+                                 SOURCE.Alias_Name,
+                                 SOURCE.Cust_Method_Of_Opening,
+                                 SOURCE.Cust_Product_Service,                                     
+                                 SOURCE.time_key,
+                                 SOURCE.CUST_TYPE_CDE,
+                                 SOURCE.Cust_With_Bearer_Shares
+                               )
+                    OUTPUT
+                        $action ,
+                        SOURCE.CIF_KEY ,
+                        INSERTED.CIF_KEY
+                        INTO dbo.CIF_Migrate_Mapping_TEMP ( ACTION,
+                                                            SOURCE_CIF_KEY,
+                                                            NEW_CIF_KEY ); -- <--- 這裡補上了 MERGE 結尾的分號
+                       END
+                       
+                       
+                    SET @sql = N'INSERT INTO WAREHOUSE' + @BNK_NBR
+                        + '.dbo.PB_CUSTOMER_FACT(time_key, CIF_KEY, cust_type_cde, CUST_NME, NATIVE_CUST_NME, C_CTRYCD, NATIONALITY_1, NATIONALITY_2, OPEN_DTE, RecordStatus, Customer_Segment)
+              SELECT B.time_key, A.NEW_CIF_KEY, cust_type_cde, B.CUST_NME, B.NATIVE_CUST_NME, B.C_CTRYCD, B.NATIONALITY_1, B.NATIONALITY_2, B.OPEN_DTE, B.RecordStatus, B.Customer_Segment
+              FROM dbo.CIF_Migrate_Mapping_TEMP A JOIN dbo.Customer_Migrate_buffer B ON A.SOURCE_CIF_KEY = B.CIF_KEY
+              WHERE A.ACTION = ''INSERT''
+              AND NOT EXISTS(SELECT 1 FROM WAREHOUSE' + @BNK_NBR
+                        + '.dbo.PB_CUSTOMER_FACT Z WHERE Z.CIF_KEY = A.NEW_CIF_KEY)';                            
+              
+                    EXEC sp_executesql @sql;
+              
+                    INSERT  INTO dbo.PB_CustProdAndServicesUsed
+                            ( CIF_KEY ,
+                              CODE ,
+                              LastUpdatedBy ,
+                              LastUpdatedDate_UTC
+                            )
+                            SELECT  NEW_CIF_KEY ,
+                                    F.Value ,
+                                    @UserId ,
+                                    @DateUTC
+                            FROM    dbo.Customer_Migrate_buffer A
+                                    INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY AND B.ACTION = 'INSERT'
+                                    CROSS APPLY dbo.fnStringSplitter(A.CustProdAndServicesUsed,
+                                                              '|') F
+                            WHERE   NOT EXISTS ( SELECT 1
+                                                 FROM   dbo.PB_CustProdAndServicesUsed Z
+                                                 WHERE  Z.CIF_KEY = B.NEW_CIF_KEY
+                                                        AND Z.CODE = F.Value )
+                                    AND ISNULL(A.CustProdAndServicesUsed, '') <> '';
+              
+                    INSERT  INTO dbo.PB_CustPurposeOfAcc
+                            ( CIF_KEY ,
+                              CODE ,
+                              LastUpdatedBy ,
+                              LastUpdatedDate_UTC
+                            )
+                            SELECT  NEW_CIF_KEY ,
+                                    F.Value ,
+                                    @UserId ,
+                                    @DateUTC
+                            FROM    dbo.Customer_Migrate_buffer A
+                                    INNER JOIN dbo.CIF_Migrate_Mapping_TEMP B ON A.CIF_KEY = B.SOURCE_CIF_KEY AND B.ACTION = 'INSERT'
+                                    CROSS APPLY dbo.fnStringSplitter(A.CustPurposeOfAcc,
+                                                              '|') F
+                            WHERE   NOT EXISTS ( SELECT 1
+                                                 FROM   dbo.PB_CustPurposeOfAcc Z
+                                                 WHERE  Z.CIF_KEY = B.NEW_CIF_KEY
+                                                        AND Z.CODE = F.Value )
+                                    AND ISNULL(A.CustPurposeOfAcc, '') <> '';
+                                    
+					IF @CIFMappingTable IS NOT NULL
+                       BEGIN                                       
+						   SET @sql = N'INSERT INTO SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source(Cif_key, Internal_Cif_Key, LoadTimeKey)
+										 SELECT COALESCE(C.' + QUOTENAME(@CIFMappingTargetColumn) + ', B.CustomerNo) AS CustomerNo, A.NEW_CIF_KEY, B.time_key
+										 FROM dbo.CIF_Migrate_Mapping_TEMP A JOIN dbo.Customer_Migrate_buffer B ON A.SOURCE_CIF_KEY = B.CIF_KEY
+										 LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' C WITH (NOLOCK) ON C.' + QUOTENAME(@CIFMappingSourceColumn) + ' = B.CustomerNo   
+										 WHERE A.ACTION = ''INSERT''
+										 AND NOT EXISTS(SELECT 1 FROM SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source Z WHERE Z.Cif_key = COALESCE(C.' + QUOTENAME(@CIFMappingTargetColumn) + ', B.CustomerNo))';                               
+	              
+							EXEC sp_executesql @sql;   
+						END     
+					ELSE					
+						BEGIN
+							SET @sql = N'INSERT INTO SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source(Cif_key, Internal_Cif_Key, LoadTimeKey)
+										 SELECT B.CustomerNo, A.NEW_CIF_KEY, B.time_key
+										 FROM dbo.CIF_Migrate_Mapping_TEMP A JOIN dbo.Customer_Migrate_buffer B ON A.SOURCE_CIF_KEY = B.CIF_KEY
+										 WHERE A.ACTION = ''INSERT''
+										 AND NOT EXISTS(SELECT 1 FROM SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source Z WHERE Z.Cif_key = B.CustomerNo)';                               
+	              
+							EXEC sp_executesql @sql;  
+						END 
+                        
+                     IF @CIFMappingTable IS NOT NULL
+                        BEGIN
+                            SET @sql = N'
+                                INSERT INTO dbo.CIF_Migrate_Mapping_TEMP (ACTION, SOURCE_CIF_KEY, NEW_CIF_KEY)
+                                SELECT ''UPDATE2'' AS Action, B.CIF_KEY, F.CIF_KEY
+                                FROM ' + QUOTENAME(@CIFMappingTable) + ' A 
+                                JOIN dbo.Customer_Migrate_buffer B ON A.' + QUOTENAME(@CIFMappingSourceColumn) + ' = B.CustomerNo
+                                JOIN dbo.BSA_SUB_CUST_FACT F ON F.CustomerNo = A.' + QUOTENAME(@CIFMappingTargetColumn) + '
+                                WHERE A.' + QUOTENAME(@CIFMappingFlagColumn) + ' = 1
+                                AND NOT EXISTS (
+                                    SELECT 1 FROM dbo.Customer_Migrate_Exception_Table e
+                                    WHERE b.CIF_KEY = e.CIF_KEY
+                                )
+                                ';
+                         
+                            EXEC sp_executesql @sql;
+                        END
+	                              
+                       INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG) 
+                       SELECT @Time, @ModuleName + ' migrate completed -------> '  , 'N';
+                END;
+
