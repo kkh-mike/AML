@@ -1,27 +1,6 @@
-D:\AML_Source\20251114_新光資轉\EXE>AMLDataMigrator.exe TW I CIF
-10/27/2026 10:37:05: Cust - Begin Import
-10/27/2026 10:37:05: Cust - Import - CustomerImportData
-10/27/2026 10:41:02 : Import of AML_Cust.csv completed successfully.
-Error importing AML_Cust.csv: MERGE 陳述式必須以分號 (;) 結束。
-10/27/2026 10:49:51: Cust - Import Failed
-10/27/2026 10:49:51: Process Done
-
-
-
-
-
-
-
-
-
-
-
-
      IF @ModuleName = 'CIF'
                 BEGIN                                                                                                                                        
                     TRUNCATE TABLE dbo.CIF_Migrate_Mapping_TEMP;
-
-
 
                     IF @CIFMappingTable IS NOT NULL
                        BEGIN                                                                       
@@ -36,8 +15,6 @@ Error importing AML_Cust.csv: MERGE 陳述式必須以分號 (;) 結束。
                                                                         ';
                          
                                    EXEC sp_executesql @sql;  
-
-
 
                        SET @sql = CAST(N'' AS NVARCHAR(MAX)) + N'
                            -- Check if table exists
@@ -203,8 +180,6 @@ Error importing AML_Cust.csv: MERGE 陳述式必須以分號 (;) 結束。
                        ) AS SOURCE
                        ON TARGET.CustomerNo = SOURCE.CustomerNo
 
-
-
                        WHEN MATCHED THEN
                            UPDATE SET 
                                CustomerNo = TARGET.CustomerNo,
@@ -212,8 +187,6 @@ Error importing AML_Cust.csv: MERGE 陳述式必須以分號 (;) 結束。
                                    WHEN TARGET.Cust_With_Bearer_Shares = ''1'' OR SOURCE.Cust_With_Bearer_Shares = ''1'' THEN ''1''
                                    ELSE ''0''
                                END                                                  
-
-
 
                        WHEN NOT MATCHED BY TARGET THEN
                            INSERT (
@@ -231,14 +204,12 @@ Error importing AML_Cust.csv: MERGE 陳述式必須以分號 (;) 結束。
                                 SOURCE.Cust_With_Bearer_Shares
                            )
 
-
-
                        OUTPUT 
                            $action, 
                            SOURCE.CIF_KEY, 
                            INSERTED.CIF_KEY
-                       INTO dbo.CIF_Migrate_Mapping_TEMP (ACTION, SOURCE_CIF_KEY, NEW_CIF_KEY);';                                                
-                       
+                       INTO dbo.CIF_Migrate_Mapping_TEMP (ACTION, SOURCE_CIF_KEY, NEW_CIF_KEY);';  -- ←★動態 SQL 裡的 MERGE 結尾這裡必須有分號（包在引號內）
+                                                
                        EXEC sp_executesql @sql;
                        END
                        ELSE
@@ -288,7 +259,7 @@ Error importing AML_Cust.csv: MERGE 陳述式必須以分號 (;) 結束。
                         INSERTED.CIF_KEY
                         INTO dbo.CIF_Migrate_Mapping_TEMP ( ACTION,
                                                             SOURCE_CIF_KEY,
-                                                            NEW_CIF_KEY ); -- <--- 這裡補上了 MERGE 結尾的分號
+                                                            NEW_CIF_KEY ); -- ←★這裡已經有分號了
                        END
                        
                        
@@ -342,27 +313,27 @@ Error importing AML_Cust.csv: MERGE 陳述式必須以分號 (;) 結束。
                                                         AND Z.CODE = F.Value )
                                     AND ISNULL(A.CustPurposeOfAcc, '') <> '';
                                     
-                                        IF @CIFMappingTable IS NOT NULL
+                    IF @CIFMappingTable IS NOT NULL
                        BEGIN                                       
-                                                   SET @sql = N'INSERT INTO SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source(Cif_key, Internal_Cif_Key, LoadTimeKey)
-                                                                                 SELECT COALESCE(C.' + QUOTENAME(@CIFMappingTargetColumn) + ', B.CustomerNo) AS CustomerNo, A.NEW_CIF_KEY, B.time_key
-                                                                                 FROM dbo.CIF_Migrate_Mapping_TEMP A JOIN dbo.Customer_Migrate_buffer B ON A.SOURCE_CIF_KEY = B.CIF_KEY
-                                                                                 LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' C WITH (NOLOCK) ON C.' + QUOTENAME(@CIFMappingSourceColumn) + ' = B.CustomerNo   
-                                                                                 WHERE A.ACTION = ''INSERT''
-                                                                                 AND NOT EXISTS(SELECT 1 FROM SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source Z WHERE Z.Cif_key = COALESCE(C.' + QUOTENAME(@CIFMappingTargetColumn) + ', B.CustomerNo))';                               
-                      
-                                                        EXEC sp_executesql @sql;   
-                                                END     
-                                        ELSE                                    
-                                                BEGIN
-                                                        SET @sql = N'INSERT INTO SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source(Cif_key, Internal_Cif_Key, LoadTimeKey)
-                                                                                 SELECT B.CustomerNo, A.NEW_CIF_KEY, B.time_key
-                                                                                 FROM dbo.CIF_Migrate_Mapping_TEMP A JOIN dbo.Customer_Migrate_buffer B ON A.SOURCE_CIF_KEY = B.CIF_KEY
-                                                                                 WHERE A.ACTION = ''INSERT''
-                                                                                 AND NOT EXISTS(SELECT 1 FROM SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source Z WHERE Z.Cif_key = B.CustomerNo)';                               
-                      
-                                                        EXEC sp_executesql @sql;  
-                                                END 
+                           SET @sql = N'INSERT INTO SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source(Cif_key, Internal_Cif_Key, LoadTimeKey)
+                                         SELECT COALESCE(C.' + QUOTENAME(@CIFMappingTargetColumn) + ', B.CustomerNo) AS CustomerNo, A.NEW_CIF_KEY, B.time_key
+                                         FROM dbo.CIF_Migrate_Mapping_TEMP A JOIN dbo.Customer_Migrate_buffer B ON A.SOURCE_CIF_KEY = B.CIF_KEY
+                                         LEFT JOIN ' + QUOTENAME(@CIFMappingTable) + ' C WITH (NOLOCK) ON C.' + QUOTENAME(@CIFMappingSourceColumn) + ' = B.CustomerNo   
+                                         WHERE A.ACTION = ''INSERT''
+                                         AND NOT EXISTS(SELECT 1 FROM SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source Z WHERE Z.Cif_key = COALESCE(C.' + QUOTENAME(@CIFMappingTargetColumn) + ', B.CustomerNo))';                               
+              
+                            EXEC sp_executesql @sql;   
+                        END     
+                    ELSE                    
+                        BEGIN
+                            SET @sql = N'INSERT INTO SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source(Cif_key, Internal_Cif_Key, LoadTimeKey)
+                                         SELECT B.CustomerNo, A.NEW_CIF_KEY, B.time_key
+                                         FROM dbo.CIF_Migrate_Mapping_TEMP A JOIN dbo.Customer_Migrate_buffer B ON A.SOURCE_CIF_KEY = B.CIF_KEY
+                                         WHERE A.ACTION = ''INSERT''
+                                         AND NOT EXISTS(SELECT 1 FROM SOURCEDB' + @BNK_NBR + '.dbo.CIF_CVT_Source Z WHERE Z.Cif_key = B.CustomerNo)';                               
+              
+                            EXEC sp_executesql @sql;  
+                        END 
                         
                      IF @CIFMappingTable IS NOT NULL
                         BEGIN
@@ -385,6 +356,3 @@ Error importing AML_Cust.csv: MERGE 陳述式必須以分號 (;) 結束。
                        INSERT INTO dbo.Migrator_LOG (PROC_DATE, MSG_LOG, FLAG) 
                        SELECT @Time, @ModuleName + ' migrate completed -------> '  , 'N';
                 END;
-
-
-哪裡錯了
