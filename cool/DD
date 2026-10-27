@@ -431,3 +431,13 @@ $Results |
 
 Write-Log "結果 CSV：$CsvFile" Cyan
 Write-Log '========== 作業結束 ==========' Cyan
+
+
+
+不支援關鍵字: 'InitialCatalog'。
+位於 D:\AML_Source\20251114_新光資轉\EXE\TRXN\TEST.ps1:98 字元:1
++ $Builder.InitialCatalog = $Database
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (:) [], ArgumentException
+    + FullyQualifiedErrorId : System.ArgumentException
+ 
