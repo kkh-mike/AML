@@ -1,240 +1,433 @@
 
-function Execute-SOAPRequest {
-    param (
-        [xml]    $SOAPRequest,
-        [string] $URL
-    )
+#requires -Version 5.1
 
-    $soapWebRequest = [System.Net.WebRequest]::Create($URL)
-    $soapWebRequest.Headers.Add("SOAPAction", "SubmitRequest")
-    $soapWebRequest.ContentType = 'text/xml; charset=utf-8'
-    $soapWebRequest.Accept = "text/xml"
-    $soapWebRequest.Method = "POST"
+# ============================================================
+# Send-SwiftByDate.ps1
+# SQL Server -> RawMessage -> SOAP API
+# ============================================================
 
-    $requestStream = $soapWebRequest.GetRequestStream()
+$ErrorActionPreference = 'Stop'
 
-    try {
-        $SOAPRequest.Save($requestStream)
-    }
-    finally {
-        $requestStream.Close()
-    }
+# -------------------- 1. 基本設定 --------------------
 
-    $resp = $soapWebRequest.GetResponse()
+$QueryDate = '2026-10-27'
+$Database = 'BSADBTW'
+$TableName = 'MESSAGEDATABASE..SWIFT_MTRAW'
 
-    try {
-        $responseStream = $resp.GetResponseStream()
-        $soapReader = [System.IO.StreamReader]::new($responseStream)
+$Url = 'http://localhost:8082/SwiftProcessor.svc?wsdl'
 
-        try {
-            return $soapReader.ReadToEnd()
-        }
-        finally {
-            $soapReader.Close()
-        }
-    }
-    finally {
-        $resp.Close()
-    }
+$LdapHost = '10.13.60.66'
+$SearchBase = 'o=tsbank'
+$LdapApp = 'AML'
+$LdapIndex = 7
+
+$DllPath = Join-Path $PSScriptRoot 'Tsbldapdbc.dll'
+$LogFolder = Join-Path $PSScriptRoot 'Log'
+
+# 請先維持 1，確認測試結果後再調整
+$RequestTimeoutSeconds = 120
+
+# -------------------- 2. Log 初始化 --------------------
+
+if (-not (Test-Path $LogFolder)) {
+    New-Item -Path $LogFolder -ItemType Directory -Force |
+        Out-Null
 }
 
+$Timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+$MainLogFile = Join-Path $LogFolder "Execution_$Timestamp.log"
 
-# ============================================================
-# 1. SOAP Service 設定
-# ============================================================
+function Write-Log {
+    param(
+        [string]$Message,
+        [ConsoleColor]$Color = [ConsoleColor]::White
+    )
 
-$url = 'http://localhost:8082/SwiftProcessor.svc?wsdl'
+    $Line = '[{0}] {1}' -f (
+        Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'
+    ), $Message
 
+    Write-Host $Line -ForegroundColor $Color
+    Add-Content -Path $MainLogFile -Value $Line -Encoding UTF8
+}
 
-# ============================================================
-# 2. 自動產生 ReferenceNumber
-#    格式：yyyyMMddHHmmssfff
-#    範例：20261027130325123
-# ============================================================
+Write-Log '========== 開始執行 ==========' Cyan
+Write-Log "查詢日期：$QueryDate"
+Write-Log "目標資料庫：$Database"
+Write-Log "Log：$MainLogFile"
 
-$referenceNumber = Get-Date -Format 'yyyyMMddHHmmssfff'
-
-
-# ============================================================
-# 3. SWIFT 電文
-# ============================================================
-
-$swiftMessage = @'
-{1:F01TSIBTWTPAXXX5356135117}{2:O1030831210315TSIBTWTPXXXX12341234560510170831N}{4:
-:20:E-T130-066_2
-:23B:CRED
-:32A:210315USD0,
-:33B:USD0,
-:50K:/21031592170
-TARTOUS
-:53A:HSBCGB2L
-:54A:CRESCHZZ
-:56A:CHASUS33
-:57A:SWHQBEBB
-:59A:DEUTDEFF
-:71A:SHA
--}
-'@
-
-
-# ============================================================
-# 4. 建立 SOAP Request
-# ============================================================
-
-$soapXml = @"
-<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope
-    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-
-    <soap:Body>
-        <SubmitRequest xmlns="http://patriotofficer.net/SwiftService">
-            <Params>
-                <ActionCode>SCAN_SWIFT</ActionCode>
-                <BankNo>TW</BankNo>
-                <BranchNo>0001</BranchNo>
-                <Channel>SWIFT</Channel>
-                <Message><![CDATA[$swiftMessage]]></Message>
-                <MessageTypeCode>MT</MessageTypeCode>
-                <ReferenceNumber>$referenceNumber</ReferenceNumber>
-                <SourceID>TSID</SourceID>
-            </Params>
-        </SubmitRequest>
-    </soap:Body>
-</soap:Envelope>
-"@
-
-$soap1 = [xml]$soapXml
-
-
-# ============================================================
-# 5. 執行 SOAP Request 並計算耗時
-# ============================================================
-
-$sw = [System.Diagnostics.Stopwatch]::StartNew()
+# -------------------- 3. 日期驗證 --------------------
 
 try {
-    $response = Execute-SOAPRequest -SOAPRequest $soap1 -URL $url
+    $StartDate = [datetime]::ParseExact(
+        $QueryDate,
+        'yyyy-MM-dd',
+        [Globalization.CultureInfo]::InvariantCulture
+    )
 
-    $sw.Stop()
-
-    Write-Host "ReferenceNumber : $referenceNumber"
-    Write-Host "Elapsed Time    : $($sw.Elapsed.TotalMilliseconds) ms"
-    Write-Host "`nSOAP Response:"
-    Write-Output $response
+    $EndDate = $StartDate.AddDays(1)
 }
 catch {
-    $sw.Stop()
-
-    Write-Host "SOAP Request Failed" -ForegroundColor Red
-    Write-Host "ReferenceNumber : $referenceNumber"
-    Write-Host "Elapsed Time    : $($sw.Elapsed.TotalMilliseconds) ms"
-    Write-Host "Error           : $($_.Exception.Message)" -ForegroundColor Red
+    throw "QueryDate 格式錯誤，請使用 yyyy-MM-dd，例如 2026-10-27"
 }
 
+# -------------------- 4. 取得 LDAP 連線字串 --------------------
 
-
-我有辦法一次輸入多筆電文訊息打多筆?
-
-
-
-我想結合
-連資料庫
-# ==========================================
-# 1. 資料夾準備與全域 Log 初始化
-# ==========================================
-$LogFolder = Join-Path -Path $PSScriptRoot -ChildPath "Log"
-if (!(Test-Path $LogFolder)) {
-    New-Item -ItemType Directory -Path $LogFolder | Out-Null
+if (-not (Test-Path $DllPath)) {
+    throw "找不到 DLL：$DllPath"
 }
-$Timestamp   = Get-Date -Format "yyyyMMdd_HHmmss"
-$MainLogFile = Join-Path -Path $LogFolder -ChildPath "Execution_$Timestamp.log"
-$HasError    = $false
-function Write-Log {
-    param (
-        [string]$Message,
-        [ConsoleColor]$ForegroundColor = [ConsoleColor]::White,
-        [switch]$IsError
+
+if (-not ([System.Management.Automation.PSTypeName]'Tsbldapdbc.RunBat').Type) {
+    Add-Type -Path $DllPath
+}
+
+$App = New-Object Tsbldapdbc.RunBat
+$App.SSL = $false
+$App.ldapHost = $LdapHost
+$App.searchBase = $SearchBase
+
+$ConnStr = $App.GetRunBat($LdapApp, $LdapIndex)
+
+if ([string]::IsNullOrWhiteSpace($ConnStr)) {
+    throw 'LDAP 沒有回傳有效的 SQL Server 連線字串'
+}
+
+$Builder = New-Object System.Data.SqlClient.SqlConnectionStringBuilder($ConnStr)
+
+# 強制指定資料庫
+$Builder.InitialCatalog = $Database
+$ConnStr = $Builder.ConnectionString
+
+$MaskedConn = [regex]::Replace(
+    $ConnStr,
+    '(?i)(Password|Pwd)\s*=\s*[^;]*',
+    '$1=******'
+)
+
+Write-Log "SQL 連線設定：$MaskedConn" DarkGray
+
+# -------------------- 5. 查詢指定日期的 RawMessage --------------------
+
+$Sql = @'
+SELECT RawMessage
+FROM [MESSAGEDATABASE]..[SWIFT_MTRAW]
+WHERE CreatedDate >= @StartDate
+  AND CreatedDate <  @EndDate
+ORDER BY CreatedDate
+'@
+
+$Messages = [System.Collections.Generic.List[string]]::new()
+
+$Connection = New-Object System.Data.SqlClient.SqlConnection($ConnStr)
+
+try {
+    $Connection.Open()
+    Write-Log 'SQL Server 連線成功' Green
+
+    $Command = $Connection.CreateCommand()
+    $Command.CommandText = $Sql
+    $Command.CommandTimeout = 120
+
+    $P1 = $Command.Parameters.Add(
+        '@StartDate',
+        [System.Data.SqlDbType]::DateTime2
     )
-    $timePrefix = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $formattedMsg = "[$timePrefix] $Message"
-    Write-Host $Message -ForegroundColor $ForegroundColor
-    Add-Content -Path $MainLogFile -Value $formattedMsg -Encoding UTF8
-}
-Write-Log "=== 開始執行指定 SQL 批次處理作業 ===" -ForegroundColor Cyan
-Write-Log "主執行紀錄檔: $MainLogFile" -ForegroundColor DarkGray
-# ==========================================
-# 2. 載入 LDAP DLL 並取得連線字串
-# ==========================================
-$dllPath = Join-Path -Path $PSScriptRoot -ChildPath "Tsbldapdbc.dll"
-$connStr = $null
-if (-not (Test-Path -Path $dllPath)) {
-    Write-Log "錯誤：找不到 DLL 檔案: $dllPath" -ForegroundColor Red -IsError
-    $HasError = $true
-}
-else {
+    $P1.Value = $StartDate
+
+    $P2 = $Command.Parameters.Add(
+        '@EndDate',
+        [System.Data.SqlDbType]::DateTime2
+    )
+    $P2.Value = $EndDate
+
+    $Reader = $Command.ExecuteReader()
+
     try {
-        if (-not ([System.Management.Automation.PSTypeName]'Tsbldapdbc.RunBat').Type) {
-            Add-Type -Path $dllPath
+        while ($Reader.Read()) {
+            if ($Reader.IsDBNull(0)) {
+                Write-Log '略過 NULL RawMessage' Yellow
+                continue
+            }
+
+            $Message = [string]$Reader['RawMessage']
+
+            if ([string]::IsNullOrWhiteSpace($Message)) {
+                Write-Log '略過空白 RawMessage' Yellow
+                continue
+            }
+
+            $Messages.Add($Message)
         }
-        $App = New-Object Tsbldapdbc.RunBat
-        $App.SSL = $false
-        $App.ldapHost = "10.13.60.66"
-        $App.searchBase = "o=tsbank"
-        $sApp = "AML"
-        $iCStr = 7
-        $connStr = $App.GetRunBat($sApp, $iCStr)
+    }
+    finally {
+        $Reader.Close()
+        $Reader.Dispose()
+        $Command.Dispose()
+    }
+}
+finally {
+    $Connection.Close()
+    $Connection.Dispose()
+}
+
+$Total = $Messages.Count
+
+Write-Log "查詢完成，有效電文筆數：$Total" Cyan
+
+if ($Total -eq 0) {
+    Write-Log '沒有可發送的電文，作業結束' Yellow
+    return
+}
+
+# -------------------- 6. 建立 SOAP XML --------------------
+
+function New-SwiftSoapXml {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Message,
+
+        [Parameter(Mandatory)]
+        [string]$ReferenceNumber
+    )
+
+    $Doc = New-Object System.Xml.XmlDocument
+    $Doc.PreserveWhitespace = $true
+
+    $SoapNs = 'http://schemas.xmlsoap.org/soap/envelope/'
+    $ServiceNs = 'http://patriotofficer.net/SwiftService'
+
+    $Declaration = $Doc.CreateXmlDeclaration('1.0', 'utf-8', $null)
+    [void]$Doc.AppendChild($Declaration)
+
+    $Envelope = $Doc.CreateElement('soap', 'Envelope', $SoapNs)
+
+    $SoapAttr = $Doc.CreateAttribute(
+        'xmlns',
+        'soap',
+        'http://www.w3.org/2000/xmlns/'
+    )
+    $SoapAttr.Value = $SoapNs
+    [void]$Envelope.Attributes.Append($SoapAttr)
+
+    [void]$Doc.AppendChild($Envelope)
+
+    $Body = $Doc.CreateElement('soap', 'Body', $SoapNs)
+    [void]$Envelope.AppendChild($Body)
+
+    $Submit = $Doc.CreateElement('SubmitRequest', $ServiceNs)
+    [void]$Body.AppendChild($Submit)
+
+    $Params = $Doc.CreateElement('Params', $ServiceNs)
+    [void]$Submit.AppendChild($Params)
+
+    $FieldsBeforeMessage = [ordered]@{
+        ActionCode = 'SCAN_SWIFT'
+        BankNo     = 'TW'
+        BranchNo   = '0001'
+        Channel    = 'SWIFT'
+    }
+
+    foreach ($Item in $FieldsBeforeMessage.GetEnumerator()) {
+        $Node = $Doc.CreateElement($Item.Key, $ServiceNs)
+        $Node.InnerText = [string]$Item.Value
+        [void]$Params.AppendChild($Node)
+    }
+
+    # InnerText 會自動處理 XML 特殊字元
+    $MessageNode = $Doc.CreateElement('Message', $ServiceNs)
+    $MessageNode.InnerText = $Message
+    [void]$Params.AppendChild($MessageNode)
+
+    $FieldsAfterMessage = [ordered]@{
+        MessageTypeCode = 'MT'
+        ReferenceNumber = $ReferenceNumber
+        SourceID        = 'TSID'
+    }
+
+    foreach ($Item in $FieldsAfterMessage.GetEnumerator()) {
+        $Node = $Doc.CreateElement($Item.Key, $ServiceNs)
+        $Node.InnerText = [string]$Item.Value
+        [void]$Params.AppendChild($Node)
+    }
+
+    return $Doc
+}
+
+# -------------------- 7. SOAP 呼叫函式 --------------------
+
+function Execute-SOAPRequest {
+    param(
+        [Parameter(Mandatory)]
+        [System.Xml.XmlDocument]$SOAPRequest,
+
+        [Parameter(Mandatory)]
+        [string]$URL
+    )
+
+    $Request = [System.Net.WebRequest]::Create($URL)
+    $Request.Method = 'POST'
+    $Request.ContentType = 'text/xml; charset=utf-8'
+    $Request.Accept = 'text/xml'
+    $Request.Headers.Add('SOAPAction', 'SubmitRequest')
+    $Request.Timeout = $RequestTimeoutSeconds * 1000
+    $Request.ReadWriteTimeout = $RequestTimeoutSeconds * 1000
+
+    $RequestStream = $Request.GetRequestStream()
+
+    try {
+        $Settings = New-Object System.Xml.XmlWriterSettings
+        $Settings.Encoding = New-Object System.Text.UTF8Encoding($false)
+        $Settings.Indent = $false
+        $Settings.OmitXmlDeclaration = $false
+
+        $Writer = [System.Xml.XmlWriter]::Create(
+            $RequestStream,
+            $Settings
+        )
+
+        try {
+            $SOAPRequest.Save($Writer)
+            $Writer.Flush()
+        }
+        finally {
+            $Writer.Close()
+        }
+    }
+    finally {
+        $RequestStream.Close()
+    }
+
+    try {
+        $Response = $Request.GetResponse()
+
+        try {
+            $ResponseStream = $Response.GetResponseStream()
+            $ResponseReader = New-Object System.IO.StreamReader($ResponseStream)
+
+            try {
+                return $ResponseReader.ReadToEnd()
+            }
+            finally {
+                $ResponseReader.Close()
+            }
+        }
+        finally {
+            $Response.Close()
+        }
+    }
+    catch [System.Net.WebException] {
+        $WebError = $_
+        $ErrorResponse = $WebError.Exception.Response
+
+        if ($null -ne $ErrorResponse) {
+            try {
+                $ErrorStream = $ErrorResponse.GetResponseStream()
+
+                if ($null -ne $ErrorStream) {
+                    $ErrorReader = New-Object System.IO.StreamReader($ErrorStream)
+
+                    try {
+                        $ErrorBody = $ErrorReader.ReadToEnd()
+                    }
+                    finally {
+                        $ErrorReader.Close()
+                    }
+
+                    throw "HTTP/SOAP 錯誤：$($WebError.Exception.Message); Response=$ErrorBody"
+                }
+            }
+            finally {
+                $ErrorResponse.Close()
+            }
+        }
+
+        throw
+    }
+}
+
+# -------------------- 8. 逐筆發送 --------------------
+
+$Results = [System.Collections.Generic.List[object]]::new()
+$SuccessCount = 0
+$FailedCount = 0
+
+for ($i = 0; $i -lt $Total; $i++) {
+
+    $No = $i + 1
+    $Message = $Messages[$i]
+
+    # 每筆產生獨立的 ReferenceNumber
+    $ReferenceNumber = (
+        (Get-Date -Format 'yyyyMMddHHmmssfff') +
+        $No.ToString('D4')
+    )
+
+    $Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+    $Status = 'Failed'
+    $ResponseText = ''
+    $ErrorText = ''
+
+    Write-Log "[$No/$Total] 開始發送，ReferenceNumber=$ReferenceNumber" Cyan
+
+    try {
+        $SoapDoc = New-SwiftSoapXml `
+            -Message $Message `
+            -ReferenceNumber $ReferenceNumber
+
+        $ResponseText = Execute-SOAPRequest `
+            -SOAPRequest $SoapDoc `
+            -URL $Url
+
+        $Status = 'Success'
+        $SuccessCount++
+
+        Write-Log "[$No/$Total] SOAP 呼叫完成" Green
     }
     catch {
-        Write-Log "錯誤：讀取 LDAP 連線資訊時發生例外: $($_.Exception.Message)" -ForegroundColor Red -IsError
-        $HasError = $true
+        $ErrorText = $_.Exception.Message
+        $FailedCount++
+
+        Write-Log "[$No/$Total] 發送失敗：$ErrorText" Red
     }
-}
-# ==========================================
-# 3. 檢查連線字串並強制指定資料庫 BSADBTW
-#    LDAP 只拿 Server / User / Password
-#    Database 固定 BSADBTW，不要被 Initial Catalog=RPADB 覆蓋
-# ==========================================
-$database = "BSADBTW"
-$spName   = "dbo.DataMigrator_Integrate_TRXN"
-if (-not $HasError) {
-    if ([string]::IsNullOrWhiteSpace($connStr)) {
-        Write-Log "錯誤：LDAP 回傳的連線字串是空的" -ForegroundColor Red -IsError
-        $HasError = $true
+    finally {
+        $Stopwatch.Stop()
     }
-}
-if (-not $HasError) {
-    $maskedConn = [regex]::Replace($connStr, '(?i)(Password|Pwd)\s*=\s*[^;]*', '$1=******')
-    Write-Log "LDAP 連線字串（已遮罩）: $maskedConn" -ForegroundColor DarkGray
-    try {
-        $builder = New-Object System.Data.SqlClient.SqlConnectionStringBuilder($connStr)
-        # 強制指定目標庫，覆寫 LDAP 回傳的 RPADB
-        $builder.InitialCatalog = $database
-        $connStr = $builder.ConnectionString
-        Write-Log "將執行 SP: $database.$spName" -ForegroundColor Cyan
-    }
-    catch {
-        Write-Log "SqlConnectionStringBuilder 解析失敗，改用手動解析: $($_.Exception.Message)" -ForegroundColor Yellow
-        if ($connStr -notmatch '(?i)(Initial Catalog|Database)\s*=') {
-            $connStr = $connStr.TrimEnd(';') + ";Database=$database;"
-        }
-        else {
-            $connStr = [regex]::Replace($connStr, '(?i)(Initial Catalog|Database)\s*=\s*[^;]*', "Initial Catalog=$database")
-        }
-        Write-Log "已強制補上 / 覆寫 Database=$database" -ForegroundColor Yellow
-        Write-Log "將執行 SP: $database.$spName" -ForegroundColor Cyan
-    }
+
+    Write-Log "[$No/$Total] Status=$Status; Elapsed=$($Stopwatch.ElapsedMilliseconds) ms"
+
+    $Results.Add([PSCustomObject]@{
+        No              = $No
+        ReferenceNumber = $ReferenceNumber
+        Status          = $Status
+        ElapsedMs       = $Stopwatch.ElapsedMilliseconds
+        Response        = $ResponseText
+        Error           = $ErrorText
+    })
 }
 
+# -------------------- 9. 結果摘要與 CSV --------------------
 
-我要讀取指定日期 例如指定10/27 整天的RawMessage
-SELECT RawMessage FROM MESSAGEDATABASE..SWIFT_MTRAW
-WHERE CreatedDate     = '2026-10-27 05:04:03.3430000'
-帶進去發電文
+Write-Log '========== 執行摘要 ==========' Cyan
+Write-Log "查詢日期：$QueryDate"
+Write-Log "查詢筆數：$Total"
+Write-Log "SOAP 呼叫成功：$SuccessCount" Green
+Write-Log "SOAP 呼叫失敗：$FailedCount" $(if ($FailedCount -gt 0) { 'Red' } else { 'Green' })
 
-如果10/27 有10筆 我就要發10筆
+$Results |
+    Select-Object No, ReferenceNumber, Status, ElapsedMs, Error |
+    Format-Table -AutoSize |
+    Out-String |
+    ForEach-Object {
+        Write-Host $_
+        Add-Content -Path $MainLogFile -Value $_ -Encoding UTF8
+    }
 
-怎麼寫ps1
+$CsvFile = Join-Path $LogFolder "Results_$Timestamp.csv"
 
+$Results |
+    Select-Object No, ReferenceNumber, Status, ElapsedMs, Error |
+    Export-Csv -Path $CsvFile -NoTypeInformation -Encoding UTF8
 
+Write-Log "結果 CSV：$CsvFile" Cyan
+Write-Log '========== 作業結束 ==========' Cyan
