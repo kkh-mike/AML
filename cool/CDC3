@@ -1,5 +1,25 @@
-     IF @ModuleName = 'CIF'
-                BEGIN                                                                                                                                        
+D:\AML_Source\20251114_新光資轉\EXE>AMLDataMigrator.exe TW I CIF
+10/27/2026 11:00:09: Cust - Begin Import
+10/27/2026 11:00:09: Cust - Import - CustomerImportData
+10/27/2026 11:04:08 : Import of AML_Cust.csv completed successfully.
+Error importing AML_Cust.csv: MERGE 陳述式必須以分號 (;) 結束。
+10/27/2026 11:13:26: Cust - Import Failed
+10/27/2026 11:13:26: Process Done
+
+D:\AML_Source\20251114_新光資轉\EXE>
+
+
+
+
+
+
+
+
+
+什麼問題
+怎麼改
+
+               BEGIN                                                                                                                                        
                     TRUNCATE TABLE dbo.CIF_Migrate_Mapping_TEMP;
 
                     IF @CIFMappingTable IS NOT NULL
