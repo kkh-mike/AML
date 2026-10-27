@@ -1,40 +1,66 @@
-function Execute-SOAPRequest 
-( 
-        [Xml]    $SOAPRequest, 
-        [String] $URL 
-        ) 
-{ 
-        $soapWebRequest = [System.Net.WebRequest]::Create($URL) 
-        $soapWebRequest.Headers.Add("SOAPAction","SubmitRequest")
-        $soapWebRequest.ContentType = "text/xml;charset=`"utf-8`"" 
-        $soapWebRequest.Accept      = "text/xml" 
-        $soapWebRequest.Method      = "POST" 
-        $requestStream = $soapWebRequest.GetRequestStream() 
-        $SOAPRequest.Save($requestStream) 
-        $requestStream.Close() 
-        $resp = $soapWebRequest.GetResponse() 
-        $responseStream = $resp.GetResponseStream() 
-        $soapReader = [System.IO.StreamReader]($responseStream) 
-        $ReturnXml = $soapReader.ReadToEnd() 
-        $responseStream.Close() 
-        return $ReturnXml 
+
+function Execute-SOAPRequest {
+    param (
+        [xml]    $SOAPRequest,
+        [string] $URL
+    )
+
+    $soapWebRequest = [System.Net.WebRequest]::Create($URL)
+    $soapWebRequest.Headers.Add("SOAPAction", "SubmitRequest")
+    $soapWebRequest.ContentType = 'text/xml; charset=utf-8'
+    $soapWebRequest.Accept = "text/xml"
+    $soapWebRequest.Method = "POST"
+
+    $requestStream = $soapWebRequest.GetRequestStream()
+
+    try {
+        $SOAPRequest.Save($requestStream)
+    }
+    finally {
+        $requestStream.Close()
+    }
+
+    $resp = $soapWebRequest.GetResponse()
+
+    try {
+        $responseStream = $resp.GetResponseStream()
+        $soapReader = [System.IO.StreamReader]::new($responseStream)
+
+        try {
+            return $soapReader.ReadToEnd()
+        }
+        finally {
+            $soapReader.Close()
+        }
+    }
+    finally {
+        $resp.Close()
+    }
 }
+
+
+# ============================================================
+# 1. SOAP Service 設定
+# ============================================================
 
 $url = 'http://localhost:8082/SwiftProcessor.svc?wsdl'
 
 
+# ============================================================
+# 2. 自動產生 ReferenceNumber
+#    格式：yyyyMMddHHmmssfff
+#    範例：20261027130325123
+# ============================================================
 
-$soap1 = [xml]@'
-<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <soap:Body>
-    <SubmitRequest xmlns="http://patriotofficer.net/SwiftService">
-      <Params>
-        <ActionCode>SCAN_SWIFT</ActionCode>
-        <BankNo>TW</BankNo>
-        <BranchNo>0001</BranchNo>
-        <Channel>SWIFT</Channel>
-        <Message>{1:F01TSIBTWTPAXXX5356135117}{2:O1030831210315TSIBTWTPXXXX12341234560510170831N}{4:
+$referenceNumber = Get-Date -Format 'yyyyMMddHHmmssfff'
+
+
+# ============================================================
+# 3. SWIFT 電文
+# ============================================================
+
+$swiftMessage = @'
+{1:F01TSIBTWTPAXXX5356135117}{2:O1030831210315TSIBTWTPXXXX12341234560510170831N}{4:
 :20:E-T130-066_2
 :23B:CRED
 :32A:210315USD0,
@@ -48,37 +74,61 @@ TARTOUS
 :59A:DEUTDEFF
 :71A:SHA
 -}
-</Message>
-        <MessageTypeCode>MT</MessageTypeCode>
-        <ReferenceNumber>E-T130-0123123123</ReferenceNumber>
-        <SourceID>TSID</SourceID>
-      </Params>
-    </SubmitRequest>
-  </soap:Body>
-</soap:Envelope>
-
 '@
 
 
+# ============================================================
+# 4. 建立 SOAP Request
+# ============================================================
+
+$soapXml = @"
+<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+
+    <soap:Body>
+        <SubmitRequest xmlns="http://patriotofficer.net/SwiftService">
+            <Params>
+                <ActionCode>SCAN_SWIFT</ActionCode>
+                <BankNo>TW</BankNo>
+                <BranchNo>0001</BranchNo>
+                <Channel>SWIFT</Channel>
+                <Message><![CDATA[$swiftMessage]]></Message>
+                <MessageTypeCode>MT</MessageTypeCode>
+                <ReferenceNumber>$referenceNumber</ReferenceNumber>
+                <SourceID>TSID</SourceID>
+            </Params>
+        </SubmitRequest>
+    </soap:Body>
+</soap:Envelope>
+"@
+
+$soap1 = [xml]$soapXml
 
 
-	$sw = [System.Diagnostics.Stopwatch]::startNew()
+# ============================================================
+# 5. 執行 SOAP Request 並計算耗時
+# ============================================================
 
-	$sw.Reset()
-	$sw.Start()
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
 
+try {
+    $response = Execute-SOAPRequest -SOAPRequest $soap1 -URL $url
 
+    $sw.Stop()
 
-Execute-SOAPRequest $soap1  $url
+    Write-Host "ReferenceNumber : $referenceNumber"
+    Write-Host "Elapsed Time    : $($sw.Elapsed.TotalMilliseconds) ms"
+    Write-Host "`nSOAP Response:"
+    Write-Output $response
+}
+catch {
+    $sw.Stop()
 
-
-
-
-#$sw.Elapsed
-#$count = $count + 1
-
-
-
-幫我整理我的電文
-ReferenceNumber 可以自動填寫為日期時間
-然後整理一下排版給我
+    Write-Host "SOAP Request Failed" -ForegroundColor Red
+    Write-Host "ReferenceNumber : $referenceNumber"
+    Write-Host "Elapsed Time    : $($sw.Elapsed.TotalMilliseconds) ms"
+    Write-Host "Error           : $($_.Exception.Message)" -ForegroundColor Red
+}
