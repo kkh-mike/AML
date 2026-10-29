@@ -1,4 +1,93 @@
-針對 SOURCEDBJP..NAICS_DIM 資料表（將資料表名稱改為 SOURCEDBJP..NAICS_DIM，並將描述欄位 Description 改為 NAICS_DESC），對應的 SQL 刪除與更新語法如下：
+
+
+DELETE FROM BSADBJP..FINCEN_NAICS_DIM
+WHERE NAICS_Code IN (
+    '013211',
+    '013219',
+    '013220',
+    '014769',
+    '015210',
+    '015220',
+    '015231',
+    '015232',
+    '015233',
+    '015241',
+    '018701',
+    '018702',
+    '018703',
+    '018709',
+    '019521',
+    '019522',
+    '019523',
+    '019630',
+    '025241',
+    '029491',
+    '029523',
+    '029630'
+);
+
+
+
+
+
+
+
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'其他陸上運輸輔助業'
+WHERE NAICS_Code = '015219';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'其他水上運輸輔助業'
+WHERE NAICS_Code = '015229';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'數位遊戲軟體出版業'
+WHERE NAICS_Code = '015821';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'有線、無線及衛星電信業'
+WHERE NAICS_Code = '016110';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'數位遊戲、軟體及其工具開發業'
+WHERE NAICS_Code = '016211';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'其他電腦程式設計業'
+WHERE NAICS_Code = '016219';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'其他文教育樂用品零售業'
+WHERE NAICS_Code = '024769';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'資訊及通訊設備零售業'
+WHERE NAICS_Code = '024830';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'其他陸上運輸輔助業'
+WHERE NAICS_Code = '025219';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'其他水上運輸輔助業'
+WHERE NAICS_Code = '025229';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'數位遊戲軟體出版業'
+WHERE NAICS_Code = '025821';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'有線、無線及衛星電信業'
+WHERE NAICS_Code = '026110';
+
+
+
+
+
+
+
+
 -- 刪除指定代碼的資料
 DELETE FROM SOURCEDBJP..NAICS_DIM
 WHERE NAICS_Code IN (
@@ -75,3 +164,15 @@ UPDATE SOURCEDBJP..NAICS_DIM
 SET NAICS_DESC = N'有線、無線及衛星電信業'
 WHERE NAICS_Code = '026110';
 
+
+
+
+
+因為我需要before after
+SELECT * FROM BSADBJP..FINCEN_NAICS_DIM
+SELECT * FROM SOURCEDBJP..NAICS_DIM
+幫我下上去
+
+然後補上nolock
+
+整個能幫我整理一下?
