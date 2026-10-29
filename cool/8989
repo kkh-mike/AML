@@ -1,5 +1,5 @@
-當然可以！已經幫您在每個資料庫區塊的開頭加上了 USE 指令，這樣執行時就會自動切換到對應的資料庫。
-完整的整理版本如下：
+使用 DECLARE 宣告資料表變數（Table Variable）來做批次更新與刪除，會讓 SQL 語法簡潔非常多，不用寫一堆重複的 UPDATE。
+以下是使用 DECLARE 配合 JOIN 的完整優化版本（包含 USE、WITH (NOLOCK) 以及修改前後的 SELECT）：
 --------------------------------------------------------------------------------
 -- 第一部分：BSADBJP..FINCEN_NAICS_DIM
 --------------------------------------------------------------------------------
@@ -10,64 +10,47 @@ GO
 SELECT * 
 FROM BSADBJP..FINCEN_NAICS_DIM WITH (NOLOCK);
 
--- 2. 刪除指定代碼的資料
-DELETE T
-FROM BSADBJP..FINCEN_NAICS_DIM AS T WITH (NOLOCK)
-WHERE NAICS_Code IN (
-    '013211', '013219', '013220', '014769', '015210', '015220', 
-    '015231', '015232', '015233', '015241', '018701', '018702', 
-    '018703', '018709', '019521', '019522', '019523', '019630', 
-    '025241', '029491', '029523', '029630'
-);
+-- 2. 宣告要刪除的清單並執行刪除
+BEGIN
+    DECLARE @DelList_BSADBJP TABLE (NAICS_Code VARCHAR(10));
+    
+    INSERT INTO @DelList_BSADBJP (NAICS_Code) VALUES
+    ('013211'), ('013219'), ('013220'), ('014769'), ('015210'), ('015220'), 
+    ('015231'), ('015232'), ('015233'), ('015241'), ('018701'), ('018702'), 
+    ('018703'), ('018709'), ('019521'), ('019522'), ('019523'), ('019630'), 
+    ('025241'), ('029491'), ('029523'), ('029630');
 
--- 3. 更新指定代碼的描述內容
-UPDATE BSADBJP..FINCEN_NAICS_DIM WITH (NOLOCK)
-SET Description = N'其他陸上運輸輔助業'
-WHERE NAICS_Code = '015219';
+    DELETE t
+    FROM BSADBJP..FINCEN_NAICS_DIM AS t WITH (NOLOCK)
+    INNER JOIN @DelList_BSADBJP AS d ON t.NAICS_Code = d.NAICS_Code;
+END;
 
-UPDATE BSADBJP..FINCEN_NAICS_DIM WITH (NOLOCK)
-SET Description = N'其他水上運輸輔助業'
-WHERE NAICS_Code = '015229';
+-- 3. 宣告要更新的清單並執行批次更新
+BEGIN
+    DECLARE @UpdList_BSADBJP TABLE (
+        NAICS_Code  VARCHAR(10),
+        Description NVARCHAR(100)
+    );
 
-UPDATE BSADBJP..FINCEN_NAICS_DIM WITH (NOLOCK)
-SET Description = N'數位遊戲軟體出版業'
-WHERE NAICS_Code = '015821';
+    INSERT INTO @UpdList_BSADBJP (NAICS_Code, Description) VALUES
+    ('015219', N'其他陸上運輸輔助業'),
+    ('015229', N'其他水上運輸輔助業'),
+    ('015821', N'數位遊戲軟體出版業'),
+    ('016110', N'有線、無線及衛星電信業'),
+    ('016211', N'數位遊戲、軟體及其工具開發業'),
+    ('016219', N'其他電腦程式設計業'),
+    ('024769', N'其他文教育樂用品零售業'),
+    ('024830', N'資訊及通訊設備零售業'),
+    ('025219', N'其他陸上運輸輔助業'),
+    ('025229', N'其他水上運輸輔助業'),
+    ('025821', N'數位遊戲軟體出版業'),
+    ('026110', N'有線、無線及衛星電信業');
 
-UPDATE BSADBJP..FINCEN_NAICS_DIM WITH (NOLOCK)
-SET Description = N'有線、無線及衛星電信業'
-WHERE NAICS_Code = '016110';
-
-UPDATE BSADBJP..FINCEN_NAICS_DIM WITH (NOLOCK)
-SET Description = N'數位遊戲、軟體及其工具開發業'
-WHERE NAICS_Code = '016211';
-
-UPDATE BSADBJP..FINCEN_NAICS_DIM WITH (NOLOCK)
-SET Description = N'其他電腦程式設計業'
-WHERE NAICS_Code = '016219';
-
-UPDATE BSADBJP..FINCEN_NAICS_DIM WITH (NOLOCK)
-SET Description = N'其他文教育樂用品零售業'
-WHERE NAICS_Code = '024769';
-
-UPDATE BSADBJP..FINCEN_NAICS_DIM WITH (NOLOCK)
-SET Description = N'資訊及通訊設備零售業'
-WHERE NAICS_Code = '024830';
-
-UPDATE BSADBJP..FINCEN_NAICS_DIM WITH (NOLOCK)
-SET Description = N'其他陸上運輸輔助業'
-WHERE NAICS_Code = '025219';
-
-UPDATE BSADBJP..FINCEN_NAICS_DIM WITH (NOLOCK)
-SET Description = N'其他水上運輸輔助業'
-WHERE NAICS_Code = '025229';
-
-UPDATE BSADBJP..FINCEN_NAICS_DIM WITH (NOLOCK)
-SET Description = N'數位遊戲軟體出版業'
-WHERE NAICS_Code = '025821';
-
-UPDATE BSADBJP..FINCEN_NAICS_DIM WITH (NOLOCK)
-SET Description = N'有線、無線及衛星電信業'
-WHERE NAICS_Code = '026110';
+    UPDATE t
+    SET t.Description = u.Description
+    FROM BSADBJP..FINCEN_NAICS_DIM AS t WITH (NOLOCK)
+    INNER JOIN @UpdList_BSADBJP AS u ON t.NAICS_Code = u.NAICS_Code;
+END;
 
 -- 4. 修改後查詢 (After)
 SELECT * 
@@ -84,64 +67,47 @@ GO
 SELECT * 
 FROM SOURCEDBJP..NAICS_DIM WITH (NOLOCK);
 
--- 2. 刪除指定代碼的資料
-DELETE T
-FROM SOURCEDBJP..NAICS_DIM AS T WITH (NOLOCK)
-WHERE NAICS_Code IN (
-    '013211', '013219', '013220', '014769', '015210', '015220', 
-    '015231', '015232', '015233', '015241', '018701', '018702', 
-    '018703', '018709', '019521', '019522', '019523', '019630', 
-    '025241', '029491', '029523', '029630'
-);
+-- 2. 宣告要刪除的清單並執行刪除
+BEGIN
+    DECLARE @DelList_SOURCE TABLE (NAICS_Code VARCHAR(10));
+    
+    INSERT INTO @DelList_SOURCE (NAICS_Code) VALUES
+    ('013211'), ('013219'), ('013220'), ('014769'), ('015210'), ('015220'), 
+    ('015231'), ('015232'), ('015233'), ('015241'), ('018701'), ('018702'), 
+    ('018703'), ('018709'), ('019521'), ('019522'), ('019523'), ('019630'), 
+    ('025241'), ('029491'), ('029523'), ('029630');
 
--- 3. 更新指定代碼的描述內容
-UPDATE SOURCEDBJP..NAICS_DIM WITH (NOLOCK)
-SET NAICS_DESC = N'其他陸上運輸輔助業'
-WHERE NAICS_Code = '015219';
+    DELETE t
+    FROM SOURCEDBJP..NAICS_DIM AS t WITH (NOLOCK)
+    INNER JOIN @DelList_SOURCE AS d ON t.NAICS_Code = d.NAICS_Code;
+END;
 
-UPDATE SOURCEDBJP..NAICS_DIM WITH (NOLOCK)
-SET NAICS_DESC = N'其他水上運輸輔助業'
-WHERE NAICS_Code = '015229';
+-- 3. 宣告要更新的清單並執行批次更新
+BEGIN
+    DECLARE @UpdList_SOURCE TABLE (
+        NAICS_Code  VARCHAR(10),
+        NAICS_DESC  NVARCHAR(100)
+    );
 
-UPDATE SOURCEDBJP..NAICS_DIM WITH (NOLOCK)
-SET NAICS_DESC = N'數位遊戲軟體出版業'
-WHERE NAICS_Code = '015821';
+    INSERT INTO @UpdList_SOURCE (NAICS_Code, NAICS_DESC) VALUES
+    ('015219', N'其他陸上運輸輔助業'),
+    ('015229', N'其他水上運輸輔助業'),
+    ('015821', N'數位遊戲軟體出版業'),
+    ('016110', N'有線、無線及衛星電信業'),
+    ('016211', N'數位遊戲、軟體及其工具開發業'),
+    ('016219', N'其他電腦程式設計業'),
+    ('024769', N'其他文教育樂用品零售業'),
+    ('024830', N'資訊及通訊設備零售業'),
+    ('025219', N'其他陸上運輸輔助業'),
+    ('025229', N'其他水上運輸輔助業'),
+    ('025821', N'數位遊戲軟體出版業'),
+    ('026110', N'有線、無線及衛星電信業');
 
-UPDATE SOURCEDBJP..NAICS_DIM WITH (NOLOCK)
-SET NAICS_DESC = N'有線、無線及衛星電信業'
-WHERE NAICS_Code = '016110';
-
-UPDATE SOURCEDBJP..NAICS_DIM WITH (NOLOCK)
-SET NAICS_DESC = N'數位遊戲、軟體及其工具開發業'
-WHERE NAICS_Code = '016211';
-
-UPDATE SOURCEDBJP..NAICS_DIM WITH (NOLOCK)
-SET NAICS_DESC = N'其他電腦程式設計業'
-WHERE NAICS_Code = '016219';
-
-UPDATE SOURCEDBJP..NAICS_DIM WITH (NOLOCK)
-SET NAICS_DESC = N'其他文教育樂用品零售業'
-WHERE NAICS_Code = '024769';
-
-UPDATE SOURCEDBJP..NAICS_DIM WITH (NOLOCK)
-SET NAICS_DESC = N'資訊及通訊設備零售業'
-WHERE NAICS_Code = '024830';
-
-UPDATE SOURCEDBJP..NAICS_DIM WITH (NOLOCK)
-SET NAICS_DESC = N'其他陸上運輸輔助業'
-WHERE NAICS_Code = '025219';
-
-UPDATE SOURCEDBJP..NAICS_DIM WITH (NOLOCK)
-SET NAICS_DESC = N'其他水上運輸輔助業'
-WHERE NAICS_Code = '025229';
-
-UPDATE SOURCEDBJP..NAICS_DIM WITH (NOLOCK)
-SET NAICS_DESC = N'數位遊戲軟體出版業'
-WHERE NAICS_Code = '025821';
-
-UPDATE SOURCEDBJP..NAICS_DIM WITH (NOLOCK)
-SET NAICS_DESC = N'有線、無線及衛星電信業'
-WHERE NAICS_Code = '026110';
+    UPDATE t
+    SET t.NAICS_DESC = u.NAICS_DESC
+    FROM SOURCEDBJP..NAICS_DIM AS t WITH (NOLOCK)
+    INNER JOIN @UpdList_SOURCE AS u ON t.NAICS_Code = u.NAICS_Code;
+END;
 
 -- 4. 修改後查詢 (After)
 SELECT * 
