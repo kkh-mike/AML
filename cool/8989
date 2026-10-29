@@ -1,225 +1,97 @@
-對，這一段目前是直接將 LEFT(B.AddressCountry, 100)（道瓊原始的國家全名）寫入 Country，沒有經過 COUNTRY_DIM 轉換成 ISO 二碼國別代碼（ISO_2_CountryCode）。
-這一段因為原本就已經有 TempAddress 的 CTE 了，修改起來最簡單，只要在 INSERT INTO #tempDJBlacklistDetails 的最後加上 OUTER APPLY COUNTRY_DIM，並把 SELECT 裡的國家欄位改成 COALESCE(F.ISO_2_CountryCode, LEFT(B.AddressCountry, 100)) 即可。
-修改後的完整程式碼（第一段：Primary Sanctions List）
-    /*
-        ============================================================
-        第一段：主要黑名單同步（Primary Sanctions List）
-        目標表：BSADB.dbo.OFAC_GLSpec（依 @GroupId 控制）
-        ============================================================
-    */
-
-    IF OBJECT_ID('tempdb..#tempDJBlacklist') IS NOT NULL
-        DROP TABLE #tempDJBlacklist;
-
-    IF OBJECT_ID('tempdb..#tempDJBlacklistDetails') IS NOT NULL
-        DROP TABLE #tempDJBlacklistDetails;
-
-    CREATE TABLE #tempDJBlacklist
-    (
-        EntNum      INT NOT NULL,
-        SdnName     NVARCHAR(350) NOT NULL,
-        UpdatedDate VARCHAR(8) NOT NULL
-    );
-
-    CREATE TABLE #tempDJBlacklistDetails
-    (
-        EntNum       INT NOT NULL,
-        SdnName      NVARCHAR(350) NOT NULL,
-        UpdatedDate  VARCHAR(8) NOT NULL,
-        Address      NVARCHAR(400),
-        City         NVARCHAR(200),
-        Country      NVARCHAR(100),
-        IdentType    VARCHAR(2),
-        IdentNumber  NVARCHAR(44),
-        DOB          VARCHAR(8)
-    );
-
-    -- 取得主要名稱資料
-    INSERT INTO #tempDJBlacklist (EntNum, SdnName, UpdatedDate)
-    SELECT 
-        A.EntNum, 
-        A.SdnName, 
-        MAX(A.UpdatedDate) AS UpdatedDate
-    FROM BSADB.dbo.DJ_List_Data_A A
-    WHERE A.NamePropertyBitCode & 1 > 0
-      AND A.SdnName IS NOT NULL
-      AND LTRIM(RTRIM(A.SdnName)) <> ''
-    GROUP BY A.EntNum, A.SdnName;
-
-    ;WITH TempAddress AS
-    (
-        SELECT 
-            A.EntityId, 
-            A.Address, 
-            A.City, 
-            A.AddressCountry,
-            ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
-        FROM BSADB.dbo.DJ_Address A WITH (NOLOCK)
-        WHERE A.Deleted = 0
-          AND EXISTS (SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
-    ),
-    TempIdent AS
-    (
-        SELECT 
-            A.EntityId,
-            CASE WHEN ISNULL(A.IdentificationType, '') = '' THEN NULL ELSE @OtherIdentMthCode END AS IdentificationType,
-            A.IdentificationNumber,
-            ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
-        FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH (NOLOCK)
-        WHERE A.Deleted = 0
-          AND EXISTS (SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
-    ),
-    TempDOB AS
-    (
-        SELECT 
-            A.EntityId, 
-            A.InfoDay, 
-            A.InfoMonth, 
-            A.InfoYear,
-            ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
-        FROM BSADB.dbo.DJ_DateTypeInfo A WITH (NOLOCK)
-        WHERE A.DateType = 'Date of Birth'
-          AND A.Deleted = 0
-          AND EXISTS (SELECT 1 FROM #tempDJBlacklist X WHERE A.EntityId = X.EntNum)
-    )
-    INSERT INTO #tempDJBlacklistDetails
-        (EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB)
-    SELECT 
-        A.EntNum,
-        A.SdnName,
-        A.UpdatedDate,
-        B.Address,
-        LEFT(B.City, 100),
-        -- 【修改】優先取 COUNTRY_DIM 的二碼國別代碼，比對不到才退回原始 AddressCountry
-        COALESCE(F.ISO_2_CountryCode, LEFT(B.AddressCountry, 100)) AS Country,
-        C.IdentificationType,
-        LEFT(C.IdentificationNumber, 44),
-        CASE 
-            WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL 
-            THEN D.InfoYear 
-            ELSE CONVERT(VARCHAR(8), dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112) 
-        END
-    FROM #tempDJBlacklist A
-    LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1
-    LEFT JOIN TempIdent   C ON A.EntNum = C.EntityId AND C.RowId = 1
-    LEFT JOIN TempDOB     D ON A.EntNum = D.EntityId AND D.RowId = 1
-    -- 【新增】關聯 COUNTRY_DIM 轉換國別代碼
-    OUTER APPLY (
-        SELECT TOP 1 CD.ISO_2_CountryCode
-        FROM COUNTRY_DIM CD WITH (NOLOCK)
-        WHERE B.AddressCountry IS NOT NULL
-          AND B.AddressCountry IN (
-              CD.ISO_CountryDescription,
-              CD.ISO_CountryDescription_zh_TW,
-              CD.ISO_CountryDescription_zh_CN,
-              CD.ISO_CountryDescription_Default
-          )
-    ) F;
 
 
-    -- MERGE 主表
-    ;WITH TargetTable AS
-    (
-        SELECT 
-            A.spec_name, A.updated_date, A.remark, A.TaxID, A.IDENT, A.IDENTO, A.TaxIDCD, A.IDNUM, A.DInd,
-            A.creUserID, A.STATE, A.ADDRESS, A.COUNTRY, A.GROUPID, A.SOURCE, A.EnterFlag,
-            A.ApprovedBy, A.ApprovedDate, A.DelUserID, A.DelDate, A.ApproveDelUserID, A.ApproveDelDate,
-            A.creDate, A.updated_date_UTC, A.ApprovedDate_UTC, A.DelDate_UTC, A.ApproveDelDate_UTC,
-            A.creDate_UTC, A.ent_num, A.DOB
-        FROM BSADB.dbo.OFAC_GLSpec A
-        WHERE A.GROUPID = @GroupId
-    )
-    MERGE TargetTable AS T
-    USING (SELECT EntNum, SdnName, UpdatedDate, Address, City, Country, IdentType, IdentNumber, DOB 
-           FROM #tempDJBlacklistDetails) AS S
-    ON T.spec_name = S.SdnName 
-   AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+DELETE FROM BSADBJP..FINCEN_NAICS_DIM
+WHERE NAICS_Code IN (
+    '013211',
+    '013219',
+    '013220',
+    '014769',
+    '015210',
+    '015220',
+    '015231',
+    '015232',
+    '015233',
+    '015241',
+    '018701',
+    '018702',
+    '018703',
+    '018709',
+    '019521',
+    '019522',
+    '019523',
+    '019630',
+    '025241',
+    '029491',
+    '029523',
+    '029630'
+);
 
-    WHEN NOT MATCHED BY TARGET THEN
-        INSERT (spec_name, updated_date, remark, DInd, creUserID, STATE, ADDRESS, COUNTRY,
-                GROUPID, IDENT, IDNUM, DOB, SOURCE, EnterFlag, ApprovedBy, ApprovedDate,
-                DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, creDate,
-                updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, creDate_UTC)
-        VALUES (S.SdnName, S.UpdatedDate, S.EntNum, 'N', 'System Admin', ISNULL(S.City, ''), S.Address, S.Country,
-                @GroupId, S.IdentType, S.IdentNumber, S.DOB, NULL, 'D', 'System Admin', GETDATE(),
-                'System Admin', GETDATE(), 'System Admin', GETDATE(), GETDATE(),
-                GETDATE(), GETUTCDATE(), NULL, NULL, GETUTCDATE())
 
-    WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN
-        UPDATE SET 
-            T.DInd = 'Y',
-            T.DelUserID = 'System Admin',
-            T.DelDate = GETDATE(),
-            T.ApproveDelUserID = 'System Admin',
-            T.ApproveDelDate = GETDATE(),
-            T.DelDate_UTC = GETUTCDATE()
 
-    WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN
-        UPDATE SET 
-            T.DInd = 'N',
-            T.updated_date = S.UpdatedDate,
-            T.DelUserID = NULL,
-            T.DelDate = NULL,
-            T.ApproveDelUserID = NULL,
-            T.ApproveDelDate = NULL,
-            T.DelDate_UTC = NULL,
-            T.EnterFlag = 'D',
-            T.updated_date_UTC = GETUTCDATE(),
-            T.ADDRESS = S.Address,
-            T.STATE = ISNULL(S.City, ''),
-            T.COUNTRY = S.Country,
-            T.IDENT = S.IdentType,
-            T.IDNUM = S.IdentNumber,
-            T.DOB = S.DOB
 
-    OUTPUT 
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ent_num ELSE Deleted.ent_num END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.spec_name ELSE Deleted.spec_name END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date ELSE Deleted.updated_date END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.remark ELSE Deleted.remark END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DInd ELSE Deleted.DInd END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creUserID ELSE Deleted.creUserID END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENTO ELSE Deleted.IDENTO END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.STATE ELSE Deleted.STATE END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ADDRESS ELSE Deleted.ADDRESS END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.COUNTRY ELSE Deleted.COUNTRY END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.GROUPID ELSE Deleted.GROUPID END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDENT ELSE Deleted.IDENT END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.IDNUM ELSE Deleted.IDNUM END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DOB ELSE Deleted.DOB END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.EnterFlag ELSE Deleted.EnterFlag END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedBy ELSE Deleted.ApprovedBy END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate ELSE Deleted.ApprovedDate END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelUserID ELSE Deleted.DelUserID END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate ELSE Deleted.DelDate END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelUserID ELSE Deleted.ApproveDelUserID END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate ELSE Deleted.ApproveDelDate END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creDate ELSE Deleted.creDate END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.updated_date_UTC ELSE Deleted.updated_date_UTC END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApprovedDate_UTC ELSE Deleted.ApprovedDate_UTC END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.DelDate_UTC ELSE Deleted.DelDate_UTC END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.ApproveDelDate_UTC ELSE Deleted.ApproveDelDate_UTC END,
-        CASE WHEN $ACTION IN ('INSERT') THEN Inserted.creDate_UTC ELSE Deleted.creDate_UTC END,
-        CASE 
-            WHEN $ACTION = 'INSERT' OR ($ACTION = 'UPDATE' AND Deleted.DInd = 'Y' AND Inserted.DInd = 'N') THEN '01'
-            WHEN $ACTION = 'UPDATE' AND Inserted.DInd = 'Y' THEN '03'
-            ELSE '02'
-        END,
-        GETUTCDATE()
-    INTO BSADB.dbo.OFAC_GLSpec_Log
-        (ent_num, spec_name, updated_date, remark, DInd, creUserID, IDENTO, STATE, ADDRESS, COUNTRY, GROUPID,
-         IDENT, IDNUM, DOB, EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate, ApproveDelUserID,
-         ApproveDelDate, CreationDate, updated_date_UTC, ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC,
-         CreationDate_UTC, ActionCD, ActionDt);
 
-順便幫你檢查到的兩個小細節：
- * WHEN NOT MATCHED BY TARGET 的刪除欄位預設值：
-   注意看這一段的 INSERT VALUES 裡面：
-   DelUserID, DelDate, ApproveDelUserID, ApproveDelDate, creDate, updated_date_UTC...
-VALUES (..., 'System Admin', GETDATE(), 'System Admin', GETDATE(), GETDATE(), GETDATE(), ...)
 
-   在其他幾段程式中，新增資料（DInd = 'N'）時，DelUserID、DelDate、ApproveDelUserID、ApproveDelDate 都是放 NULL，且 updated_date_UTC 是放 GETUTCDATE()；但這一段原本寫成了 'System Admin' 和 GETDATE()。如果不希望剛新增的有效名單上帶有刪除人員與刪除時間，建議一併改回 NULL 與 GETUTCDATE()。
- * 舊資料國別刷新：
-   因為這一段原本已經把英文國家全名（例如 United States）寫進 OFAC_GLSpec.COUNTRY 了，如果希望下次執行時直接把資料庫裡既有的英文全名洗成二碼代碼（例如 US），可以把 WHEN MATCHED 條件改為：
-   WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date OR ISNULL(T.COUNTRY, '') <> ISNULL(S.Country, '')) THEN
 
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'其他陸上運輸輔助業'
+WHERE NAICS_Code = '015219';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'其他水上運輸輔助業'
+WHERE NAICS_Code = '015229';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'數位遊戲軟體出版業'
+WHERE NAICS_Code = '015821';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'有線、無線及衛星電信業'
+WHERE NAICS_Code = '016110';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'數位遊戲、軟體及其工具開發業'
+WHERE NAICS_Code = '016211';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'其他電腦程式設計業'
+WHERE NAICS_Code = '016219';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'其他文教育樂用品零售業'
+WHERE NAICS_Code = '024769';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'資訊及通訊設備零售業'
+WHERE NAICS_Code = '024830';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'其他陸上運輸輔助業'
+WHERE NAICS_Code = '025219';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'其他水上運輸輔助業'
+WHERE NAICS_Code = '025229';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'數位遊戲軟體出版業'
+WHERE NAICS_Code = '025821';
+
+UPDATE BSADBJP..FINCEN_NAICS_DIM
+SET Description = N'有線、無線及衛星電信業'
+WHERE NAICS_Code = '026110';
+
+
+
+
+
+
+
+
+我還有一個
+SELECT * FROM SOURCEDBJP..NAICS_DIM
+
+NAICS_Code   一樣是NAICS_Code
+Description  欄位名稱是 NAICS_DESC
+
+一樣做 刪除跟update  的code
