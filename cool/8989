@@ -1,17 +1,10 @@
-1.	需求概述與目的(  NA )
-因應香港内部稽核之建議，優化香港分行每月HKAML組(FAM)下載與貿易金融相關(Trade Finance)的紅旗月報，以利AML管治及匯報。其中要求之資訊包括觸發紅旗及其關聯細節等相關資訊。
-
-經與HOIT初步討論，因所需紅旗及其關聯細節等資訊只在WBS顯示而非AML PO系統，因而已聯係HOIT AML提取所需香港分行貿易金融資訊產出(月報)報表,以幫助HKAML組能更有效地整理資訊及數據。
-
-也因而參考 HK OP WBS所提供之截圖（之前電郵提供HOIT截圖），主要是Trade Finance (TF) transaction若有“紅旗”/Red flags, 希望能把WBS這一頁一些相關聯及主要的資訊（比如顯示欄位：AML Type, Red Flag, Red Flag Reason and Content, Remarks, Goods Code, Merchandise, Vessel Name, flag of vessel, AML_Info_Seq等及客戶CIF，Trade date, Function Code and Name, Transaction amount等）都extract進這一份月報，幫助AML組能更有效地整理資訊及數據。 
-
-所需資訊請抓當月的紅旗交易。
-下檔之母體條件：可在FAM下載；
-出表頻率: 每個月第一天出表 (report to be generated beginning of each month for reporting on data as at end of previous month)。 可跟原有的（每個月）FAM月報一起產出。 
-
-例如：抓當月交易起日為20251101~20251130的060010交易其中紅旗交易欄位=Y的客戶清單，提供以上所提之欄位資訊。 
-
-另外，由於貿易金融紅旗等相關交易其中包括貿易金融貸款 (Loan)，但現況是目前放款主檔資料僅存在於「WBS主機」- LON_INFO欄位AML_INFO_SEQ而未下檔至HKODS, HOIT AML提取不到貿易金融貸款資料，所以提交提案單及規格書請WBS將相關資料下檔至HKODS，方便HOIT AML提取資料，整合報表。
-
-
-這幫我改一下
+這段「需求概述與目的」完全保留了上一個案子（關於香港分行貿易金融紅旗月報、WBS 欄位下檔、AML_INFO_SEQ 等）的內容。
+因為你這次實際在做的需求是「人員權限 View 來源從 TAS9-T 改到 AMLDB1，並取消透過檔案變更來維護額外分行權限」，這段內容必須整個換掉。
+這裡幫你把這段文字改成符合你這次「權限來源與維護機制調整」的版本：
+1. 需求概述與目的
+為落實 AML 系統相關權限之集中管理與維護效率，優化人員權限檢視視圖（AML_RIGHTS_VW）的資料來源與維護機制。
+ * 現況說明（AS-IS）：
+   目前系統是透過伺服器 TAS9-T 之 TSAAS 資料庫取得人員權限 View，且以往若需新增或調整額外分行權限時，需透過修改程式檔案或檔案變更方式進行人工維護。
+ * 改善目的（TO-BE）：
+   * 資料來源切換：將人員權限 View（AML_RIGHTS_VW）之資料來源，改由 AML 系統伺服器 AMLDB1 之 BatchJobDB 資料庫中取得。
+   * 簡化維護流程：取消以往透過檔案變更來手動維護額外分行權限的做法，改由資料庫層級整合相關權限規則（如主規則查詢、特殊維護群組、TYP 01~04 指派邏輯等）進行統一控管，以提升系統維護效率與正確性。
