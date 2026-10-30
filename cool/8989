@@ -1,441 +1,224 @@
-這裏是為你改好、使用 System.Text.StringBuilder 串流讀取（徹底解決超長電文造成的 VariableOverflow 4096 限制）的完整 PowerShell 執行腳本（.ps1）。
-你可以直接複製這整段程式碼覆蓋你的 .ps1 檔案：
-#requires -Version 5.1
-
-# ============================================================
-# Send-SwiftFromTxt_HK.ps1
-# TXT 多筆海外/綜合 SWIFT 電文 -> SOAP API（支援超長電文串流讀取）
-# ============================================================
-
-$ErrorActionPreference = 'Stop'
-
-# ============================================================
-# 1. 基本設定
-# ============================================================
-
-$url = 'http://localhost:8082/SwiftProcessor.svc?wsdl'
-
-# TXT 電文檔案路徑：請依實際位置修改
-$InputFile = 'D:\TEST\1141923\amlwsobt\swift_messages.txt'
-
-# 批次結果 CSV 路徑
-$OutputCsv = 'D:\TEST\1141923\amlwsobt\swift_results.csv'
-
-# SOAP 固定參數（若要測香港/海外可在此調整 BankNo 與 BranchNo）
-$ActionCode      = 'SCAN_SWIFT'
-$BankNo          = 'HK'
-$BranchNo        = '0900'
-$Channel         = 'SWIFT'
-$MessageTypeCode = 'MT'
-$SourceID        = 'TSID'
-
-# HTTP Timeout（毫秒）
-$TimeoutMs = 60000
-
-# ============================================================
-# 2. SOAP Request 函式
-# ============================================================
-
-function Execute-SOAPRequest {
-    param (
-        [Parameter(Mandatory = $true)]
-        [xml] $SOAPRequest,
-
-        [Parameter(Mandatory = $true)]
-        [string] $URL
-    )
-
-    $soapWebRequest = [System.Net.WebRequest]::Create($URL)
-
-    $soapWebRequest.Headers.Add('SOAPAction', 'SubmitRequest')
-    $soapWebRequest.ContentType = 'text/xml; charset=utf-8'
-    $soapWebRequest.Accept = 'text/xml'
-    $soapWebRequest.Method = 'POST'
-    $soapWebRequest.Timeout = $TimeoutMs
-    $soapWebRequest.ReadWriteTimeout = $TimeoutMs
-
-    # 送出 Request
-    $requestStream = $soapWebRequest.GetRequestStream()
-
-    try {
-        # 使用 UTF-8 編碼送出 XML
-        $settings = New-Object System.Xml.XmlWriterSettings
-        $settings.Encoding = New-Object System.Text.UTF8Encoding($false)
-        $settings.Indent = $false
-        $settings.CloseOutput = $false
-
-        $writer = [System.Xml.XmlWriter]::Create(
-            $requestStream,
-            $settings
-        )
-
-        try {
-            $SOAPRequest.Save($writer)
-            $writer.Flush()
-        }
-        finally {
-            $writer.Close()
-        }
-    }
-    finally {
-        $requestStream.Close()
-    }
-
-    # 接收 Response
-    $resp = $soapWebRequest.GetResponse()
-
-    try {
-        $responseStream = $resp.GetResponseStream()
-
-        try {
-            $reader = New-Object System.IO.StreamReader(
-                $responseStream,
-                [System.Text.Encoding]::UTF8
-            )
-
-            try {
-                return $reader.ReadToEnd()
-            }
-            finally {
-                $reader.Close()
-            }
-        }
-        finally {
-            $responseStream.Close()
-        }
-    }
-    finally {
-        $resp.Close()
-    }
-}
-
-# ============================================================
-# 3. 建立 SOAP XML
-# ============================================================
-
-function New-SOAPRequest {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string] $SwiftMessage,
-
-        [Parameter(Mandatory = $true)]
-        [string] $ReferenceNumber
-    )
-
-    $soapNs = 'http://schemas.xmlsoap.org/soap/envelope/'
-    $serviceNs = 'http://patriotofficer.net/SwiftService'
-
-    $xml = New-Object System.Xml.XmlDocument
-    $xml.PreserveWhitespace = $true
-
-    # XML Declaration
-    $declaration = $xml.CreateXmlDeclaration(
-        '1.0',
-        'utf-8',
-        $null
-    )
-    [void] $xml.AppendChild($declaration)
-
-    # Envelope
-    $envelope = $xml.CreateElement(
-        'soap',
-        'Envelope',
-        $soapNs
-    )
-    [void] $xml.AppendChild($envelope)
-
-    # Body
-    $body = $xml.CreateElement(
-        'soap',
-        'Body',
-        $soapNs
-    )
-    [void] $envelope.AppendChild($body)
-
-    # SubmitRequest
-    $submit = $xml.CreateElement(
-        '',
-        'SubmitRequest',
-        $serviceNs
-    )
-    [void] $body.AppendChild($submit)
-
-    # Params
-    $params = $xml.CreateElement(
-        '',
-        'Params',
-        $serviceNs
-    )
-    [void] $submit.AppendChild($params)
-
-    # 固定欄位
-    $fields = [ordered]@{
-        ActionCode      = $ActionCode
-        BankNo          = $BankNo
-        BranchNo        = $BranchNo
-        Channel         = $Channel
-    }
-
-    foreach ($field in $fields.GetEnumerator()) {
-        $element = $xml.CreateElement(
-            '',
-            $field.Key,
-            $serviceNs
-        )
-        $element.InnerText = [string]$field.Value
-        [void] $params.AppendChild($element)
-    }
-
-    # Message 使用 CDATA，保留 SWIFT 電文內容
-    $messageElement = $xml.CreateElement(
-        '',
-        'Message',
-        $serviceNs
-    )
-
-    # CDATA 不能直接包含 ]]>；遇到時改成一般文字節點，
-    # 由 XML 自動處理特殊字元
-    if ($SwiftMessage.Contains(']]>')) {
-        $messageElement.InnerText = $SwiftMessage
-    }
-    else {
-        $cdata = $xml.CreateCDataSection($SwiftMessage)
-        [void] $messageElement.AppendChild($cdata)
-    }
-
-    [void] $params.AppendChild($messageElement)
-
-    # 剩餘欄位
-    $remainingFields = [ordered]@{
-        MessageTypeCode = $MessageTypeCode
-        ReferenceNumber = $ReferenceNumber
-        SourceID        = $SourceID
-    }
-
-    foreach ($field in $remainingFields.GetEnumerator()) {
-        $element = $xml.CreateElement(
-            '',
-            $field.Key,
-            $serviceNs
-        )
-        $element.InnerText = [string]$field.Value
-        [void] $params.AppendChild($element)
-    }
-
-    return $xml
-}
-
-# ============================================================
-# 4. 檢查輸入檔案並以串流讀取超長電文（避開 4096 限制）
-# ============================================================
-
-if (-not (Test-Path -LiteralPath $InputFile -PathType Leaf)) {
-    throw "找不到 TXT 檔案：$InputFile"
-}
-
-$outputDirectory = Split-Path -Parent $OutputCsv
-
-if ($outputDirectory -and
-    -not (Test-Path -LiteralPath $outputDirectory)) {
-
-    New-Item -ItemType Directory -Path $outputDirectory -Force |
-        Out-Null
-}
-
-# 使用 StreamReader 逐行組合，支援巨量超長電文
-$stringBuilder = New-Object System.Text.StringBuilder
-$reader = [System.IO.File]::OpenText($InputFile)
-
-try {
-    while (($line = $reader.ReadLine()) -ne $null) {
-        [void]$stringBuilder.AppendLine($line)
-    }
-}
-finally {
-    $reader.Close()
-}
-
-$fileContent = $stringBuilder.ToString()
-
-if ([string]::IsNullOrWhiteSpace($fileContent)) {
-    throw "TXT 檔案內容為空：$InputFile"
-}
-
-# 依據 SWIFT 電文結尾 '-}' 來進行多筆電文切割
-$rawMessages = $fileContent -split '-}'
-
-$messages = @(
-    foreach ($msg in $rawMessages) {
-        $trimmed = $msg.Trim()
-        if (-not [string]::IsNullOrWhiteSpace($trimmed)) {
-            # 把被 split 掉的結尾 '-}' 補回來，確保電文結構完整
-            "$trimmed-}"
-        }
-    }
-)
-
-$total = $messages.Count
-
-if ($total -eq 0) {
-    throw "TXT 沒有可處理的 SWIFT 電文：$InputFile"
-}
-
-Write-Host ''
-Write-Host '============================================================'
-Write-Host 'SWIFT SOAP Batch Processing (HK / Stream Mode)'
-Write-Host '============================================================'
-Write-Host "Input File : $InputFile"
-Write-Host "SOAP URL   : $url"
-Write-Host "Total      : $total"
-Write-Host "Output CSV : $OutputCsv"
-Write-Host '============================================================'
-Write-Host ''
-
-# ============================================================
-# 5. 逐筆送出 SOAP Request
-# ============================================================
-
-$results = New-Object System.Collections.Generic.List[object]
-$batchWatch = [System.Diagnostics.Stopwatch]::StartNew()
-
-$referenceNumbers = @{}
-
-for ($i = 0; $i -lt $total; $i++) {
-
-    $seq = $i + 1
-    $swiftMessage = $messages[$i]
-
-    # ReferenceNumber 格式：yyyyMMddHHmmssfff
-    # 避免同一毫秒產生重複編號
-    do {
-        $referenceNumber = Get-Date -Format 'yyyyMMddHHmmssfff'
-
-        if ($referenceNumbers.ContainsKey($referenceNumber)) {
-            Start-Sleep -Milliseconds 2
-        }
-    }
-    while ($referenceNumbers.ContainsKey($referenceNumber))
-
-    $referenceNumbers[$referenceNumber] = $true
-
-    $status = 'SUCCESS'
-    $responseText = ''
-    $errorMessage = ''
-    $elapsedMs = 0
-
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-
-    Write-Host "[$seq/$total] Sending..." -ForegroundColor Cyan
-    Write-Host "ReferenceNumber : $referenceNumber"
-
-    try {
-        # 建立 XML
-        $soapRequest = New-SOAPRequest `
-            -SwiftMessage $swiftMessage `
-            -ReferenceNumber $referenceNumber
-
-        # 送出 SOAP
-        $responseText = Execute-SOAPRequest `
-            -SOAPRequest $soapRequest `
-            -URL $url
-
-        $sw.Stop()
-        $elapsedMs = [math]::Round(
-            $sw.Elapsed.TotalMilliseconds, 2
-        )
-
-        Write-Host "Status          : SUCCESS" -ForegroundColor Green
-        Write-Host "Elapsed Time    : $elapsedMs ms"
-    }
-    catch {
-        $sw.Stop()
-        $elapsedMs = [math]::Round(
-            $sw.Elapsed.TotalMilliseconds, 2
-        )
-
-        $status = 'FAILED'
-        $errorMessage = $_.Exception.Message
-
-        # 嘗試取得 HTTP 錯誤 Response 內容
-        if ($_.Exception.Response) {
-            try {
-                $errorStream = $_.Exception.Response.GetResponseStream()
-
-                if ($errorStream) {
-                    try {
-                        $errorReader = New-Object System.IO.StreamReader(
-                            $errorStream,
-                            [System.Text.Encoding]::UTF8
-                        )
-
-                        try {
-                            $responseText = $errorReader.ReadToEnd()
-                        }
-                        finally {
-                            $errorReader.Close()
-                        }
-                    }
-                    finally {
-                        $errorStream.Close()
-                    }
-                }
-            }
-            catch {
-                # 保留原始錯誤，不中斷後續電文
-            }
-        }
-
-        Write-Host "Status          : FAILED" -ForegroundColor Red
-        Write-Host "Elapsed Time    : $elapsedMs ms"
-        Write-Host "Error           : $errorMessage" -ForegroundColor Red
-    }
-
-    # 每筆結果
-    $results.Add([PSCustomObject]@{
-        Sequence        = $seq
-        ReferenceNumber = $referenceNumber
-        Status          = $status
-        ElapsedMs       = $elapsedMs
-        ErrorMessage    = $errorMessage
-        Response        = $responseText
-        Message         = $swiftMessage
-    })
-
-    Write-Host '------------------------------------------------------------'
-}
-
-$batchWatch.Stop()
-
-# ============================================================
-# 6. 輸出 CSV 結果報表
-# ============================================================
-
-$results |
-    Export-Csv -LiteralPath $OutputCsv `
-        -NoTypeInformation `
-        -Encoding UTF8
-
-$successCount = @(
-    $results | Where-Object { $_.Status -eq 'SUCCESS' }
-).Count
-
-$failedCount = @(
-    $results | Where-Object { $_.Status -eq 'FAILED' }
-).Count
-
-# ============================================================
-# 7. 批次執行摘要
-# ============================================================
-
-Write-Host ''
-Write-Host '============================================================'
-Write-Host 'Batch Summary'
-Write-Host '============================================================'
-Write-Host "Total Messages : $total"
-Write-Host "Success        : $successCount" -ForegroundColor Green
-Write-Host "Failed         : $failedCount" -ForegroundColor Red
-Write-Host "Total Time     : $([math]::Round($batchWatch.Elapsed.TotalSeconds, 2)) sec"
-Write-Host "Average Time   : $([math]::Round($batchWatch.Elapsed.TotalMilliseconds / $total, 2)) ms/message"
-Write-Host "Result CSV     : $OutputCsv"
-Write-Host '============================================================'
-
+----------------
+---------------
+/* CIF_撈資料給USER_20260929.sql */
+
+IF OBJECT_ID('tempdb..#SampleCust') IS NOT NULL DROP TABLE #SampleCust;
+
+SELECT *
+INTO #SampleCust
+FROM (
+    SELECT TOP 1
+        m.CustomerNo  AS SK_CustomerNo,
+        bb.CustomerNo AS TS_CustomerNo,
+        cc.CUST_TYPE_CDE,
+        v.ACTION,
+        a.highrisk,
+        CONCAT(
+            CASE cc.CUST_TYPE_CDE WHEN 'N' THEN '企業' WHEN 'P' THEN '個人' END, ' ',
+            CASE v.ACTION WHEN 'update' THEN '共有戶' WHEN 'INSERT' THEN '純新光' END, ' ',
+            CASE a.highrisk WHEN 'H' THEN '高' WHEN 'M' THEN '中' WHEN 'L' THEN '低' END
+        ) AS 完整分類標籤
+    FROM Cust_NP_Migrate_buffer a
+    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN Customer_Migrate_buffer m  ON m.CIF_KEY = v.SOURCE_CIF_KEY
+    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+    WHERE cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'update' AND a.highrisk = 'H'
+
+    UNION ALL
+    SELECT TOP 1 m.CustomerNo, bb.CustomerNo, cc.CUST_TYPE_CDE, v.ACTION, a.highrisk,
+        CONCAT(CASE cc.CUST_TYPE_CDE WHEN 'N' THEN '企業' WHEN 'P' THEN '個人' END, ' ',
+               CASE v.ACTION WHEN 'update' THEN '共有戶' WHEN 'INSERT' THEN '純新光' END, ' ',
+               CASE a.highrisk WHEN 'H' THEN '高' WHEN 'M' THEN '中' WHEN 'L' THEN '低' END)
+    FROM Cust_NP_Migrate_buffer a
+    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN Customer_Migrate_buffer m  ON m.CIF_KEY = v.SOURCE_CIF_KEY
+    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+    WHERE cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'update' AND a.highrisk = 'M'
+
+    UNION ALL
+    SELECT TOP 1 m.CustomerNo, bb.CustomerNo, cc.CUST_TYPE_CDE, v.ACTION, a.highrisk,
+        CONCAT(CASE cc.CUST_TYPE_CDE WHEN 'N' THEN '企業' WHEN 'P' THEN '個人' END, ' ',
+               CASE v.ACTION WHEN 'update' THEN '共有戶' WHEN 'INSERT' THEN '純新光' END, ' ',
+               CASE a.highrisk WHEN 'H' THEN '高' WHEN 'M' THEN '中' WHEN 'L' THEN '低' END)
+    FROM Cust_NP_Migrate_buffer a
+    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN Customer_Migrate_buffer m  ON m.CIF_KEY = v.SOURCE_CIF_KEY
+    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+    WHERE cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'update' AND a.highrisk = 'L'
+
+    UNION ALL
+    SELECT TOP 1 m.CustomerNo, bb.CustomerNo, cc.CUST_TYPE_CDE, v.ACTION, a.highrisk,
+        CONCAT(CASE cc.CUST_TYPE_CDE WHEN 'N' THEN '企業' WHEN 'P' THEN '個人' END, ' ',
+               CASE v.ACTION WHEN 'update' THEN '共有戶' WHEN 'INSERT' THEN '純新光' END, ' ',
+               CASE a.highrisk WHEN 'H' THEN '高' WHEN 'M' THEN '中' WHEN 'L' THEN '低' END)
+    FROM Cust_NP_Migrate_buffer a
+    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN Customer_Migrate_buffer m  ON m.CIF_KEY = v.SOURCE_CIF_KEY
+    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+    WHERE cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'INSERT' AND a.highrisk = 'H'
+
+    UNION ALL
+    SELECT TOP 1 m.CustomerNo, bb.CustomerNo, cc.CUST_TYPE_CDE, v.ACTION, a.highrisk,
+        CONCAT(CASE cc.CUST_TYPE_CDE WHEN 'N' THEN '企業' WHEN 'P' THEN '個人' END, ' ',
+               CASE v.ACTION WHEN 'update' THEN '共有戶' WHEN 'INSERT' THEN '純新光' END, ' ',
+               CASE a.highrisk WHEN 'H' THEN '高' WHEN 'M' THEN '中' WHEN 'L' THEN '低' END)
+    FROM Cust_NP_Migrate_buffer a
+    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN Customer_Migrate_buffer m  ON m.CIF_KEY = v.SOURCE_CIF_KEY
+    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+    WHERE cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'INSERT' AND a.highrisk = 'M'
+
+    UNION ALL
+    SELECT TOP 1 m.CustomerNo, bb.CustomerNo, cc.CUST_TYPE_CDE, v.ACTION, a.highrisk,
+        CONCAT(CASE cc.CUST_TYPE_CDE WHEN 'N' THEN '企業' WHEN 'P' THEN '個人' END, ' ',
+               CASE v.ACTION WHEN 'update' THEN '共有戶' WHEN 'INSERT' THEN '純新光' END, ' ',
+               CASE a.highrisk WHEN 'H' THEN '高' WHEN 'M' THEN '中' WHEN 'L' THEN '低' END)
+    FROM Cust_NP_Migrate_buffer a
+    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN Customer_Migrate_buffer m  ON m.CIF_KEY = v.SOURCE_CIF_KEY
+    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+    WHERE cc.CUST_TYPE_CDE = 'P' AND v.ACTION = 'INSERT' AND a.highrisk = 'L'
+
+    UNION ALL
+    SELECT TOP 1 m.CustomerNo, bb.CustomerNo, cc.CUST_TYPE_CDE, v.ACTION, a.highrisk,
+        CONCAT(CASE cc.CUST_TYPE_CDE WHEN 'N' THEN '企業' WHEN 'P' THEN '個人' END, ' ',
+               CASE v.ACTION WHEN 'update' THEN '共有戶' WHEN 'INSERT' THEN '純新光' END, ' ',
+               CASE a.highrisk WHEN 'H' THEN '高' WHEN 'M' THEN '中' WHEN 'L' THEN '低' END)
+    FROM Cust_NP_Migrate_buffer a
+    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN Customer_Migrate_buffer m  ON m.CIF_KEY = v.SOURCE_CIF_KEY
+    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+    WHERE cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'update' AND a.highrisk = 'H'
+
+    UNION ALL
+    SELECT TOP 1 m.CustomerNo, bb.CustomerNo, cc.CUST_TYPE_CDE, v.ACTION, a.highrisk,
+        CONCAT(CASE cc.CUST_TYPE_CDE WHEN 'N' THEN '企業' WHEN 'P' THEN '個人' END, ' ',
+               CASE v.ACTION WHEN 'update' THEN '共有戶' WHEN 'INSERT' THEN '純新光' END, ' ',
+               CASE a.highrisk WHEN 'H' THEN '高' WHEN 'M' THEN '中' WHEN 'L' THEN '低' END)
+    FROM Cust_NP_Migrate_buffer a
+    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN Customer_Migrate_buffer m  ON m.CIF_KEY = v.SOURCE_CIF_KEY
+    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+    WHERE cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'update' AND a.highrisk = 'M'
+
+    UNION ALL
+    SELECT TOP 1 m.CustomerNo, bb.CustomerNo, cc.CUST_TYPE_CDE, v.ACTION, a.highrisk,
+        CONCAT(CASE cc.CUST_TYPE_CDE WHEN 'N' THEN '企業' WHEN 'P' THEN '個人' END, ' ',
+               CASE v.ACTION WHEN 'update' THEN '共有戶' WHEN 'INSERT' THEN '純新光' END, ' ',
+               CASE a.highrisk WHEN 'H' THEN '高' WHEN 'M' THEN '中' WHEN 'L' THEN '低' END)
+    FROM Cust_NP_Migrate_buffer a
+    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN Customer_Migrate_buffer m  ON m.CIF_KEY = v.SOURCE_CIF_KEY
+    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+    WHERE cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'update' AND a.highrisk = 'L'
+
+    UNION ALL
+    SELECT TOP 1 m.CustomerNo, bb.CustomerNo, cc.CUST_TYPE_CDE, v.ACTION, a.highrisk,
+        CONCAT(CASE cc.CUST_TYPE_CDE WHEN 'N' THEN '企業' WHEN 'P' THEN '個人' END, ' ',
+               CASE v.ACTION WHEN 'update' THEN '共有戶' WHEN 'INSERT' THEN '純新光' END, ' ',
+               CASE a.highrisk WHEN 'H' THEN '高' WHEN 'M' THEN '中' WHEN 'L' THEN '低' END)
+    FROM Cust_NP_Migrate_buffer a
+    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN Customer_Migrate_buffer m  ON m.CIF_KEY = v.SOURCE_CIF_KEY
+    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+    WHERE cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'INSERT' AND a.highrisk = 'H'
+
+    UNION ALL
+    SELECT TOP 1 m.CustomerNo, bb.CustomerNo, cc.CUST_TYPE_CDE, v.ACTION, a.highrisk,
+        CONCAT(CASE cc.CUST_TYPE_CDE WHEN 'N' THEN '企業' WHEN 'P' THEN '個人' END, ' ',
+               CASE v.ACTION WHEN 'update' THEN '共有戶' WHEN 'INSERT' THEN '純新光' END, ' ',
+               CASE a.highrisk WHEN 'H' THEN '高' WHEN 'M' THEN '中' WHEN 'L' THEN '低' END)
+    FROM Cust_NP_Migrate_buffer a
+    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN Customer_Migrate_buffer m  ON m.CIF_KEY = v.SOURCE_CIF_KEY
+    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+    WHERE cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'INSERT' AND a.highrisk = 'M'
+
+    UNION ALL
+    SELECT TOP 1 m.CustomerNo, bb.CustomerNo, cc.CUST_TYPE_CDE, v.ACTION, a.highrisk,
+        CONCAT(CASE cc.CUST_TYPE_CDE WHEN 'N' THEN '企業' WHEN 'P' THEN '個人' END, ' ',
+               CASE v.ACTION WHEN 'update' THEN '共有戶' WHEN 'INSERT' THEN '純新光' END, ' ',
+               CASE a.highrisk WHEN 'H' THEN '高' WHEN 'M' THEN '中' WHEN 'L' THEN '低' END)
+    FROM Cust_NP_Migrate_buffer a
+    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN Customer_Migrate_buffer m  ON m.CIF_KEY = v.SOURCE_CIF_KEY
+    JOIN BSA_SUB_CUST_FACT bb       ON bb.CIF_KEY = v.NEW_CIF_KEY
+    JOIN PB_CUSTOMER_FACT cc        ON cc.CIF_KEY = bb.CIF_KEY
+    WHERE cc.CUST_TYPE_CDE = 'N' AND v.ACTION = 'INSERT' AND a.highrisk = 'L'
+) x;
+
+
+-- STEP 3：TS 寫入前 / SK 來源 / TS 寫入後
+SELECT
+    s.SK_CustomerNo AS [新光客戶ID],
+    s.TS_CustomerNo AS [台新客戶ID],
+    s.完整分類標籤,
+    CASE
+        WHEN s.ACTION = 'INSERT' THEN '純新光'
+        WHEN s.ACTION = 'update' THEN '共有戶'
+        ELSE s.ACTION
+    END AS [客戶分類],
+
+    s.CUST_TYPE_CDE AS [SK_CUST_TYPE],
+    b.CUST_TYPE_CDE AS [TS寫入後_CUST_TYPE],
+    CASE
+        WHEN s.CUST_TYPE_CDE = b.CUST_TYPE_CDE THEN 'OK'
+        ELSE 'MISMATCH'
+    END AS CHECK_CUST_TYPE,
+
+    bak.highrisk AS [TS寫入前_HIGHRISK],   -- BSA_SUB_CUST_FACT_BAK_TEST
+    s.highrisk   AS [SK來源_HIGHRISK],     -- Cust_NP_Migrate_buffer
+    aft.highrisk AS [TS寫入後_HIGHRISK],   -- BSA_SUB_CUST_FACT
+
+    CASE
+        WHEN aft.highrisk = s.highrisk THEN 'OK'
+        WHEN s.ACTION = 'update'
+         AND aft.highrisk = CASE
+                WHEN bak.highrisk = 'H' OR s.highrisk = 'H' THEN 'H'
+                WHEN bak.highrisk = 'M' OR s.highrisk = 'M' THEN 'M'
+                ELSE 'L'
+            END
+            THEN 'OK_取高'
+        ELSE 'MISMATCH'
+    END AS CHECK_HIGHRISK
+FROM #SampleCust s
+LEFT JOIN BSA_SUB_CUST_FACT_BAK_TEST bak
+    ON bak.CustomerNo = s.TS_CustomerNo
+LEFT JOIN BSA_SUB_CUST_FACT aft
+    ON aft.CustomerNo = s.TS_CustomerNo
+LEFT JOIN PB_CUSTOMER_FACT b
+    ON b.CIF_KEY = aft.CIF_KEY
+ORDER BY
+    CASE
+        WHEN s.CUST_TYPE_CDE <> b.CUST_TYPE_CDE
+          OR NOT (
+                aft.highrisk = s.highrisk
+             OR (
+                    s.ACTION = 'update'
+                AND aft.highrisk = CASE
+                        WHEN bak.highrisk = 'H' OR s.highrisk = 'H' THEN 'H'
+                        WHEN bak.highrisk = 'M' OR s.highrisk = 'M' THEN 'M'
+                        ELSE 'L'
+                    END
+                )
+             )
+        THEN 0 ELSE 1
+    END,
+    s.完整分類標籤;
+
+
+
+因為我現在這樣執行會很久
+有更好的寫法?
+我是在撈資料給user
