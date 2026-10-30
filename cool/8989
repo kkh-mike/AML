@@ -1,20 +1,10 @@
-PS D:\TEST\1141923> D:\TEST\1141923\amlwsobt\TEST_TXT.ps1
-無法建立 fileContent 變數，因為對這個範圍而言已經超過變數容量 4096。
-位於 D:\TEST\1141923\amlwsobt\TEST_TXT.ps1:244 字元:1
-+ $fileContent = Get-Content -LiteralPath $InputFile -Raw -Encoding UTF ...
-+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : InvalidOperation: (fileContent:String) []，ParentContainsErrorRecordException
-    + FullyQualifiedErrorId : VariableOverflow
- 
-
-PS D:\TEST\1141923> 
-
-
+這裏是為你改好、使用 System.Text.StringBuilder 串流讀取（徹底解決超長電文造成的 VariableOverflow 4096 限制）的完整 PowerShell 執行腳本（.ps1）。
+你可以直接複製這整段程式碼覆蓋你的 .ps1 檔案：
 #requires -Version 5.1
 
 # ============================================================
 # Send-SwiftFromTxt_HK.ps1
-# TXT 多筆海外/綜合 SWIFT 電文 -> SOAP API（支援多行與完整區塊解析）
+# TXT 多筆海外/綜合 SWIFT 電文 -> SOAP API（支援超長電文串流讀取）
 # ============================================================
 
 $ErrorActionPreference = 'Stop'
@@ -236,7 +226,7 @@ function New-SOAPRequest {
 }
 
 # ============================================================
-# 4. 檢查輸入檔案並以 '-}' 區塊切分電文
+# 4. 檢查輸入檔案並以串流讀取超長電文（避開 4096 限制）
 # ============================================================
 
 if (-not (Test-Path -LiteralPath $InputFile -PathType Leaf)) {
@@ -252,8 +242,20 @@ if ($outputDirectory -and
         Out-Null
 }
 
-# 使用 -Raw 一次讀取整份檔案內容（支援跨行與長字串電文）
-$fileContent = Get-Content -LiteralPath $InputFile -Raw -Encoding UTF8
+# 使用 StreamReader 逐行組合，支援巨量超長電文
+$stringBuilder = New-Object System.Text.StringBuilder
+$reader = [System.IO.File]::OpenText($InputFile)
+
+try {
+    while (($line = $reader.ReadLine()) -ne $null) {
+        [void]$stringBuilder.AppendLine($line)
+    }
+}
+finally {
+    $reader.Close()
+}
+
+$fileContent = $stringBuilder.ToString()
 
 if ([string]::IsNullOrWhiteSpace($fileContent)) {
     throw "TXT 檔案內容為空：$InputFile"
@@ -280,7 +282,7 @@ if ($total -eq 0) {
 
 Write-Host ''
 Write-Host '============================================================'
-Write-Host 'SWIFT SOAP Batch Processing (HK / Block Mode)'
+Write-Host 'SWIFT SOAP Batch Processing (HK / Stream Mode)'
 Write-Host '============================================================'
 Write-Host "Input File : $InputFile"
 Write-Host "SOAP URL   : $url"
@@ -437,5 +439,3 @@ Write-Host "Average Time   : $([math]::Round($batchWatch.Elapsed.TotalMillisecon
 Write-Host "Result CSV     : $OutputCsv"
 Write-Host '============================================================'
 
-
-怎麼改
