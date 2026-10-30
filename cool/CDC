@@ -1,10 +1,39 @@
-SELECT * FROM MESSAGEDATABASE..SWIFT_MTRAW 
+從你提供的 SQL Server 資料表欄位（ParseStartDt、SplitStartDt、DetectionStartDt 等）來看，要計算一筆電文從開始處理到結束的完整執行時間，以及篩選出執行超過 20 分鐘的資料，可以直接用 SQL 進行時間差的計算。
+以下提供對應的 SQL 查詢語法：
+1. 找出完整執行時間（計算總耗時）
+你可以利用資料表中的時間欄位（例如從最早的 ParseStartDt 開始，一直到最後一個步驟完成的時間，或者利用 CreatedDate 到 LastModifiedDate）。
+如果你想看每一筆電文的各階段耗時與總耗時（以秒或毫秒為單位），可以用這段 SQL：
+SELECT 
+    ID,
+    ClientReferenceNo,
+    CreatedDate,
+    LastModifiedDate,
+    -- 計算整體從建立到最後修改的總秒數
+    DATEDIFF(millisecond, CreatedDate, LastModifiedDate) AS Total_Duration_Ms,
+    CAST(DATEDIFF(millisecond, CreatedDate, LastModifiedDate) / 1000.0 AS DECIMAL(10, 2)) AS Total_Duration_Sec,
+    
+    -- 拆解各階段的時間點
+    ParseStartDt,
+    SplitStartDt,
+    DetectionStartDt
+FROM MESSAGEDATABASE..SWIFT_MTRAW
 
+2. 找出執行超過 20 分鐘的電文
+如果你要找出「處理很久（超過 20 分鐘）」的資料，可以用 DATEDIFF 來過濾。
+20 分鐘等於 1,200 秒 或 1,200,000 毫秒。你可以用以下查詢：
+SELECT 
+    ID,
+    ClientReferenceNo,
+    CreatedDate,
+    LastModifiedDate,
+    DATEDIFF(minute, CreatedDate, LastModifiedDate) AS Duration_Minutes,
+    ParseStartDt,
+    SplitStartDt,
+    DetectionStartDt
+FROM MESSAGEDATABASE..SWIFT_MTRAW
+WHERE DATEDIFF(minute, CreatedDate, LastModifiedDate) >= 20
+   -- 或者如果你是以 SQL Server 的 3 階段時間跨度為主，也可以用：
+   -- OR DATEDIFF(minute, ParseStartDt, LastModifiedDate) >= 20
 
-ID	BankNo	BranchNo	ClientReferenceNo	ClientMessageTypeCode	RawMessage	SourceID	Channel	Progress	CreatedDate	LastModifiedDate	Format	Priority	Block4_UserReference	FeedBackSend	FeedBackSendDate	ParseStartDt	SplitStartDt	DetectionStartDt
-0C4FDBB8-FED3-F111-AE48-0050568A89CC	TW	0001	20261030091050255	MT	{1:F21TSIBHKHHAXXX3511121756}{4:{177:1803281321}{451:0}}{1:F01TSIBHKHHAXXX3511121756}{2:O1030120180328SCBLUS33BXXX06229896331803281321N}{3:{108:1803280046819-07}{119:STP}{111:001}{121:4e582008-d667-4da3-8e29-fb8b7cfa2967}}{4:  :20:2018032800046819  :23B:CRED  :32A:180328USD10301,6  :33B:USD10321,6  :50K:/000-388-596-000  ACBEL POLYTECH PHILIPPINES INC  2 TAGAYTAY RIDGE DRIVE CARMELRAY  INDL PARK II CALAMBA CITY LAGUNA  PHILIPPINES  :52A:BNORPHMM  :53A:CHASUS33  :59:/29000780075641  HCR ELECTRONICS HK INTERNATIONAL CO  LIMITED - YAN GANG MANAGEMENT  DISTRICT HU MEN TOWN DONG GUAN CITY  GUAN DONG PROVINCE CHINA  :70:/RFB/0282-1800445FXTT  IMPORTATION PAYMENT  :71A:SHA  :71F:USD20,-}	TSID	SWIFT	HOLD	2026-10-30 01:10:50.4470000	2026-10-30 01:12:01.450	103	NULL	2018032800046819	0	NULL	2026-10-30 09:10:50.4800000	2026-10-30 09:10:50.9270000	2026-10-30 09:10:51.1400000
-
-
-我要怎麼找出它完整的執行時間阿
-
-另外我如果要找有執行超過20分鐘的要怎麼找
+💡 實務小建議：
+ * 如果你是要看程式在 Split（切字串） 或 Parse（解析） 階段卡多久，也可以把 DATEDIFF 拿去算 SplitStartDt 到下一個階段的時間差，幫助你精準定位到底是哪個步驟讓程式跑很久。
