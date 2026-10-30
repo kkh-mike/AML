@@ -1,12 +1,8 @@
-
 #requires -Version 5.1
 
 # ============================================================
 # Send-SwiftFromTxt.ps1
-# TXT 多筆 SWIFT 電文 -> SOAP API
-#
-# TXT 格式：一行一筆 SWIFT 電文
-# 功能：逐筆送出、記錄耗時、錯誤處理、輸出 CSV
+# TXT 多筆 SWIFT 電文 -> SOAP API（支援多行與完整區塊解析）
 # ============================================================
 
 $ErrorActionPreference = 'Stop'
@@ -24,12 +20,12 @@ $InputFile = 'D:\AML_Source\Source\1141923\SWIFTMT\swift_messages_long.txt'
 $OutputCsv = 'D:\AML_Source\Source\1141923\SWIFTMT\swift_results.csv'
 
 # SOAP 固定參數
-$ActionCode     = 'SCAN_SWIFT'
-$BankNo         = 'TW'
-$BranchNo       = '0001'
-$Channel        = 'SWIFT'
+$ActionCode      = 'SCAN_SWIFT'
+$BankNo          = 'TW'
+$BranchNo        = '0001'
+$Channel         = 'SWIFT'
 $MessageTypeCode = 'MT'
-$SourceID       = 'TSID'
+$SourceID        = 'TSID'
 
 # HTTP Timeout（毫秒）
 $TimeoutMs = 60000
@@ -228,7 +224,7 @@ function New-SOAPRequest {
 }
 
 # ============================================================
-# 4. 檢查輸入檔案
+# 4. 檢查輸入檔案並以 '-}' 區塊切分電文
 # ============================================================
 
 if (-not (Test-Path -LiteralPath $InputFile -PathType Leaf)) {
@@ -244,20 +240,23 @@ if ($outputDirectory -and
         Out-Null
 }
 
-# UTF-8 讀取，每一行視為一筆電文
-$allLines = @(
-    Get-Content -LiteralPath $InputFile -Encoding UTF8
-)
+# 使用 -Raw 一次讀取整份檔案內容（避免被換行符號逐行切碎）
+$fileContent = Get-Content -LiteralPath $InputFile -Raw -Encoding UTF8
+
+if ([string]::IsNullOrWhiteSpace($fileContent)) {
+    throw "TXT 檔案內容為空：$InputFile"
+}
+
+# 依據 SWIFT 電文結尾 '-}' 來進行多筆電文切割
+$rawMessages = $fileContent -split '-}'
 
 $messages = @(
-    foreach ($line in $allLines) {
-        $message = $line.Trim()
-
-        if ([string]::IsNullOrWhiteSpace($message)) {
-            continue
+    foreach ($msg in $rawMessages) {
+        $trimmed = $msg.Trim()
+        if (-not [string]::IsNullOrWhiteSpace($trimmed)) {
+            # 把被 split 掉的結尾 '-}' 補回來，確保電文結構完整
+            "$trimmed-}"
         }
-
-        $message
     }
 )
 
@@ -269,7 +268,7 @@ if ($total -eq 0) {
 
 Write-Host ''
 Write-Host '============================================================'
-Write-Host 'SWIFT SOAP Batch Processing'
+Write-Host 'SWIFT SOAP Batch Processing (Block Mode)'
 Write-Host '============================================================'
 Write-Host "Input File : $InputFile"
 Write-Host "SOAP URL   : $url"
@@ -425,8 +424,3 @@ Write-Host "Total Time     : $([math]::Round($batchWatch.Elapsed.TotalSeconds, 2
 Write-Host "Average Time   : $([math]::Round($batchWatch.Elapsed.TotalMilliseconds / $total, 2)) ms/message"
 Write-Host "Result CSV     : $OutputCsv"
 Write-Host '============================================================'
-
-
-那我這隻發電文的不就要改
-
-是不是要改成} 結尾的 算一個電文阿?
