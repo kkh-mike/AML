@@ -1,15 +1,10 @@
-系統在處理這筆電文時會花比較久的時間（甚至可能導致塞車或執行緒卡住），主要是因為資料結構與解析機制上的幾個關鍵因素：
-1. :79: 欄位的超長字串與大量空白（Padding）
- * 欄位特性： 在 SWIFT 電文中，:79: 是屬於自由格式（Narrative）欄位，通常用來放備註或詳細說明。
- * 效能影響：
-   * 你提供的電文在 :79: 裡面塞了非常多的空白與固定間距（為了對齊欄位而補了大量空白字元），導致整行字串變得極長。
-   * 當後端系統（或程式中的 Regex、字串切割邏輯、字串比對）去讀取這段超長文字時，如果用了不佳的正規表達式（例如會造成回溯陷阱的 Regex）或是逐字掃描，CPU 的運算量會瞬間暴增。
-2. 資料庫欄位長度與型態的轉換負擔
- * 欄位特性： 像這種大型的 MT999 自由格式電文，後端系統通常會把整串 :79: 的內容拆解、對應，然後存入關聯式資料庫（如 SQL Server）的 VARCHAR、NVARCHAR 或 TEXT / MAX 欄位中。
- * 效能影響：
-   * 如果資料庫欄位或程式內的暫存變數被宣告為大容量型態（例如 NVARCHAR(MAX)），在寫入和頻繁進行字串截取（Substring）、索引掃描（Index Scan）時，會消耗較多的 TempDB 資源與記憶體。
-   * 如果剛好碰上 ETL 批次處理或是其他 Stored Procedure 同時在跑，這類的超大欄位寫入就容易造成鎖定（Locking）或等待（Latch/Lock Wait），導致處理時間拉長。
-3. 解析器（Parser）的逐行掃描開銷
- * 欄位特性： 系統內部的 SWIFT Parser 需要把整個 Block 4 的內容按照規定格式（Tag 與內容）拆開。
- * 效能影響： 正常電文很短，Parser 很快就能掃完；但面對這種單行或區塊極度肥大的電文，Parser 在做記憶體配置（Memory Allocation）、緩衝區複製（Buffer Copy）以及錯誤檢查時，花費的時間會呈倍數成長。
-如果這類電文常常需要打，或者會造成系統明顯延遲，通常建議從後端程式的解析邏輯（例如檢查是否有效率差的字串處理或正規表達式）以及資料庫欄位處理方式下去優化！
+SELECT * FROM MESSAGEDATABASE..SWIFT_MTRAW 
+
+
+ID	BankNo	BranchNo	ClientReferenceNo	ClientMessageTypeCode	RawMessage	SourceID	Channel	Progress	CreatedDate	LastModifiedDate	Format	Priority	Block4_UserReference	FeedBackSend	FeedBackSendDate	ParseStartDt	SplitStartDt	DetectionStartDt
+0C4FDBB8-FED3-F111-AE48-0050568A89CC	TW	0001	20261030091050255	MT	{1:F21TSIBHKHHAXXX3511121756}{4:{177:1803281321}{451:0}}{1:F01TSIBHKHHAXXX3511121756}{2:O1030120180328SCBLUS33BXXX06229896331803281321N}{3:{108:1803280046819-07}{119:STP}{111:001}{121:4e582008-d667-4da3-8e29-fb8b7cfa2967}}{4:  :20:2018032800046819  :23B:CRED  :32A:180328USD10301,6  :33B:USD10321,6  :50K:/000-388-596-000  ACBEL POLYTECH PHILIPPINES INC  2 TAGAYTAY RIDGE DRIVE CARMELRAY  INDL PARK II CALAMBA CITY LAGUNA  PHILIPPINES  :52A:BNORPHMM  :53A:CHASUS33  :59:/29000780075641  HCR ELECTRONICS HK INTERNATIONAL CO  LIMITED - YAN GANG MANAGEMENT  DISTRICT HU MEN TOWN DONG GUAN CITY  GUAN DONG PROVINCE CHINA  :70:/RFB/0282-1800445FXTT  IMPORTATION PAYMENT  :71A:SHA  :71F:USD20,-}	TSID	SWIFT	HOLD	2026-10-30 01:10:50.4470000	2026-10-30 01:12:01.450	103	NULL	2018032800046819	0	NULL	2026-10-30 09:10:50.4800000	2026-10-30 09:10:50.9270000	2026-10-30 09:10:51.1400000
+
+
+我要怎麼找出它完整的執行時間阿
+
+另外我如果要找有執行超過20分鐘的要怎麼找
