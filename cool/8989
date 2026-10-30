@@ -1,80 +1,12 @@
-function Execute-SOAPRequest 
-( 
-        [Xml]    $SOAPRequest, 
-        [String] $URL 
-        ) 
-{ 
-        $soapWebRequest = [System.Net.WebRequest]::Create($URL) 
-        $soapWebRequest.Headers.Add("SOAPAction","SubmitRequest")
-        $soapWebRequest.ContentType = "text/xml;charset=`"utf-8`"" 
-        $soapWebRequest.Accept      = "text/xml" 
-        $soapWebRequest.Method      = "POST" 
-        $requestStream = $soapWebRequest.GetRequestStream() 
-        $SOAPRequest.Save($requestStream) 
-        $requestStream.Close() 
-        $resp = $soapWebRequest.GetResponse() 
-        $responseStream = $resp.GetResponseStream() 
-        $soapReader = [System.IO.StreamReader]($responseStream) 
-        $ReturnXml = $soapReader.ReadToEnd() 
-        $responseStream.Close() 
-        return $ReturnXml 
-}
-
-$url = 'http://localhost:8082/SwiftProcessor.svc?wsdl'
-
-$soap1 = [xml]@'
-<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-  <soap:Body>
-    <SubmitRequest xmlns="http://patriotofficer.net/SwiftService">
-      <Params>
-        <ActionCode>SCAN_SWIFT</ActionCode>
-        <BankNo>HK</BankNo>
-        <BranchNo>0900</BranchNo>
-        <Channel>SWIFT</Channel>
-        <Message>{1:F01TSIBTWTPAXXX0000000000}{2:I605CHASGB2LXBULN}{3:{108:11677120}}{4:  :20:11677120  :26C:/LONDON/UNALLGOLD9950  :25:48010  :30:260319  :72:/BNF/FINE OUNCES GOLD 995  FAVOR TAISHIN INTL BANK  AC NO. 48010  :21:11677120  :23:TRANSFER  :32F:FOZ30,  :82A:CHASGB2LBUL  :87A:CHASGB2L  :88A:TSIBTWTP  -}{S:{MDG:AC9E9EAD25FADD760454C22D849CCAFDC87E00547E30822569423868BF3056B4}}</Message>
-        <MessageTypeCode>MT</MessageTypeCode>
-        <ReferenceNumber>20268888699</ReferenceNumber>
-        <SourceID>TSID</SourceID>
-      </Params>
-    </SubmitRequest>
-  </soap:Body>
-</soap:Envelope>
-
-'@
-
-
-
-
-	$sw = [System.Diagnostics.Stopwatch]::startNew()
-
-	$sw.Reset()
-	$sw.Start()
-
-
-Execute-SOAPRequest $soap1  $url
-
-
-
-
-
-#$sw.Elapsed
-#$count = $count + 1
-
-
-
-這是海外的 電文 確定可以打   
-
-我想改成跟台完一樣的寫法
-
+要把你那則單筆測試成功的海外電文格式，整合進這支多筆批次發送的 PowerShell 腳本中，主要需要調整兩個地方：
+ * SOAP 固定參數： 你的海外電文範例中，<BankNo> 是 HK、<BranchNo> 是 0900（而原本批次腳本預設是 TW / 0001）。如果你要測海外的，記得在基本設定把它改掉。
+ * TXT 檔案的讀取邏輯： 為了避免像剛剛那樣「多行電文被誤切成多筆」，或是你的海外電文本身帶有複雜的格式，我們一樣用 -Raw 讀取，並以 SWIFT 結尾標記 -} 來精確切分每一筆電文。
+以下為你調整好的完整批次發送 PowerShell 腳本：
 #requires -Version 5.1
 
 # ============================================================
-# Send-SwiftFromTxt.ps1
-# TXT 多筆 SWIFT 電文 -> SOAP API
-#
-# TXT 格式：一行一筆 SWIFT 電文
-# 功能：逐筆送出、記錄耗時、錯誤處理、輸出 CSV
+# Send-SwiftFromTxt_HK.ps1
+# TXT 多筆海外/綜合 SWIFT 電文 -> SOAP API（支援多行與完整區塊解析）
 # ============================================================
 
 $ErrorActionPreference = 'Stop'
@@ -91,13 +23,13 @@ $InputFile = 'D:\TEST\1141923\amlwsobt\swift_messages.txt'
 # 批次結果 CSV 路徑
 $OutputCsv = 'D:\TEST\1141923\amlwsobt\swift_results.csv'
 
-# SOAP 固定參數
-$ActionCode     = 'SCAN_SWIFT'
-$BankNo         = 'TW'
-$BranchNo       = '0001'
-$Channel        = 'SWIFT'
+# SOAP 固定參數（若要測香港/海外可在此調整 BankNo 與 BranchNo）
+$ActionCode      = 'SCAN_SWIFT'
+$BankNo          = 'HK'
+$BranchNo        = '0900'
+$Channel         = 'SWIFT'
 $MessageTypeCode = 'MT'
-$SourceID       = 'TSID'
+$SourceID        = 'TSID'
 
 # HTTP Timeout（毫秒）
 $TimeoutMs = 60000
@@ -296,7 +228,7 @@ function New-SOAPRequest {
 }
 
 # ============================================================
-# 4. 檢查輸入檔案
+# 4. 檢查輸入檔案並以 '-}' 區塊切分電文
 # ============================================================
 
 if (-not (Test-Path -LiteralPath $InputFile -PathType Leaf)) {
@@ -312,20 +244,23 @@ if ($outputDirectory -and
         Out-Null
 }
 
-# UTF-8 讀取，每一行視為一筆電文
-$allLines = @(
-    Get-Content -LiteralPath $InputFile -Encoding UTF8
-)
+# 使用 -Raw 一次讀取整份檔案內容（支援跨行與長字串電文）
+$fileContent = Get-Content -LiteralPath $InputFile -Raw -Encoding UTF8
+
+if ([string]::IsNullOrWhiteSpace($fileContent)) {
+    throw "TXT 檔案內容為空：$InputFile"
+}
+
+# 依據 SWIFT 電文結尾 '-}' 來進行多筆電文切割
+$rawMessages = $fileContent -split '-}'
 
 $messages = @(
-    foreach ($line in $allLines) {
-        $message = $line.Trim()
-
-        if ([string]::IsNullOrWhiteSpace($message)) {
-            continue
+    foreach ($msg in $rawMessages) {
+        $trimmed = $msg.Trim()
+        if (-not [string]::IsNullOrWhiteSpace($trimmed)) {
+            # 把被 split 掉的結尾 '-}' 補回來，確保電文結構完整
+            "$trimmed-}"
         }
-
-        $message
     }
 )
 
@@ -337,7 +272,7 @@ if ($total -eq 0) {
 
 Write-Host ''
 Write-Host '============================================================'
-Write-Host 'SWIFT SOAP Batch Processing'
+Write-Host 'SWIFT SOAP Batch Processing (HK / Block Mode)'
 Write-Host '============================================================'
 Write-Host "Input File : $InputFile"
 Write-Host "SOAP URL   : $url"
@@ -494,4 +429,3 @@ Write-Host "Average Time   : $([math]::Round($batchWatch.Elapsed.TotalMillisecon
 Write-Host "Result CSV     : $OutputCsv"
 Write-Host '============================================================'
 
-怎麼改
