@@ -1,222 +1,76 @@
+這裡幫你將這段 SQL 腳本進行了排版精簡，將過長的空白行和冗長註解去除，並縮短了欄位對齊的留白，讓整體看起來更緊湊好讀：
 /*============================================================
   程式名稱 : CIF_撈資料給USER_20260929_優化版.sql
-
-  用途說明：
-  1. 從移轉客戶中，每種客戶類型組合挑選 1 筆代表樣本
-  2. 比對 SK(新光) → TS(台新) 移轉前後資料
-  3. 驗證：
-     (1) 客戶類型(CUST_TYPE_CDE)是否一致
-     (2) 風險等級(HIGHRISK)是否符合移轉規則
-  4. 共有戶(update)客戶需依「取高風險」邏輯檢核
+  用途說明 : 挑選移轉客戶樣本、比對 SK 轉 TS 前後資料及驗證風險等級
 ============================================================*/
 
-------------------------------------------------------------
 -- STEP 1：清除暫存表
-------------------------------------------------------------
 IF OBJECT_ID('tempdb..#SampleCust') IS NOT NULL
     DROP TABLE #SampleCust;
 
-
-------------------------------------------------------------
 -- STEP 2：每種客戶分類抓取 1 筆樣本
---
--- 分類條件：
---   客戶類型：個人(P) / 企業(N)
---   客戶來源：共有戶(update) / 純新光(INSERT)
---   風險等級：H / M / L
-------------------------------------------------------------
-WITH RankedCust AS
-(
+WITH RankedCust AS (
     SELECT
-        m.CustomerNo  AS SK_CustomerNo,      -- 新光客戶ID
-        bb.CustomerNo AS TS_CustomerNo,      -- 台新客戶ID
-
+        m.CustomerNo AS SK_CustomerNo,
+        bb.CustomerNo AS TS_CustomerNo,
         cc.CUST_TYPE_CDE,
         v.ACTION,
         a.highrisk,
-
-        ----------------------------------------------------
-        -- 產生易讀分類標籤
-        ----------------------------------------------------
         CONCAT(
-            CASE cc.CUST_TYPE_CDE
-                WHEN 'N' THEN '企業'
-                WHEN 'P' THEN '個人'
-            END,
-            ' ',
-            CASE v.ACTION
-                WHEN 'update' THEN '共有戶'
-                WHEN 'INSERT' THEN '純新光'
-            END,
-            ' ',
-            CASE a.highrisk
-                WHEN 'H' THEN '高'
-                WHEN 'M' THEN '中'
-                WHEN 'L' THEN '低'
-            END
+            CASE cc.CUST_TYPE_CDE WHEN 'N' THEN '企業' WHEN 'P' THEN '個人' END, ' ',
+            CASE v.ACTION WHEN 'update' THEN '共有戶' WHEN 'INSERT' THEN '純新光' END, ' ',
+            CASE a.highrisk WHEN 'H' THEN '高' WHEN 'M' THEN '中' WHEN 'L' THEN '低' END
         ) AS 完整分類標籤,
-
-        ----------------------------------------------------
-        -- 每個分類群組只保留第一筆樣本
-        ----------------------------------------------------
-        ROW_NUMBER() OVER
-        (
-            PARTITION BY
-                cc.CUST_TYPE_CDE,
-                v.ACTION,
-                a.highrisk
-            ORDER BY
-                m.CustomerNo
+        ROW_NUMBER() OVER (
+            PARTITION BY cc.CUST_TYPE_CDE, v.ACTION, a.highrisk
+            ORDER BY m.CustomerNo
         ) AS rn
-
     FROM Cust_NP_Migrate_buffer a
-
-    INNER JOIN CIF_Migrate_Mapping_TEMP v
-        ON v.SOURCE_CIF_KEY = a.CIF_KEY
-
-    INNER JOIN Customer_Migrate_buffer m
-        ON m.CIF_KEY = v.SOURCE_CIF_KEY
-
-    INNER JOIN BSA_SUB_CUST_FACT bb
-        ON bb.CIF_KEY = v.NEW_CIF_KEY
-
-    INNER JOIN PB_CUSTOMER_FACT cc
-        ON cc.CIF_KEY = bb.CIF_KEY
-
+    JOIN CIF_Migrate_Mapping_TEMP v ON v.SOURCE_CIF_KEY = a.CIF_KEY
+    JOIN Customer_Migrate_buffer m ON m.CIF_KEY = v.SOURCE_CIF_KEY
+    JOIN BSA_SUB_CUST_FACT bb ON bb.CIF_KEY = v.NEW_CIF_KEY
+    JOIN PB_CUSTOMER_FACT cc ON cc.CIF_KEY = bb.CIF_KEY
     WHERE cc.CUST_TYPE_CDE IN ('P','N')
       AND v.ACTION IN ('update','INSERT')
       AND a.highrisk IN ('H','M','L')
 )
+SELECT * INTO #SampleCust FROM RankedCust WHERE rn = 1;
 
-SELECT *
-INTO #SampleCust
-FROM RankedCust
-WHERE rn = 1;
-
-
-------------------------------------------------------------
 -- STEP 3：驗證移轉結果
---
--- 比較：
---   1. TS寫入前資料
---   2. SK來源資料
---   3. TS寫入後資料
-------------------------------------------------------------
 SELECT
-    --------------------------------------------------------
-    -- 客戶基本資訊
-    --------------------------------------------------------
     s.SK_CustomerNo AS [新光客戶ID],
     s.TS_CustomerNo AS [台新客戶ID],
     s.完整分類標籤,
-
-    CASE
-        WHEN s.ACTION = 'INSERT' THEN '純新光'
-        WHEN s.ACTION = 'update' THEN '共有戶'
-        ELSE s.ACTION
-    END AS [客戶分類],
-
-    --------------------------------------------------------
+    CASE s.ACTION WHEN 'INSERT' THEN '純新光' WHEN 'update' THEN '共有戶' ELSE s.ACTION END AS [客戶分類],
+    
     -- CUST_TYPE驗證
-    --------------------------------------------------------
     s.CUST_TYPE_CDE AS [SK_CUST_TYPE],
     b.CUST_TYPE_CDE AS [TS寫入後_CUST_TYPE],
-
-    CASE
-        WHEN s.CUST_TYPE_CDE = b.CUST_TYPE_CDE
-            THEN 'OK'
-        ELSE 'MISMATCH'
-    END AS CHECK_CUST_TYPE,
-
-    --------------------------------------------------------
+    CASE WHEN s.CUST_TYPE_CDE = b.CUST_TYPE_CDE THEN 'OK' ELSE 'MISMATCH' END AS CHECK_CUST_TYPE,
+    
     -- HIGHRISK驗證
-    --------------------------------------------------------
     bak.highrisk AS [TS寫入前_HIGHRISK],
     s.highrisk   AS [SK來源_HIGHRISK],
     aft.highrisk AS [TS寫入後_HIGHRISK],
-
-    CASE
-
-        ----------------------------------------------------
-        -- 純新光客戶
-        -- 寫入後應與來源完全相同
-        ----------------------------------------------------
-        WHEN aft.highrisk = s.highrisk
-            THEN 'OK'
-
-        ----------------------------------------------------
-        -- 共有戶
-        -- 寫入後需符合取高風險邏輯
-        ----------------------------------------------------
-        WHEN s.ACTION = 'update'
-         AND aft.highrisk =
-                CASE
-                    WHEN bak.highrisk = 'H'
-                      OR s.highrisk = 'H'
-                        THEN 'H'
-
-                    WHEN bak.highrisk = 'M'
-                      OR s.highrisk = 'M'
-                        THEN 'M'
-
-                    ELSE 'L'
-                END
-            THEN 'OK_取高'
-
+    CASE 
+        WHEN aft.highrisk = s.highrisk THEN 'OK'
+        WHEN s.ACTION = 'update' AND aft.highrisk = 
+            CASE 
+                WHEN bak.highrisk = 'H' OR s.highrisk = 'H' THEN 'H'
+                WHEN bak.highrisk = 'M' OR s.highrisk = 'M' THEN 'M'
+                ELSE 'L' 
+            END THEN 'OK_取高'
         ELSE 'MISMATCH'
-
     END AS CHECK_HIGHRISK
-
 FROM #SampleCust s
-
-------------------------------------------------------------
--- 移轉前資料(BAK)
-------------------------------------------------------------
-LEFT JOIN BSA_SUB_CUST_FACT_BAK_TEST bak
-    ON bak.CustomerNo = s.TS_CustomerNo
-
-------------------------------------------------------------
--- 移轉後資料
-------------------------------------------------------------
-LEFT JOIN BSA_SUB_CUST_FACT aft
-    ON aft.CustomerNo = s.TS_CustomerNo
-
-------------------------------------------------------------
--- 取得移轉後客戶類型
-------------------------------------------------------------
-LEFT JOIN PB_CUSTOMER_FACT b
-    ON b.CIF_KEY = aft.CIF_KEY
-
-------------------------------------------------------------
--- 將有問題資料排前面
-------------------------------------------------------------
-ORDER BY
-    CASE
-        WHEN s.CUST_TYPE_CDE <> b.CUST_TYPE_CDE
-          OR NOT
-             (
-                  aft.highrisk = s.highrisk
-               OR (
-                    s.ACTION = 'update'
-                    AND aft.highrisk =
-                        CASE
-                            WHEN bak.highrisk = 'H'
-                              OR s.highrisk = 'H'
-                                THEN 'H'
-
-                            WHEN bak.highrisk = 'M'
-                              OR s.highrisk = 'M'
-                                THEN 'M'
-
-                            ELSE 'L'
-                        END
-                  )
-             )
-        THEN 0
-        ELSE 1
-    END,
+LEFT JOIN BSA_SUB_CUST_FACT_BAK_TEST bak ON bak.CustomerNo = s.TS_CustomerNo
+LEFT JOIN BSA_SUB_CUST_FACT aft ON aft.CustomerNo = s.TS_CustomerNo
+LEFT JOIN PB_CUSTOMER_FACT b ON b.CIF_KEY = aft.CIF_KEY
+ORDER BY 
+    CASE WHEN s.CUST_TYPE_CDE <> b.CUST_TYPE_CDE 
+           OR NOT (aft.highrisk = s.highrisk OR (s.ACTION = 'update' AND aft.highrisk = 
+                CASE WHEN bak.highrisk = 'H' OR s.highrisk = 'H' THEN 'H'
+                     WHEN bak.highrisk = 'M' OR s.highrisk = 'M' THEN 'M' ELSE 'L' END)) 
+         THEN 0 ELSE 1 END,
     s.完整分類標籤;
-
-可以幫我整理排版不要這麼長? 
-然後註解不要太多簡單就好
 
