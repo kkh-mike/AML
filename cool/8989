@@ -1,14 +1,17 @@
-這份 5.4 節的範本（包含紅旗、Trade Finance、WBS、FAM、AML_INFO_SEQ 等）完全是舊案子的舊內容，和這次你正在做的「人員權限 View 來源從 TAS9-T 改到 AMLDB1、取消檔案改權限」完全無關。
-因為這次變更只是單純的 IT 資料來源與維護機制調整，業務畫面上沒有新增功能或欄位，建議你可以直接：
- * 直接勾選：[v] NA（不適用）
-如果你們主管規定 5.4 節不能空白、一定要寫，可以用極簡的方式幫你改寫成這次「權限來源變更」的版本：
-5.4 需求功能
- * 5.4.1 需求功能-1
-   * 業務規則與限制：
-     * 僅調整 View 資料來源與對應邏輯，維持既有權限派發與檢視結果。
-   * 處理說明：
-     * 將人員權限 View（AML_RIGHTS_VW）資料來源從伺服器 TAS9-T（TSAAS）改至 AML 系統伺服器 AMLDB1（BatchJobDB）。
-     * 取消以往透過檔案變更來手動維護額外分行權限的做法。
-   * 案例說明：
-     * 無（純底層來源與維護機制調整）。
-(如果 5.4.2 用不到，可以直接整段刪除或標註 NA)
+1.	需求概述與目的(  NA )
+因應香港内部稽核之建議，優化香港分行每月HKAML組(FAM)下載與貿易金融相關(Trade Finance)的紅旗月報，以利AML管治及匯報。其中要求之資訊包括觸發紅旗及其關聯細節等相關資訊。
+
+經與HOIT初步討論，因所需紅旗及其關聯細節等資訊只在WBS顯示而非AML PO系統，因而已聯係HOIT AML提取所需香港分行貿易金融資訊產出(月報)報表,以幫助HKAML組能更有效地整理資訊及數據。
+
+也因而參考 HK OP WBS所提供之截圖（之前電郵提供HOIT截圖），主要是Trade Finance (TF) transaction若有“紅旗”/Red flags, 希望能把WBS這一頁一些相關聯及主要的資訊（比如顯示欄位：AML Type, Red Flag, Red Flag Reason and Content, Remarks, Goods Code, Merchandise, Vessel Name, flag of vessel, AML_Info_Seq等及客戶CIF，Trade date, Function Code and Name, Transaction amount等）都extract進這一份月報，幫助AML組能更有效地整理資訊及數據。 
+
+所需資訊請抓當月的紅旗交易。
+下檔之母體條件：可在FAM下載；
+出表頻率: 每個月第一天出表 (report to be generated beginning of each month for reporting on data as at end of previous month)。 可跟原有的（每個月）FAM月報一起產出。 
+
+例如：抓當月交易起日為20251101~20251130的060010交易其中紅旗交易欄位=Y的客戶清單，提供以上所提之欄位資訊。 
+
+另外，由於貿易金融紅旗等相關交易其中包括貿易金融貸款 (Loan)，但現況是目前放款主檔資料僅存在於「WBS主機」- LON_INFO欄位AML_INFO_SEQ而未下檔至HKODS, HOIT AML提取不到貿易金融貸款資料，所以提交提案單及規格書請WBS將相關資料下檔至HKODS，方便HOIT AML提取資料，整合報表。
+
+
+這幫我改一下
