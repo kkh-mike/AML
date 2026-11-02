@@ -1,97 +1,42 @@
-DJ 月批重跑作業說明
-
-一、適用情況 當 DJ 月批有問題，且產出檔案內容為空白，例如：
-
-20261102_DJRC_WL-AME_F.csv
-內容為空的情況
+==================================================
+DJ 月批重跑標準作業說明 (SOP)
+【適用情況】
+當 DJ 月批有問題，且產出檔案內容為空白時（例如：20261102_DJRC_WL-AME_F.csv 內容為空），
 需重新執行月批流程，重新抓取名單並重跑 DJ 提取。
-
-
-二、重跑前準備
-
-先確認月批執行時間
-通常月批執行時間約為 15:00
-需確認原始 feedlog 檔案名稱，例如：
-20261101150016_DJRC_WL-AME
-備份原始資料
-路徑： D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\DJ\BackUp
-複製以下資料：
-20261101150016_DJRC_WL-AME
-備份到桌面，避免原檔被覆蓋或遺失
-
-
-三、重跑流程 步驟 1：重新執行月批批次
-
-執行批次： AMLTW_M_DJ_01C
-批次執行完成後，名單檔會產出到： D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\DJ\SourceFolder
-批次內容實際執行為： D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\EXE\FTPDownloader.exe M
-說明：
-
-此步驟會重新抓取月批名單資料
-產出的名單檔需再丟回 SourceFolder 供下一步使用
-步驟 2：重新跑名單檔
-
-重新跑名單檔到： D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\DJ\SourceFolder
-說明：
-
-若有之前的錯誤產出，需重新執行一次，確保檔案更新為正確內容
-步驟 3：放入 feedlog 檔案
-
-將 feedlog 檔案： 20261101150016_DJRC_WL-AME
-放到： D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\DJ\SourceFolder
-注意：
-
-需將檔名中的時間去掉
-改名後格式為： DJRC_WL-AME
-例如：
-
-原檔：20261101150016_DJRC_WL-AME
-轉成：DJRC_WL-AME
-步驟 4：執行 DJ 提取批次
-
-執行批次： AMLTW_M_DJ_02C
-執行程式： D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\EXE\DJ_ExtractList.exe
-說明：
-
-這一步會依照重新整理後的資料進行 DJ 提取名單
-若資料正常，產出檔案不應再為空白
-
-四、確認事項 執行完成後，請確認：
-20261102_DJRC_WL-AME_F.csv 不是空白
-名單資料已重新抓取
-feedlog 已正確放入 SourceFolder 且檔名已修正
-DJ_ExtractList.exe 執行成功，且輸出結果正常
-
-五、簡短版作業流程
-
-至 D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\DJ\BackUp
-複製 20261101150016_DJRC_WL-AME 並備份到桌面
-執行 AMLTW_M_DJ_01C
-產出名單檔放到 D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\DJ\SourceFolder
-將 feedlog 20261101150016_DJRC_WL-AME 放入 SourceFolder，並改名為 DJRC_WL-AME
-執行 AMLTW_M_DJ_02C
-確認 DJ 輸出檔案內容不為空白
-
-
-
-
-
-
-
-
------------
-
-
-D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\DJ\BackUp           
-D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\DJ\Factiva_PFA_Feed_CSV    
-D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\DJ\SourceFolder        (AMLTW_M_DJ_01C 批次執行完，名單檔會放到這  批次內容D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\EXE\FTPDownloader.exe M)
-
-
-
-
-檔案名稱 : 
-20261101150016_DJRC_WL-AME
-20261102_DJRC_WL-AME_F.csv
-
-
-幫我整理人家一看就懂的說明書
+一、 重跑前準備
+1. 確認原始 feedlog 檔案名稱（例如：20261101150016_DJRC_WL-AME）。
+2. 備份原始資料：
+￼ 路徑：D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\DJ\BackUp
+￼ 將檔案（如：20261101150016_DJRC_WL-AME）複製一份到桌面備份，避免覆蓋或遺失。
+二、 重跑執行流程
+【步驟 1】重新執行月批批次
+￼ 執行批次代號：AMLTW_M_DJ_01C
+￼ 實際執行程式：D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\EXE\FTPDownloader.exe M
+￼ 說明：重新抓取月批名單資料。
+【步驟 2】確認名單檔案
+￼ 目標路徑：D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\DJ\SourceFolder
+￼ 說明：確認抓取出的名單檔已正確產出至此資料夾（若有舊的錯誤產出需確保已更新）。
+【步驟 3】放入並調整 feedlog 檔案
+￼ 將備好的 feedlog 檔（如：20261101150016_DJRC_WL-AME）放入：
+D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\DJ\SourceFolder
+￼ 【重要】需將檔名中的時間移除，改名為：DJRC_WL-AME
+￼ 原檔：20261101150016_DJRC_WL-AME
+￼ 更改後：DJRC_WL-AME
+【步驟 4】執行 DJ 提取批次
+￼ 執行批次代號：AMLTW_M_DJ_02C
+￼ 執行程式：D:\PATRIOTOFFICER\PATRIOTOFFICER_FILES\EXE\DJ_ExtractList.exe
+￼ 說明：依據整理後的資料重新進行 DJ 提取名單。
+三、 確認事項
+執行完成後，請檢查：
+1. 目標檔案（如 20261102_DJRC_WL-AME_F.csv）內容不再是空白。
+2. 名單資料已重新抓取完成。
+3. feedlog 已正確放入 SourceFolder 且檔名已修正為 DJRC_WL-AME。
+4. DJ_ExtractList.exe 執行成功且輸出正常。
+四、 簡短版快速步驟
+1. 至 BackUp 資料夾備份 20261101150016_DJRC_WL-AME 到桌面。
+2. 執行 AMLTW_M_DJ_01C 批次。
+3. 確認產出名單檔已至 SourceFolder。
+4. 將 feedlog 放入 SourceFolder，並改名為 DJRC_WL-AME。
+5. 執行 AMLTW_M_DJ_02C 批次。
+6. 確認最終輸出檔案內容不為空白。
+==================================================
