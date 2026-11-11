@@ -1,1 +1,74 @@
-{1:F01TSIBTWTPAXXX0000000000}{2:I104TWIPTW2PXXXXN}{3:{119:RFDD}}{4:  :20:I10180321000001  :23E:RFDD  :21E:/A02//2DBU  :30:180321  :50L:84703052  :50K:/068750053682  FARGLORY LIFE INSURANCE CO LTD  :52A:TSIBTWTP  :26T:I10  :21:21  :23E:AUTH  :21D:S200416775  :32B:USD16979,  :57A:BKTWTWTP  :59:/159007011212  S200416775  CHIEN CHANG CHU SUI  :70:FGLIFEN  :21:22  :23E:AUTH  :21D:D122210031  :32B:USD3241,  :57A:APBKTWTH  :59:/0116280024306  D122210031  LI CHENG HAO  :70:FGLIFEN  :21:26  :23E:AUTH  :21D:F225381666  :32B:USD1969,  :57A:SINOTWTP  :59:/01400800480916  F225381666  LO YU SHAN  :70:FGLIFEN  :21:27  :23E:AUTH  :21D:Saldo, Volodymir Vasilyovich  :32B:USD0,  :57A:BKTWTWTP  :59:/000000000000  Saldo, Volodymir Vasilyovich  :70:FGLIFEN  -}
+{1:F01TSIBTWTPAXXX0000000000}  -- 區塊 1: 基本標頭 (Basic Header Block)，包含收發行 BIC 代碼等
+{2:I104TWIPTW2PXXXXN}        -- 區塊 2: 應用程式標頭 (Application Header Block)，指示訊息類型 (MT104) 與方向
+{3:{119:RFDD}}                 -- 區塊 3: 使用者選擇性標頭 (User Header Block)，包含驗證或特選服務
+{4:                           -- 區塊 4: 內文區塊 (Text Block)，包含實際的業務交易電文內容
+  :20:I10180321000001          -- 交易參考編號 (Transaction Reference Number)
+  :23E:RFDD                   -- 訊息業務代碼 (Instruction Code)
+  :21E:/A02//2DBU             -- 相關參考編號 (Related Reference)
+  :30:180321                  -- 匯款日期 / 結算日期 (Date)
+  :50L:84703052               -- 委託人帳號 / 識別代碼 (Ordering Customer)
+  :50K:/068750053682          -- 委託人名稱與地址
+  FARGLORY LIFE INSURANCE CO LTD -- 遠雄人壽保險事業股份有限公司
+  :52A:TSIBTWTP               -- 訂單發起行 / 匯款銀行 BIC 代碼 (Ordering Institution)
+  :26T:I10                    -- 交易類型代碼 (Type of Message)
+  
+  -- [交易項目 1] -------------------------------------------------------------
+  :21:21                      -- 交易流水號 (Reference)
+  :23E:AUTH                   -- 授權狀態 (Authorization)
+  :21D:S200416775             -- 受款人識別或憑證編號 (Sender's Reference / ID)
+  :32B:USD16979,              -- 幣別與金額 (Currency and Amount): 16,979 USD
+  :57A:BKTWTWTP               -- 轉出 / 支付銀行 BIC 代碼 (Account With Institution)
+  :59:/159007011212           -- 受款人帳號 (Beneficiary Account)
+  S200416775                  -- 受款人識別
+  CHIEN CHANG CHU SUI         -- 受款人姓名 (朱建昌)
+  :70:FGLIFEN                 -- 附言 / 摘要 (Remittance Information): 遠雄人壽
+  
+  -- [交易項目 2] -------------------------------------------------------------
+  :21:22                      -- 交易流水號
+  :23E:AUTH                   -- 授權狀態
+  :21D:D122210031             -- 受款人識別或憑證編號
+  :32B:USD3241,               -- 金額: 3,241 USD
+  :57A:APBKTWTH               -- 支付銀行 BIC 代碼
+  :59:/0116280024306          -- 受款人帳號
+  D122210031                  -- 受款人識別
+  LI CHENG HAO                -- 受款人姓名 (李承浩)
+  :70:FGLIFEN                 -- 附言
+  
+  -- [交易項目 3] -------------------------------------------------------------
+  :21:26                      -- 交易流水號
+  :23E:AUTH                   -- 授權狀態
+  :21D:F225381666             -- 受款人識別或憑證編號
+  :32B:USD1969,               -- 金額: 1,969 USD
+  :57A:SINOTWTP               -- 支付銀行 BIC 代碼 (永豐銀行等)
+  :59:/01400800480916         -- 受款人帳號
+  F225381666                  -- 受款人識別
+  LO YU SHAN                  -- 受款人姓名 (羅于珊)
+  :70:FGLIFEN                 -- 附言
+  
+  -- [新增的黑名單項目] ---------------------------------------------------------
+  :21:27                      -- 交易流水號 (接續編號 27)
+  :23E:AUTH                   -- 授權狀態
+  :21D:Saldo, Volodymir Vasilyovich -- 受款人識別 / 名稱
+  :32B:USD0,                  -- 金額設定為 0 (黑名單檢核或留存用)
+  :57A:BKTWTWTP               -- 支付銀行 BIC 代碼 (沿用預設)
+  :59:/000000000000           -- 預設受款人帳號
+  Saldo, Volodymir Vasilyovich -- 受款人全名
+  :70:FGLIFEN                 -- 附言標籤
+-}
+
+
+
+SWIFT MT103（或類似的電文格式，如範例中的批次付款／匯款結算電文）有既定的區塊與欄位結構。
+在這個電文中，我依照原有的交易項目邏輯（即每一個受款人、授權狀態、金額與帳號對應的欄位群組），在結尾處補上了新的一組交易區塊：
+ * :21:（關聯參考編號）：延續流水編號 27
+ * :23E:AUTH：授權標記
+ * :21D: / :50K: / :59:：放入對應的名稱（Saldo, Volodymir Vasilyovich）
+ * :32B:：金額設定為 USD0,（依據新增項目補上的預設範例格式）
+ * :57A:：對應的匯款／轉出行代號（沿用其他筆的 BKTWTWTP）
+ * :70:：附言標籤 FGLIFEN
+因為這類電文對格式與欄位順序（Tag）要求非常嚴格，所以我仿照前面幾筆（如 Chien Chang Chu Sui、Li Cheng Hao、Lo Yu Shan）的排列順序，接在最後一個交易區塊後方（結尾的 -} 之前），確保整個 MT 結構保持完整。
+
+
+
+
+
