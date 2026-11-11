@@ -1,39 +1,21 @@
-從你提供的 SQL Server 資料表欄位（ParseStartDt、SplitStartDt、DetectionStartDt 等）來看，要計算一筆電文從開始處理到結束的完整執行時間，以及篩選出執行超過 20 分鐘的資料，可以直接用 SQL 進行時間差的計算。
-以下提供對應的 SQL 查詢語法：
-1. 找出完整執行時間（計算總耗時）
-你可以利用資料表中的時間欄位（例如從最早的 ParseStartDt 開始，一直到最後一個步驟完成的時間，或者利用 CreatedDate 到 LastModifiedDate）。
-如果你想看每一筆電文的各階段耗時與總耗時（以秒或毫秒為單位），可以用這段 SQL：
-SELECT 
-    ID,
-    ClientReferenceNo,
-    CreatedDate,
-    LastModifiedDate,
-    -- 計算整體從建立到最後修改的總秒數
-    DATEDIFF(millisecond, CreatedDate, LastModifiedDate) AS Total_Duration_Ms,
-    CAST(DATEDIFF(millisecond, CreatedDate, LastModifiedDate) / 1000.0 AS DECIMAL(10, 2)) AS Total_Duration_Sec,
-    
-    -- 拆解各階段的時間點
-    ParseStartDt,
-    SplitStartDt,
-    DetectionStartDt
-FROM MESSAGEDATABASE..SWIFT_MTRAW
+SELECT DISTINCT
+    A.EntityId,
+    A.FullName,
+    BL.sdn_name,
+    O.GROUPID,
+    O.spec_name,
+    O.DInd
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B    ON A.EntityId = B.EntityId
+JOIN BSADBJP..BlackListData BL    ON BL.sdn_name = A.FullName
+LEFT JOIN BSADBJP..OFAC_SPEC O    ON O.spec_name = BL.sdn_name
+WHERE A.Deceased = 1
+AND B.SanctionListReference LIKE '%Japanese Finance%' AND O.GROUPID = '7'
 
-2. 找出執行超過 20 分鐘的電文
-如果你要找出「處理很久（超過 20 分鐘）」的資料，可以用 DATEDIFF 來過濾。
-20 分鐘等於 1,200 秒 或 1,200,000 毫秒。你可以用以下查詢：
-SELECT 
-    ID,
-    ClientReferenceNo,
-    CreatedDate,
-    LastModifiedDate,
-    DATEDIFF(minute, CreatedDate, LastModifiedDate) AS Duration_Minutes,
-    ParseStartDt,
-    SplitStartDt,
-    DetectionStartDt
-FROM MESSAGEDATABASE..SWIFT_MTRAW
-WHERE DATEDIFF(minute, CreatedDate, LastModifiedDate) >= 20
-   -- 或者如果你是以 SQL Server 的 3 階段時間跨度為主，也可以用：
-   -- OR DATEDIFF(minute, ParseStartDt, LastModifiedDate) >= 20
 
-💡 實務小建議：
- * 如果你是要看程式在 Split（切字串） 或 Parse（解析） 階段卡多久，也可以把 DATEDIFF 拿去算 SplitStartDt 到下一個階段的時間差，幫助你精準定位到底是哪個步驟讓程式跑很久。
+SELECT * FROM   BSADBJP..OFAC_SPEC WHERE GROUPID = '7'
+
+
+
+
+我要怎麼確認group 7 都是死人
