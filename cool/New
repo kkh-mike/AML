@@ -29,4 +29,11 @@ FROM BSADB.dbo.DJ_List_Data_A A
 WHERE A.EntNum = 683933;
 
 
+-- 看看它到底存在哪個表裡
+SELECT 'DJ_Entity' AS TableName, EntityId FROM BSADB.dbo.DJ_Entity WHERE EntityId = 683933
+UNION ALL
+SELECT 'DJ_SanctionListReference', EntityId FROM BSADB.dbo.DJ_SanctionListReference WHERE EntityId = 683933;
+
+
+
 
