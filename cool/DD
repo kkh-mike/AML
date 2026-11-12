@@ -1,54 +1,27 @@
-
-# -------------------- 4. 強制指定資料庫 BSADBTW --------------------
-
-if ([string]::IsNullOrWhiteSpace($ConnStr)) {
-    throw 'LDAP 沒有回傳有效的 SQL Server 連線字串'
-}
-
-# 先記錄遮罩後的原始連線字串，方便確認格式
-$MaskedConn = [regex]::Replace(
-    $ConnStr,
-    '(?i)(Password|Pwd)\s*=\s*[^;]*',
-    '$1=******'
-)
-
-Write-Log "LDAP 原始連線字串：$MaskedConn" DarkGray
-
-try {
-    $Builder = New-Object System.Data.SqlClient.SqlConnectionStringBuilder
-
-    $Builder.ConnectionString = $ConnStr
-    $Builder['Initial Catalog'] = $Database
-
-    $ConnStr = $Builder.ConnectionString
-
-    Write-Log "已透過 SqlConnectionStringBuilder 指定資料庫：$Database" Green
-}
-catch {
-    Write-Log "標準連線字串解析失敗，改用手動處理：$($_.Exception.Message)" Yellow
-
-    # 僅處理標準的 key=value;key=value 格式
-    if ($ConnStr -match '(?i)(Initial Catalog|Database)\s*=') {
-
-        $ConnStr = [regex]::Replace(
-            $ConnStr,
-            '(?i)(Initial Catalog|Database)\s*=\s*[^;]*',
-            "Initial Catalog=$Database"
-        )
-    }
-    else {
-        $ConnStr = $ConnStr.TrimEnd(';') + ";Initial Catalog=$Database;"
-    }
-
-    # 再次驗證
-    try {
-        $Builder = New-Object System.Data.SqlClient.SqlConnectionStringBuilder
-        $Builder.ConnectionString = $ConnStr
-        $ConnStr = $Builder.ConnectionString
-
-        Write-Log "已指定資料庫：$Database" Green
-    }
-    catch {
-        throw "無法解析 LDAP 回傳的連線字串。請確認連線字串格式；錯誤：$($_.Exception.Message)"
-    }
-}
+這段文字是心理懸疑小說《沉默的病人》（The Silent Patient）的開頭。以下為您整理成「英文一句、中文一句」的對照：
+ALICIA BERENSON WAS THIRTY-THREE YEARS OLD when she killed her husband.
+艾莉西亞・貝倫森（Alicia Berenson）謀殺丈夫時年三十三歲。
+They had been married for seven years.
+他們結婚七年了。
+They were both artists—Alicia was a painter, and Gabriel was a well-known fashion photographer.
+兩人都是藝術家——艾莉西亞是畫家，蓋布瑞（Gabriel）則是知名的時尚攝影師。
+He had a distinctive style, shooting semi-starved, semi-naked women in strange, unflattering angles.
+他有獨特的風格，專門拍攝半飢餓、半裸的女性，角度奇特且不討喜。
+Since his death, the price of his photographs has increased astronomically.
+自他死後，他的攝影作品價格暴漲。
+I find his stuff rather slick and shallow, to be honest.
+老實說，我覺得他的東西相當圓滑而膚淺。
+It has none of the visceral quality of Alicia’s best work.
+它完全沒有艾莉西亞優秀作品那種直擊人心的力量。
+I don’t know enough about art to say whether Alicia Berenson will stand the test of time as a painter.
+我對藝術了解不夠深，無法斷言艾莉西亞・貝倫森身為畫家是否禁得起時間的考驗。
+Her talent will always be overshadowed by her notoriety, so it’s hard to be objective.
+她的才華永遠會被她的惡名所掩蓋，所以很難做到客觀。
+And you might well accuse me of being biased.
+而你大可指責我有偏見。
+All I can offer is my opinion, for what it’s worth.
+我能提供的只有我的看法，儘管它或許微不足道。
+And to me, Alicia was a kind of genius.
+但在我眼裡，艾莉西亞堪稱某種天才。
+Apart from her technical skill, her paintings have an uncanny ability to grab your attention—by the throat, almost—and hold it in a viselike grip.
+除了精湛的技藝外，她的畫作還有一種不可思議的力量，能抓住你的注意力——簡直像掐住你的喉嚨一樣——並用虎鉗般的緊握力將其扣留。
