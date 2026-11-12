@@ -19,3 +19,10 @@ DJ_SanctionListReference	683933
 DJ_SanctionListReference	683933
 DJ_SanctionListReference	683933
 DJ_SanctionListReference	683933
+
+
+
+
+SELECT EntNum, SdnName, NamePropertyBitCode
+FROM BSADB.dbo.DJ_List_Data_A
+WHERE EntNum = 683933;
