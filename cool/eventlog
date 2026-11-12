@@ -1,267 +1,187 @@
 Severity	Timestamp	Node	Thread	Message Code	Message
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	DIRECTOR	VAR_27027	Use default value [] for mapping parameter:[$$BHDT].
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	DIRECTOR	VAR_27027	Use default value [] for mapping parameter:[$$P12MTH].
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	DIRECTOR	TM_6014	Initializing session [s_m_I_CASA_MASTER_BANCS_01] at [Thu Nov 12 14:28:08 2026].
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	DIRECTOR	TM_6683	Repository Name: [INFA_DEV]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	DIRECTOR	TM_6684	Server Name: [dwmt]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	DIRECTOR	TM_6686	Folder: [ODAMLSK]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	DIRECTOR	TM_6685	Workflow: [wf_I_BANCS] Run Instance Name: [] Run Id: [849800]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	DIRECTOR	TM_6101	Mapping name: m_I_CASA_MASTER_BANCS_01.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	DIRECTOR	TM_6964	Date format for the Session is [MM/DD/YYYY HH24:MI:SS.US]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	DIRECTOR	TM_6708	Using configuration property [EnableDataEncryption,no]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	DIRECTOR	TM_6708	Using configuration property [StoreHAPersistenceInDB,no]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	DIRECTOR	TM_6708	Using configuration property [LogParameterOverrideValue,Yes]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	DIRECTOR	TM_6708	Using configuration property [LogParameterOverrideValue,Yes]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	DIRECTOR	TM_6703	Session [s_m_I_CASA_MASTER_BANCS_01] is run by 64-bit Integration Service  [node01_dwmt], version [9.6.1 HotFix4], build [0408].
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MANAGER	PETL_24058	Running Partition Group [1].
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MANAGER	PETL_24000	Parallel Pipeline Engine initializing.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MANAGER	PETL_24001	Parallel Pipeline Engine running.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MANAGER	PETL_24003	Initializing session run.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	CMN_1569	Server Mode: [UNICODE]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	CMN_1570	Server Code page: [MS Windows Traditional Chinese, superset of Big 5]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	TM_6151	The session sort order is [Binary].
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	TM_6156	Using low precision processing.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	TM_6180	Deadlock retry logic will not be implemented.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	TM_6187	Session target-based commit interval is [10000].
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	TM_6307	DTM error log disabled. 
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	TE_7022	TShmWriter: Initialized
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	DBG_21693	SRT_CUST_ID: Cache size for partition [1] = [44739240]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	SORT_40419	For Transformation [SRT_CUST_ID], memory used is [44739240] bytes and row size is 88 bytes.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	DBG_21693	srt_DEP_ACCT_CUST_NO: Cache size for partition [1] = [44739240]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	SORT_40419	For Transformation [srt_DEP_ACCT_CUST_NO], memory used is [44739240] bytes and row size is 200 bytes.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	DBG_21693	srt_ACCT_TYP1: Cache size for partition [1] = [44739240]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	SORT_40419	For Transformation [srt_ACCT_TYP1], memory used is [44739240] bytes and row size is 160 bytes.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	DBG_21693	SRTTRANS: Cache size for partition [1] = [44739240]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	SORT_40419	For Transformation [SRTTRANS], memory used is [44739240] bytes and row size is 104 bytes.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	TE_7036	Aggregate Information: agg_Get_LST_MTN_DT: Sorted input optimization ON.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	DBG_21693	srt_CUST_NO: Cache size for partition [1] = [44739240]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	SORT_40419	For Transformation [srt_CUST_NO], memory used is [44739240] bytes and row size is 68 bytes.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	DBG_21694	jnr_CUST_ID Partition [0]: Index cache size = [5592405], Data cache size = [11184810]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	TT_11098	The Joiner transformation [jnr_CUST_ID] is configured with the join algorithm: Sorted-Merge.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	DBG_21077	DBG_21077 Create joiner cache on master relation : (Thu Nov 12 14:28:08 2026)
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	CMN_1690	Created new data file [/appl/infouser/Cache/ODAML/PMJNR143819_11_0_849800.dat] and index file [/appl/infouser/Cache/ODAML/PMJNR143819_11_0_849800.idx] for Joiner [jnr_CUST_ID].
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	DBG_21603	DBG_21603 Open master relation cache for detail joiner : (Thu Nov 12 14:28:08 2026)
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	DBG_21693	srt_ACCT_NO_1: Cache size for partition [1] = [44739240]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	SORT_40419	For Transformation [srt_ACCT_NO_1], memory used is [44739240] bytes and row size is 612 bytes.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	TE_7036	Aggregate Information: agg_DISTINCT: Sorted input optimization ON.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	DBG_21693	srt_ACCT_TYP: Cache size for partition [1] = [44739240]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	SORT_40419	For Transformation [srt_ACCT_TYP], memory used is [44739240] bytes and row size is 792 bytes.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	DBG_21693	srt_ACCT_NO: Cache size for partition [1] = [44739240]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	SORT_40419	For Transformation [srt_ACCT_NO], memory used is [44739240] bytes and row size is 188 bytes.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	TE_7036	Aggregate Information: agg_DISTINCT_ACCT_NO: Sorted input optimization ON.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	DBG_21694	JNRTRANS Partition [0]: Index cache size = [5592405], Data cache size = [11184810]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	TT_11098	The Joiner transformation [JNRTRANS] is configured with the join algorithm: Nested-Loop.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	DBG_21694	jnr_ACCT_TYP Partition [0]: Index cache size = [5592405], Data cache size = [11184810]
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	TT_11098	The Joiner transformation [jnr_ACCT_TYP] is configured with the join algorithm: Sorted-Merge.
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	DBG_21077	DBG_21077 Create joiner cache on master relation : (Thu Nov 12 14:28:08 2026)
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	CMN_1690	Created new data file [/appl/infouser/Cache/ODAML/PMJNR143819_31_0_849800.dat] and index file [/appl/infouser/Cache/ODAML/PMJNR143819_31_0_849800.idx] for Joiner [jnr_ACCT_TYP].
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	DBG_21603	DBG_21603 Open master relation cache for detail joiner : (Thu Nov 12 14:28:08 2026)
-INFO	2026/11/12 下午 02:28:08	node01_dwmt	MAPPING	DBG_21075	Connecting to database [oddbt01sk], user [odaml]
-INFO	2026/11/12 下午 02:28:09	node01_dwmt	MAPPING	CMN_1716	Lookup [LKP_BRANCH_MAPPING] uses database connection [Relational:od01_odamlsk] in code page [MS Windows Traditional Chinese, superset of Big 5]
-INFO	2026/11/12 下午 02:28:09	node01_dwmt	MAPPING	DBG_21693	SRT_BRANCH_NBR: Cache size for partition [1] = [44739240]
-INFO	2026/11/12 下午 02:28:09	node01_dwmt	MAPPING	SORT_40419	For Transformation [SRT_BRANCH_NBR], memory used is [44739240] bytes and row size is 588 bytes.
-INFO	2026/11/12 下午 02:28:09	node01_dwmt	MAPPING	DBG_21694	JNRTRANS1 Partition [0]: Index cache size = [5592405], Data cache size = [11184810]
-INFO	2026/11/12 下午 02:28:09	node01_dwmt	MAPPING	TT_11098	The Joiner transformation [JNRTRANS1] is configured with the join algorithm: Sorted-Merge.
-INFO	2026/11/12 下午 02:28:09	node01_dwmt	MAPPING	DBG_21077	DBG_21077 Create joiner cache on master relation : (Thu Nov 12 14:28:09 2026)
-INFO	2026/11/12 下午 02:28:09	node01_dwmt	MAPPING	CMN_1690	Created new data file [/appl/infouser/Cache/ODAML/PMJNR143819_16_0_849800.dat] and index file [/appl/infouser/Cache/ODAML/PMJNR143819_16_0_849800.idx] for Joiner [JNRTRANS1].
-INFO	2026/11/12 下午 02:28:09	node01_dwmt	MAPPING	DBG_21603	DBG_21603 Open master relation cache for detail joiner : (Thu Nov 12 14:28:09 2026)
-INFO	2026/11/12 下午 02:28:09	node01_dwmt	MAPPING	TM_6007	DTM initialized successfully for session [s_m_I_CASA_MASTER_BANCS_01]
-INFO	2026/11/12 下午 02:28:09	node01_dwmt	DIRECTOR	PETL_24033	All DTM Connection Info: [<NONE>].
-INFO	2026/11/12 下午 02:28:09	node01_dwmt	MANAGER	PETL_24004	PETL_24004 Starting pre-session tasks. : (Thu Nov 12 14:28:09 2026)
-INFO	2026/11/12 下午 02:28:09	node01_dwmt	PRE-SESS	DBG_21349	No load constraints for Target [AML_CASA_MASTER_BANCS]. It does not reference any primary table from the same active source or transaction generator.
-INFO	2026/11/12 下午 02:28:09	node01_dwmt	PRE-SESS	DBG_21104	Determining truncate order for [AML_CASA_MASTER_BANCS] [instance id:1]
-INFO	2026/11/12 下午 02:28:09	node01_dwmt	PRE-SESS	DBG_21531	    Truncate order for [AML_CASA_MASTER_BANCS] [instance id:1] determined successfully
-INFO	2026/11/12 下午 02:28:09	node01_dwmt	PRE-SESS	WRT_8365	WRT_8365 Starting truncate for target table [AML_CASA_MASTER_BANCS]. : (Thu Nov 12 14:28:09 2026)
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	PRE-SESS	WRT_8022	WRT_8022 Truncate table for table [AML_CASA_MASTER_BANCS] succeeded. : (Thu Nov 12 14:28:10 2026)
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	MANAGER	PETL_24027	PETL_24027 Pre-session task completed successfully. : (Thu Nov 12 14:28:10 2026)
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	DIRECTOR	PETL_24006	Starting data movement.
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	DIRECTOR	TT_11183	Enabled using [1 (auto)] additional concurrent pipelines to build lookup caches. (Session likely will build or refresh [1] lookup caches; [0] on-demand only).
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	MAPPING	TM_6660	Total Buffer Pool size is 46045888 bytes and Block size is 637304 bytes.
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1	DBG_21312	Lookup Transformation [LKP_BRANCH_MAPPING]: Lookup override sql to create cache: SELECT  RTRIM(DEPT_CD_FUNC) AS DEPT_CD_FUNC FROM ODAML.BRANCH_MAPPING
-WHERE TYP ='D' AND STATUS ='1' ORDER BY DEPT_CD_FUNC
-
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1	TE_7212	Increasing [Index Cache] size for transformation [LKP_BRANCH_MAPPING] from [5592405] to [5596400].
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1	TE_7212	Increasing [Data Cache] size for transformation [LKP_BRANCH_MAPPING] from [11184810] to [11190272].
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	DIRECTOR	TT_11184	Starting additional concurrent pipeline to build the lookup cache needed by Lookup transformation [LKP_BRANCH_MAPPING].
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1	TM_6660	Total Buffer Pool size is 609824 bytes and Block size is 65536 bytes.
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1:READER_1_1	DBG_21438	Reader: Source is [oddbt01sk], user [odaml]
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_1_1	DBG_21438	Reader: Source is [oddbt01sk], user [odaml]
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1:READER_1_1	BLKR_16051	Source database connection [od01_odamlsk] code page: [MS Windows Traditional Chinese, superset of Big 5]
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_1_1	BLKR_16051	Source database connection [od01_odamlsk] code page: [MS Windows Traditional Chinese, superset of Big 5]
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1:READER_1_1	BLKR_16003	Initialization completed successfully.
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1:READER_1_1	BLKR_16007	Reader run started.
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1:READER_1_1	RR_4049	RR_4049 SQL Query issued to database : (Thu Nov 12 14:28:10 2026)
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_1_1	BLKR_16003	Initialization completed successfully.
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_2_1	DBG_21438	Reader: Source is [oddbt01sk], user [odaml]
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_2_1	BLKR_16051	Source database connection [od01_odamlsk] code page: [MS Windows Traditional Chinese, superset of Big 5]
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1:READER_1_1	RR_4050	RR_4050 First row returned from database to reader : (Thu Nov 12 14:28:10 2026)
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1:READER_1_1	BLKR_16008	Reader run completed.
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1:TRANSF_1_1	DBG_21079	DBG_21079 Creating Lookup Cache : (Thu Nov 12 14:28:10 2026)
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1:TRANSF_1_1	DBG_21682	Lookup table row count : 128
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1:TRANSF_1_1	DBG_21297	Lookup cache row count : 128
-
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1:TRANSF_1_1	DBG_21294	DBG_21294 Lookup cache creation completed : (Thu Nov 12 14:28:10 2026)
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1:TRANSF_1_1	CMN_1671	Created new cache files PMLKUP143819_40_0_849800H64.[dat/idx] in directory /appl/infouser/Cache/ODAML for Lookup [LKP_BRANCH_MAPPING].
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1:TRANSF_1_1	DBG_21641	LKP_BRANCH_MAPPING: Index cache size = [5596400], Data cache size = [11190272]
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	LKPDP_1:TRANSF_1_1	DBG_21216	Finished transformations for Source Qualifier [LKP_BRANCH_MAPPING{{DSQ}}]. Total errors [0] 
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	DIRECTOR	TT_11185	No more lookup cache to build by additional concurrent pipeline in the current concurrent source set.
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_2_1	BLKR_16003	Initialization completed successfully.
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_3_1	DBG_21438	Reader: Source is [oddbt01sk], user [odaml]
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_3_1	BLKR_16051	Source database connection [od01_odamlsk] code page: [MS Windows Traditional Chinese, superset of Big 5]
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_3_1	BLKR_16003	Initialization completed successfully.
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_4_1	DBG_21438	Reader: Source is [oddbt01sk], user [odaml]
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_4_1	BLKR_16051	Source database connection [od01_odamlsk] code page: [MS Windows Traditional Chinese, superset of Big 5]
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_4_1	BLKR_16003	Initialization completed successfully.
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_5_1	DBG_21438	Reader: Source is [oddbt01sk], user [odaml]
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_5_1	BLKR_16051	Source database connection [od01_odamlsk] code page: [MS Windows Traditional Chinese, superset of Big 5]
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_5_1	BLKR_16003	Initialization completed successfully.
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_6_1	DBG_21438	Reader: Source is [oddbt01sk], user [odaml]
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_6_1	BLKR_16051	Source database connection [od01_odamlsk] code page: [MS Windows Traditional Chinese, superset of Big 5]
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_6_1	BLKR_16003	Initialization completed successfully.
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_7_1	DBG_21438	Reader: Source is [oddbt01sk], user [odaml]
-INFO	2026/11/12 下午 02:28:10	node01_dwmt	READER_1_7_1	BLKR_16051	Source database connection [od01_odamlsk] code page: [MS Windows Traditional Chinese, superset of Big 5]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_7_1	BLKR_16003	Initialization completed successfully.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	WRITER_1_*_1	WRT_8147	Writer: Target is database [oddbt01sk], user [odaml], bulk mode [OFF]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	WRITER_1_*_1	WRT_8221	Target database connection [od01_odamlsk] code page: [MS Windows Traditional Chinese, superset of Big 5]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	WRITER_1_*_1	WRT_8124	Target Table AML_CASA_MASTER_BANCS :SQL INSERT statement:
-INSERT INTO AML_CASA_MASTER_BANCS(ACCOUNT_NBR,APPLICATION_CODE,CUSTOMER_ID,BRANCH_NBR,BRANCH_NAME,ACCOUNT_TYPE_CODE,ACCOUNT_TYPE_DESC,OFFICER_NBR,OFFICER_NAME,CURRENT_BALANCE,AVAILABLE_BALANCE,OPENING_DATE,CLOSED_DATE,ACCOUNT_STATUS,OVERDRAFT_LIMIT,DATE_OF_LAST_ACTIVITY,OPENING_METHOD_CODE,OPENING_METHOD_DESC,PRODUCT_CODE,PRODUCT_DESC,ACCOUNT_PURPOSE_CODE,ACCOUNT_PURPOSE_DESC,CORE_SYSTEM,PROCESSING_DATE)  VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	WRITER_1_*_1	WRT_8020	No column marked as primary key for table [AML_CASA_MASTER_BANCS]. UPDATEs Not Supported.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	WRITER_1_*_1	WRT_8270	Target connection group #1 consists of target(s) [AML_CASA_MASTER_BANCS]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	WRITER_1_*_1	WRT_8003	Writer initialization complete.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_1_1	BLKR_16007	Reader run started.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_3_1	BLKR_16007	Reader run started.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_2_1	BLKR_16007	Reader run started.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_6_1	BLKR_16007	Reader run started.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	WRITER_1_*_1	WRT_8005	Writer run started.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_1_1	RR_4010	SQ instance [SQ_PSNL] SQL Query [SELECT ODCIF.PSNL.CUST_ID, ODCIF.PSNL.LST_MTN_DT, ODCIF.PSNL.CUST_NO FROM ODCIF.PSNL WHERE DATA_SRC_CD = 'BNS_PSNL' AND CUST_NO IS NOT NULL]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	WRITER_1_*_1	WRT_8158	
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	DIRECTOR	VAR_27028	Use override value [20260102] for mapping parameter:[$$BHDT].
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	DIRECTOR	VAR_27027	Use default value [] for mapping parameter:[$$P12MTH].
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	DIRECTOR	TM_6014	Initializing session [s_m_I_TD_MASTER_BANCS_01] at [Thu Nov 12 15:12:36 2026].
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	DIRECTOR	TM_6683	Repository Name: [INFA_DEV]
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	DIRECTOR	TM_6684	Server Name: [dwmt]
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	DIRECTOR	TM_6686	Folder: [ODAMLSK]
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	DIRECTOR	TM_6685	Workflow: [wf_I_BANCS] Run Instance Name: [] Run Id: [849804]
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	DIRECTOR	TM_6101	Mapping name: m_I_TD_MASTER_BANCS_01.
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	DIRECTOR	TM_6964	Date format for the Session is [MM/DD/YYYY HH24:MI:SS.US]
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	DIRECTOR	TM_6708	Using configuration property [EnableDataEncryption,no]
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	DIRECTOR	TM_6708	Using configuration property [StoreHAPersistenceInDB,no]
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	DIRECTOR	TM_6708	Using configuration property [LogParameterOverrideValue,Yes]
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	DIRECTOR	TM_6708	Using configuration property [LogParameterOverrideValue,Yes]
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	DIRECTOR	TM_6703	Session [s_m_I_TD_MASTER_BANCS_01] is run by 64-bit Integration Service  [node01_dwmt], version [9.6.1 HotFix4], build [0408].
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MANAGER	PETL_24058	Running Partition Group [1].
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MANAGER	PETL_24000	Parallel Pipeline Engine initializing.
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MANAGER	PETL_24001	Parallel Pipeline Engine running.
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MANAGER	PETL_24003	Initializing session run.
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MAPPING	CMN_1569	Server Mode: [UNICODE]
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MAPPING	CMN_1570	Server Code page: [MS Windows Traditional Chinese, superset of Big 5]
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MAPPING	TM_6151	The session sort order is [Binary].
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MAPPING	TM_6156	Using low precision processing.
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MAPPING	TM_6180	Deadlock retry logic will not be implemented.
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MAPPING	TM_6187	Session target-based commit interval is [10000].
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MAPPING	TM_6307	DTM error log disabled. 
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MAPPING	TE_7022	TShmWriter: Initialized
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MAPPING	DBG_21693	srt_PSNL: Cache size for partition [1] = [87652392]
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MAPPING	SORT_40419	For Transformation [srt_PSNL], memory used is [87652392] bytes and row size is 88 bytes.
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MAPPING	DBG_21693	srt_DEP_ACCT_CUST_NO: Cache size for partition [1] = [87652392]
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MAPPING	SORT_40419	For Transformation [srt_DEP_ACCT_CUST_NO], memory used is [87652392] bytes and row size is 200 bytes.
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MAPPING	DBG_21693	SRTTRANS: Cache size for partition [1] = [87652392]
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MAPPING	SORT_40419	For Transformation [SRTTRANS], memory used is [87652392] bytes and row size is 104 bytes.
+INFO	2026/11/12 下午 03:12:36	node01_dwmt	MAPPING	TE_7036	Aggregate Information: agg_Get_LST_MTN_DT: Sorted input optimization ON.
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MAPPING	DBG_21693	srt_CUST_NO: Cache size for partition [1] = [87652392]
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MAPPING	SORT_40419	For Transformation [srt_CUST_NO], memory used is [87652392] bytes and row size is 68 bytes.
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MAPPING	DBG_21694	jnr_CUST_ID Partition [0]: Index cache size = [10956549], Data cache size = [21913098]
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MAPPING	TT_11098	The Joiner transformation [jnr_CUST_ID] is configured with the join algorithm: Sorted-Merge.
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MAPPING	DBG_21077	DBG_21077 Create joiner cache on master relation : (Thu Nov 12 15:12:37 2026)
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MAPPING	CMN_1690	Created new data file [/appl/infouser/Cache/ODAML/PMJNR143817_13_0_849804.dat] and index file [/appl/infouser/Cache/ODAML/PMJNR143817_13_0_849804.idx] for Joiner [jnr_CUST_ID].
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MAPPING	DBG_21603	DBG_21603 Open master relation cache for detail joiner : (Thu Nov 12 15:12:37 2026)
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MAPPING	DBG_21693	SRTTRANS1: Cache size for partition [1] = [87652392]
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MAPPING	SORT_40419	For Transformation [SRTTRANS1], memory used is [87652392] bytes and row size is 620 bytes.
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MAPPING	DBG_21694	JNRTRANS1 Partition [0]: Index cache size = [10956549], Data cache size = [21913098]
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MAPPING	TT_11098	The Joiner transformation [JNRTRANS1] is configured with the join algorithm: Sorted-Merge.
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MAPPING	DBG_21077	DBG_21077 Create joiner cache on master relation : (Thu Nov 12 15:12:37 2026)
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MAPPING	CMN_1690	Created new data file [/appl/infouser/Cache/ODAML/PMJNR143817_18_0_849804.dat] and index file [/appl/infouser/Cache/ODAML/PMJNR143817_18_0_849804.idx] for Joiner [JNRTRANS1].
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MAPPING	DBG_21603	DBG_21603 Open master relation cache for detail joiner : (Thu Nov 12 15:12:37 2026)
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MAPPING	TM_6007	DTM initialized successfully for session [s_m_I_TD_MASTER_BANCS_01]
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	DIRECTOR	PETL_24033	All DTM Connection Info: [<NONE>].
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MANAGER	PETL_24004	PETL_24004 Starting pre-session tasks. : (Thu Nov 12 15:12:37 2026)
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	PRE-SESS	DBG_21349	No load constraints for Target [AML_TD_MASTER_BANCS]. It does not reference any primary table from the same active source or transaction generator.
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	PRE-SESS	DBG_21104	Determining truncate order for [AML_TD_MASTER_BANCS] [instance id:1]
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	PRE-SESS	DBG_21531	    Truncate order for [AML_TD_MASTER_BANCS] [instance id:1] determined successfully
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	PRE-SESS	WRT_8365	WRT_8365 Starting truncate for target table [AML_TD_MASTER_BANCS]. : (Thu Nov 12 15:12:37 2026)
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	PRE-SESS	WRT_8022	WRT_8022 Truncate table for table [AML_TD_MASTER_BANCS] succeeded. : (Thu Nov 12 15:12:37 2026)
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MANAGER	PETL_24027	PETL_24027 Pre-session task completed successfully. : (Thu Nov 12 15:12:37 2026)
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	DIRECTOR	PETL_24006	Starting data movement.
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	MAPPING	TM_6660	Total Buffer Pool size is 17667640 bytes and Block size is 390392 bytes.
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	READER_1_1_1	DBG_21438	Reader: Source is [oddbt01sk], user [odaml]
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	READER_1_1_1	BLKR_16051	Source database connection [od01_odamlsk] code page: [MS Windows Traditional Chinese, superset of Big 5]
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	READER_1_1_1	BLKR_16003	Initialization completed successfully.
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	READER_1_2_1	DBG_21438	Reader: Source is [oddbt01sk], user [odaml]
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	READER_1_2_1	BLKR_16051	Source database connection [od01_odamlsk] code page: [MS Windows Traditional Chinese, superset of Big 5]
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	READER_1_2_1	BLKR_16003	Initialization completed successfully.
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	READER_1_3_1	DBG_21438	Reader: Source is [oddbt01sk], user [odaml]
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	READER_1_3_1	BLKR_16051	Source database connection [od01_odamlsk] code page: [MS Windows Traditional Chinese, superset of Big 5]
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	READER_1_3_1	BLKR_16003	Initialization completed successfully.
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	READER_1_4_1	DBG_21438	Reader: Source is [oddbt01sk], user [odaml]
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	READER_1_4_1	BLKR_16051	Source database connection [od01_odamlsk] code page: [MS Windows Traditional Chinese, superset of Big 5]
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	READER_1_4_1	BLKR_16003	Initialization completed successfully.
+INFO	2026/11/12 下午 03:12:37	node01_dwmt	WRITER_1_*_1	WRT_8147	Writer: Target is database [oddbt01sk], user [odaml], bulk mode [OFF]
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	WRITER_1_*_1	WRT_8221	Target database connection [od01_odamlsk] code page: [MS Windows Traditional Chinese, superset of Big 5]
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	WRITER_1_*_1	WRT_8124	Target Table AML_TD_MASTER_BANCS :SQL INSERT statement:
+INSERT INTO AML_TD_MASTER_BANCS(ACCOUNT_NBR,APPLICATION_CODE,CUSTOMER_ID,BRANCH_NBR,BRANCH_NAME,ACCOUNT_TYPE_CODE,ACCOUNT_TYPE_DESC,OFFICER_NBR,OFFICER_NAME,CURRENT_BALANCE,AVAILABLE_BALANCE,OPENING_DATE,CLOSED_DATE,ACCOUNT_STATUS,OVERDRAFT_LIMIT,DATE_OF_LAST_ACTIVITY,TERM_MONTH,MATURITY_DATE,OPENING_METHOD_CODE,OPENING_METHOD_DESC,PRODUCT_CODE,PRODUCT_DESC,ACCOUNT_PURPOSE_CODE,ACCOUNT_PURPOSE_DESC,CORE_SYSTEM,PROCESSING_DATE)  VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	WRITER_1_*_1	WRT_8020	No column marked as primary key for table [AML_TD_MASTER_BANCS]. UPDATEs Not Supported.
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	WRITER_1_*_1	WRT_8270	Target connection group #1 consists of target(s) [AML_TD_MASTER_BANCS]
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	WRITER_1_*_1	WRT_8003	Writer initialization complete.
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	READER_1_1_1	BLKR_16007	Reader run started.
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	READER_1_3_1	BLKR_16007	Reader run started.
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	READER_1_2_1	BLKR_16007	Reader run started.
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	READER_1_4_1	BLKR_16007	Reader run started.
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	WRITER_1_*_1	WRT_8005	Writer run started.
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	WRITER_1_*_1	WRT_8158	
 
 *****START LOAD SESSION*****
 
-Load Start Time: Thu Nov 12 14:28:10 2026
+Load Start Time: Thu Nov 12 15:12:37 2026
 
 Target tables:
 
-     AML_CASA_MASTER_BANCS
+     AML_TD_MASTER_BANCS
 
 
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_1_1	RR_4049	RR_4049 SQL Query issued to database : (Thu Nov 12 14:28:11 2026)
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_6_1	RR_4010	SQ instance [SQ_DEP_PAR_TABLE] SQL Query [SELECT ODDEP.DEP_PAR_TABLE.ACCT_TYP, ODDEP.DEP_PAR_TABLE.INTR_CAT FROM ODDEP.DEP_PAR_TABLE WHERE SLR_ACCT_IND = 'P' and 1=0]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_6_1	RR_4049	RR_4049 SQL Query issued to database : (Thu Nov 12 14:28:11 2026)
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_4_1	BLKR_16007	Reader run started.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_2_1	RR_4010	SQ instance [SQ_CORP] SQL Query [SELECT ODCIF.CORP.CUST_ID, ODCIF.CORP.CUST_NO FROM ODCIF.CORP WHERE DATA_SRC_CD = 'BNS_CORP' AND CUST_NO IS NOT NULL]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_3_1	RR_4010	SQ instance [SQ_DEP_ACCT_MSTR] SQL Query [SELECT ODDEP.DEP_ACCT_MSTR.ACCT_NO, ODDEP.DEP_ACCT_MSTR.BRN_CD, ODDEP.DEP_ACCT_MSTR.CURT_STS, ODDEP.DEP_ACCT_MSTR.ACCT_TYP, ODDEP.DEP_ACCT_MSTR.INT_CAT, ODDEP.DEP_ACCT_MSTR.CUST_NO, ODDEP.DEP_ACCT_MSTR.OPN_DT, ODDEP.DEP_ACCT_MSTR.LST_TXN_DT, ODDEP.DEP_ACCT_MSTR.ACCT_LST_MTN_DT FROM ODDEP.DEP_ACCT_MSTR WHERE SUBSTR(ACCT_TYP,1,1) IN ('1','2') AND 
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	READER_1_4_1	RR_4010	SQ instance [SQ_CTB_BRANCH_CODE] SQL Query [SELECT ODWBS.CTB_BRANCH_CODE.BRANCH_CODE, ODWBS.CTB_BRANCH_CODE.BRANCH_CHT_NAME FROM ODWBS.CTB_BRANCH_CODE]
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	READER_1_2_1	RR_4010	SQ instance [SQ_PSNL] SQL Query [SELECT ODCIF.PSNL.CUST_ID, ODCIF.PSNL.LST_MTN_DT, ODCIF.PSNL.CUST_NO FROM ODCIF.PSNL WHERE DATA_SRC_CD = 'BNS_PSNL' AND CUST_NO IS NOT NULL]
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	READER_1_1_1	RR_4010	SQ instance [SQ_CORP] SQL Query [SELECT ODCIF.CORP.CUST_ID, ODCIF.CORP.CUST_NO FROM ODCIF.CORP WHERE DATA_SRC_CD = 'BNS_CORP' AND CUST_NO IS NOT NULL]
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	READER_1_2_1	RR_4049	RR_4049 SQL Query issued to database : (Thu Nov 12 15:12:38 2026)
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	READER_1_1_1	RR_4049	RR_4049 SQL Query issued to database : (Thu Nov 12 15:12:38 2026)
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	READER_1_4_1	RR_4049	RR_4049 SQL Query issued to database : (Thu Nov 12 15:12:38 2026)
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	READER_1_3_1	RR_4010	SQ instance [SQ_DEP_ACCT_MSTR] SQL Query [SELECT ODDEP.DEP_ACCT_MSTR.ACCT_NO, ODDEP.DEP_ACCT_MSTR.BRN_CD, ODDEP.DEP_ACCT_MSTR.CURT_STS, ODDEP.DEP_ACCT_MSTR.ACCT_TYP, ODDEP.DEP_ACCT_MSTR.INT_CAT, ODDEP.DEP_ACCT_MSTR.CUST_NO, ODDEP.DEP_ACCT_MSTR.OPN_DT, ODDEP.DEP_ACCT_MSTR.LST_TXN_DT, ODDEP.DEP_ACCT_MSTR.ACCT_LST_MTN_DT FROM ODDEP.DEP_ACCT_MSTR WHERE SUBSTR(ACCT_TYP,1,1) ='3' AND
+(TRF_ACCT_NO = '0000000000000000' OR TRF_ACCT_NO = '')
+AND 
 (
-(CURT_STS = '00' AND (OPN_DT >= '19221111' OR ACCT_LST_MTN_DT >= '19221111' OR  LST_TXN_DT = ) ) OR  (CURT_STS = '07' AND CASE WHEN ACCT_LST_MTN_DT >= LST_TXN_DT THEN ACCT_LST_MTN_DT ELSE LST_TXN_DT END =  )
+(CURT_STS = '00' AND (OPN_DT >=  OR ACCT_LST_MTN_DT >=  OR LST_TXN_DT  = 20260102 )) OR  (CURT_STS = '07' AND CASE WHEN ACCT_LST_MTN_DT >= LST_TXN_DT THEN ACCT_LST_MTN_DT ELSE LST_TXN_DT END = 20260102 )
 )]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_2_1	RR_4049	RR_4049 SQL Query issued to database : (Thu Nov 12 14:28:11 2026)
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_3_1	RR_4049	RR_4049 SQL Query issued to database : (Thu Nov 12 14:28:11 2026)
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_7_1	BLKR_16007	Reader run started.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_4_1	RR_4010	SQ instance [SQ_BILL_PAMT_ACCT] SQL Query [SELECT ODDEP.BILL_PAMT_ACCT.ACCT_NO FROM ODDEP.BILL_PAMT_ACCT WHERE CUST_SYS = 'DEP' AND 1=0]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_4_1	RR_4049	RR_4049 SQL Query issued to database : (Thu Nov 12 14:28:11 2026)
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_5_1	BLKR_16007	Reader run started.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_7_1	RR_4010	SQ instance [SQ_CTB_BRANCH_CODE] SQL Query [SELECT odwbs.CTB_BRANCH_CODE.BRANCH_CODE, odwbs.CTB_BRANCH_CODE.BRANCH_CHT_NAME FROM odwbs.CTB_BRANCH_CODE]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_7_1	RR_4049	RR_4049 SQL Query issued to database : (Thu Nov 12 14:28:11 2026)
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_5_1	RR_4010	SQ instance [SQ_DEP_ACCT_OMNI] SQL Query [SELECT ODDEP.DEP_ACCT_OMNI.SAVG_ACCT_NO FROM ODDEP.DEP_ACCT_OMNI WHERE STS ='A' AND TERM_ACCT_NO NOT IN ('0000000000000000','0000000000000001') AND 1=0]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_5_1	RR_4049	RR_4049 SQL Query issued to database : (Thu Nov 12 14:28:11 2026)
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_6_1	BLKR_16019	Read [0] rows, read [0] error rows for source table [DEP_PAR_TABLE] instance name [DEP_PAR_TABLE]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_6_1	BLKR_16008	Reader run completed.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	TRANSF_1_6_1	SORT_40421	SORT_40421 End of input for Transformation [srt_ACCT_TYP1]. : (Thu Nov 12 14:28:11 2026)
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_5_1	BLKR_16019	Read [0] rows, read [0] error rows for source table [DEP_ACCT_OMNI] instance name [DEP_ACCT_OMNI]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	TRANSF_1_5_1	DBG_21216	Finished transformations for Source Qualifier [SQ_DEP_ACCT_OMNI]. Total errors [0] 
-ERROR	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_3_1	RR_4035	SQL Error [
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	READER_1_3_1	RR_4049	RR_4049 SQL Query issued to database : (Thu Nov 12 15:12:38 2026)
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	READER_1_1_1	RR_4050	RR_4050 First row returned from database to reader : (Thu Nov 12 15:12:38 2026)
+ERROR	2026/11/12 下午 03:12:38	node01_dwmt	READER_1_3_1	RR_4035	SQL Error [
 ORA-00936: missing expression
 
 Database driver error...
 Function Name : Execute
-SQL Stmt : SELECT ODDEP.DEP_ACCT_MSTR.ACCT_NO, ODDEP.DEP_ACCT_MSTR.BRN_CD, ODDEP.DEP_ACCT_MSTR.CURT_STS, ODDEP.DEP_ACCT_MSTR.ACCT_TYP, ODDEP.DEP_ACCT_MSTR.INT_CAT, ODDEP.DEP_ACCT_MSTR.CUST_NO, ODDEP.DEP_ACCT_MSTR.OPN_DT, ODDEP.DEP_ACCT_MSTR.LST_TXN_DT, ODDEP.DEP_ACCT_MSTR.ACCT_LST_MTN_DT FROM ODDEP.DEP_ACCT_MSTR WHERE SUBSTR(ACCT_TYP,1,1) IN ('1','2') AND 
+SQL Stmt : SELECT ODDEP.DEP_ACCT_MSTR.ACCT_NO, ODDEP.DEP_ACCT_MSTR.BRN_CD, ODDEP.DEP_ACCT_MSTR.CURT_STS, ODDEP.DEP_ACCT_MSTR.ACCT_TYP, ODDEP.DEP_ACCT_MSTR.INT_CAT, ODDEP.DEP_ACCT_MSTR.CUST_NO, ODDEP.DEP_ACCT_MSTR.OPN_DT, ODDEP.DEP_ACCT_MSTR.LST_TXN_DT, ODDEP.DEP_ACCT_MSTR.ACCT_LST_MTN_DT FROM ODDEP.DEP_ACCT_MSTR WHERE SUBSTR(ACCT_TYP,1,1) ='3' AND
+(TRF_ACCT_NO = '0000000000000000' OR TRF_ACCT_NO = '')
+AND 
 (
-(CURT_STS = '00' AND (OPN_DT >= '19221111' OR ACCT_LST_MTN_DT >= '19221111' OR  LST_TXN_DT = ) ) OR  (CURT_STS = '07' AND CASE WHEN ACCT_LST_MTN_DT >= LST_TXN_DT THEN ACCT_LST_MTN_DT ELSE LST_TXN_DT END =  )
+(CURT_STS = '00' AND (OPN_DT >=  OR ACCT_LST_MTN_DT >=  OR LST_TXN_DT  = 20260102 )) OR  (CURT_STS = '07' AND CASE WHEN ACCT_LST_MTN_DT >= LST_TXN_DT THEN ACCT_LST_MTN_DT ELSE LST_TXN_DT END = 20260102 )
 )
 Oracle Fatal Error
 Database driver error...
 Function Name : Execute
-SQL Stmt : SELECT ODDEP.DEP_ACCT_MSTR.ACCT_NO, ODDEP.DEP_ACCT_MSTR.BRN_CD, ODDEP.DEP_ACCT_MSTR.CURT_STS, ODDEP.DEP_ACCT_MSTR.ACCT_TYP, ODDEP.DEP_ACCT_MSTR.INT_CAT, ODDEP.DEP_ACCT_MSTR.CUST_NO, ODDEP.DEP_ACCT_MSTR.OPN_DT, ODDEP.DEP_ACCT_MSTR.LST_TXN_DT, ODDEP.DEP_ACCT_MSTR.ACCT_LST_MTN_DT FROM ODDEP.DEP_ACCT_MSTR WHERE SUBSTR(ACCT_TYP,1,1) IN ('1','2') AND 
+SQL Stmt : SELECT ODDEP.DEP_ACCT_MSTR.ACCT_NO, ODDEP.DEP_ACCT_MSTR.BRN_CD, ODDEP.DEP_ACCT_MSTR.CURT_STS, ODDEP.DEP_ACCT_MSTR.ACCT_TYP, ODDEP.DEP_ACCT_MSTR.INT_CAT, ODDEP.DEP_ACCT_MSTR.CUST_NO, ODDEP.DEP_ACCT_MSTR.OPN_DT, ODDEP.DEP_ACCT_MSTR.LST_TXN_DT, ODDEP.DEP_ACCT_MSTR.ACCT_LST_MTN_DT FROM ODDEP.DEP_ACCT_MSTR WHERE SUBSTR(ACCT_TYP,1,1) ='3' AND
+(TRF_ACCT_NO = '0000000000000000' OR TRF_ACCT_NO = '')
+AND 
 (
-(CURT_STS = '00' AND (OPN_DT >= '19221111' OR ACCT_LST_MTN_DT >= '19221111' OR  LST_TXN_DT = ) ) OR  (CURT_STS = '07' AND CASE WHEN ACCT_LST_MTN_DT >= LST_TXN_DT THEN ACCT_LST_MTN_DT ELSE LST_TXN_DT END =  )
+(CURT_STS = '00' AND (OPN_DT >=  OR ACCT_LST_MTN_DT >=  OR LST_TXN_DT  = 20260102 )) OR  (CURT_STS = '07' AND CASE WHEN ACCT_LST_MTN_DT >= LST_TXN_DT THEN ACCT_LST_MTN_DT ELSE LST_TXN_DT END = 20260102 )
 )
 Oracle Fatal Error].
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_5_1	BLKR_16008	Reader run completed.
-ERROR	2026/11/12 下午 02:28:11	node01_dwmt	READER_1_3_1	BLKR_16004	ERROR: Prepare failed.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	WRITER_1_*_1	WRT_8333	Rolling back all the targets due to fatal session error.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	WRITER_1_*_1	WRT_8325	Final rollback executed for the target [AML_CASA_MASTER_BANCS] at end of load
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	TRANSF_1_6_1	SORT_40422	SORT_40422 End of output from Sorter Transformation [srt_ACCT_TYP1]. Processed 0 rows (0 input bytes; 0 temp I/O bytes). : (Thu Nov 12 14:28:11 2026)
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	WRITER_1_*_1	WRT_8035	Load complete time: Thu Nov 12 14:28:10 2026
+ERROR	2026/11/12 下午 03:12:38	node01_dwmt	READER_1_3_1	BLKR_16004	ERROR: Prepare failed.
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	TRANSF_1_5_1	SORT_40420	SORT_40420 Start of input for Transformation [srt_CUST_NO]. : (Thu Nov 12 15:12:38 2026)
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	WRITER_1_*_1	WRT_8333	Rolling back all the targets due to fatal session error.
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	WRITER_1_*_1	WRT_8325	Final rollback executed for the target [AML_TD_MASTER_BANCS] at end of load
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	WRITER_1_*_1	WRT_8035	Load complete time: Thu Nov 12 15:12:37 2026
 
 LOAD SUMMARY
 ============
 
-WRT_8036 Target: AML_CASA_MASTER_BANCS (Instance Name: [AML_CASA_MASTER_BANCS])
+WRT_8036 Target: AML_TD_MASTER_BANCS (Instance Name: [AML_TD_MASTER_BANCS])
 WRT_8044 No data loaded for this target
 
 
 
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	WRITER_1_*_1	WRT_8043	*****END LOAD SESSION*****
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	TRANSF_1_6_1	SORT_40423	SORT_40423 End of sort for Sorter Transformation [srt_ACCT_TYP1]. : (Thu Nov 12 14:28:11 2026)
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	TRANSF_1_6_1	DBG_21216	Finished transformations for Source Qualifier [SQ_DEP_PAR_TABLE]. Total errors [0] 
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	MANAGER	PETL_24031	
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	WRITER_1_*_1	WRT_8043	*****END LOAD SESSION*****
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	MANAGER	PETL_24031	
 ***** RUN INFO FOR TGT LOAD ORDER GROUP [1], CONCURRENT SET [1] *****
-Thread [READER_1_1_1] created for [the read stage] of partition point [SQ_PSNL] has completed. The total run time was insufficient for any meaningful statistics.
-Thread [TRANSF_1_1_1] created for [the transformation stage] of partition point [SQ_PSNL] has completed. The total run time was insufficient for any meaningful statistics.
-Thread [READER_1_2_1] created for [the read stage] of partition point [SQ_CORP] has completed. The total run time was insufficient for any meaningful statistics.
-Thread [TRANSF_1_2_1] created for [the transformation stage] of partition point [SQ_CORP] has completed. The total run time was insufficient for any meaningful statistics.
+Thread [READER_1_1_1] created for [the read stage] of partition point [SQ_CORP] has completed. The total run time was insufficient for any meaningful statistics.
+Thread [TRANSF_1_1_1] created for [the transformation stage] of partition point [SQ_CORP] has completed. The total run time was insufficient for any meaningful statistics.
+Thread [READER_1_2_1] created for [the read stage] of partition point [SQ_PSNL] has completed. The total run time was insufficient for any meaningful statistics.
+Thread [TRANSF_1_2_1] created for [the transformation stage] of partition point [SQ_PSNL] has completed. The total run time was insufficient for any meaningful statistics.
 Thread [READER_1_3_1] created for [the read stage] of partition point [SQ_DEP_ACCT_MSTR] has completed. The total run time was insufficient for any meaningful statistics.
 Thread [TRANSF_1_3_1] created for [the transformation stage] of partition point [SQ_DEP_ACCT_MSTR] has completed. The total run time was insufficient for any meaningful statistics.
-Thread [READER_1_4_1] created for [the read stage] of partition point [SQ_BILL_PAMT_ACCT] has completed. The total run time was insufficient for any meaningful statistics.
-Thread [TRANSF_1_4_1] created for [the transformation stage] of partition point [SQ_BILL_PAMT_ACCT] has completed. The total run time was insufficient for any meaningful statistics.
-Thread [READER_1_5_1] created for [the read stage] of partition point [SQ_DEP_ACCT_OMNI] has completed. The total run time was insufficient for any meaningful statistics.
-Thread [TRANSF_1_5_1] created for [the transformation stage] of partition point [SQ_DEP_ACCT_OMNI] has completed. The total run time was insufficient for any meaningful statistics.
-Thread [READER_1_6_1] created for [the read stage] of partition point [SQ_DEP_PAR_TABLE] has completed. The total run time was insufficient for any meaningful statistics.
-Thread [TRANSF_1_6_1] created for [the transformation stage] of partition point [SQ_DEP_PAR_TABLE] has completed. The total run time was insufficient for any meaningful statistics.
-Thread [READER_1_7_1] created for [the read stage] of partition point [SQ_CTB_BRANCH_CODE] has completed. The total run time was insufficient for any meaningful statistics.
-Thread [TRANSF_1_7_1] created for [the transformation stage] of partition point [SQ_CTB_BRANCH_CODE] has completed. The total run time was insufficient for any meaningful statistics.
-Thread [TRANSF_1_8_1] created for [the transformation stage] of partition point [agg_Get_LST_MTN_DT] has completed. The total run time was insufficient for any meaningful statistics.
-Thread [TRANSF_1_9_1] created for [the transformation stage] of partition point [Union] has completed. The total run time was insufficient for any meaningful statistics.
-Thread [TRANSF_1_11_1] created for [the transformation stage] of partition point [Union1] has completed. The total run time was insufficient for any meaningful statistics.
-Thread [WRITER_1_*_1] created for [the write stage] of partition point [AML_CASA_MASTER_BANCS] has completed. The total run time was insufficient for any meaningful statistics.
+Thread [READER_1_4_1] created for [the read stage] of partition point [SQ_CTB_BRANCH_CODE] has completed. The total run time was insufficient for any meaningful statistics.
+Thread [TRANSF_1_4_1] created for [the transformation stage] of partition point [SQ_CTB_BRANCH_CODE] has completed. The total run time was insufficient for any meaningful statistics.
+Thread [TRANSF_1_5_1] created for [the transformation stage] of partition point [Union] has completed. The total run time was insufficient for any meaningful statistics.
+Thread [TRANSF_1_6_1] created for [the transformation stage] of partition point [agg_Get_LST_MTN_DT] has completed. The total run time was insufficient for any meaningful statistics.
+Thread [WRITER_1_*_1] created for [the write stage] of partition point [AML_TD_MASTER_BANCS] has completed. The total run time was insufficient for any meaningful statistics.
 
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	MAPPING	CMN_1793	The index cache size that would hold [0] rows in the lookup table for [LKP_BRANCH_MAPPING], in memory, is [0] bytes
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	MAPPING	CMN_1792	The data cache size that would hold [0] rows in the lookup table for [LKP_BRANCH_MAPPING], in memory, is [0] bytes
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	MANAGER	PETL_24005	PETL_24005 Starting post-session tasks. : (Thu Nov 12 14:28:11 2026)
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	MANAGER	PETL_24029	PETL_24029 Post-session task completed successfully. : (Thu Nov 12 14:28:11 2026)
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	MAPPING	TE_7216	Deleting cache files [PMLKUP143819_40_0_849800H64] for transformation [LKP_BRANCH_MAPPING].
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	MAPPING	TM_6018	The session completed with [0] row transformation errors. 
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	MANAGER	TE_7216	Deleting cache files [/appl/infouser/Cache/ODAML/PMJNR143819_29_0_849800.dat] for transformation [JNRTRANS].
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	MANAGER	TE_7216	Deleting cache files [/appl/infouser/Cache/ODAML/PMJNR143819_29_0_849800.idx] for transformation [JNRTRANS].
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	MANAGER	PETL_24002	Parallel Pipeline Engine finished.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	DIRECTOR	PETL_24013	Session run completed with failure.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	DIRECTOR	TM_6022	
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	MANAGER	PETL_24005	PETL_24005 Starting post-session tasks. : (Thu Nov 12 15:12:38 2026)
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	MANAGER	PETL_24029	PETL_24029 Post-session task completed successfully. : (Thu Nov 12 15:12:38 2026)
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	MAPPING	TM_6018	The session completed with [0] row transformation errors. 
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	MANAGER	PETL_24002	Parallel Pipeline Engine finished.
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	DIRECTOR	PETL_24013	Session run completed with failure.
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	DIRECTOR	TM_6022	
 
 SESSION LOAD SUMMARY
 ================================================
 
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	DIRECTOR	TM_6252	Source Load Summary.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	DIRECTOR	CMN_1740	Table: [SQ_PSNL] (Instance Name: [SQ_PSNL])
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	DIRECTOR	TM_6252	Source Load Summary.
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	DIRECTOR	CMN_1740	Table: [SQ_CORP] (Instance Name: [SQ_CORP])
+	 Output Rows [7360], Affected Rows [7360], Applied Rows [7360], Rejected Rows [0]
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	DIRECTOR	CMN_1740	Table: [SQ_PSNL] (Instance Name: [SQ_PSNL])
 	 Output Rows [0], Affected Rows [0], Applied Rows [0], Rejected Rows [0]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	DIRECTOR	CMN_1740	Table: [SQ_CORP] (Instance Name: [SQ_CORP])
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	DIRECTOR	CMN_1740	Table: [SQ_DEP_ACCT_MSTR] (Instance Name: [SQ_DEP_ACCT_MSTR])
 	 Output Rows [0], Affected Rows [0], Applied Rows [0], Rejected Rows [0]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	DIRECTOR	CMN_1740	Table: [SQ_DEP_ACCT_MSTR] (Instance Name: [SQ_DEP_ACCT_MSTR])
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	DIRECTOR	CMN_1740	Table: [SQ_CTB_BRANCH_CODE] (Instance Name: [SQ_CTB_BRANCH_CODE])
 	 Output Rows [0], Affected Rows [0], Applied Rows [0], Rejected Rows [0]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	DIRECTOR	CMN_1740	Table: [SQ_BILL_PAMT_ACCT] (Instance Name: [SQ_BILL_PAMT_ACCT])
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	DIRECTOR	TM_6253	Target Load Summary.
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	DIRECTOR	CMN_1740	Table: [AML_TD_MASTER_BANCS] (Instance Name: [AML_TD_MASTER_BANCS])
 	 Output Rows [0], Affected Rows [0], Applied Rows [0], Rejected Rows [0]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	DIRECTOR	CMN_1740	Table: [SQ_DEP_ACCT_OMNI] (Instance Name: [SQ_DEP_ACCT_OMNI])
-	 Output Rows [0], Affected Rows [0], Applied Rows [0], Rejected Rows [0]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	DIRECTOR	CMN_1740	Table: [SQ_DEP_PAR_TABLE] (Instance Name: [SQ_DEP_PAR_TABLE])
-	 Output Rows [0], Affected Rows [0], Applied Rows [0], Rejected Rows [0]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	DIRECTOR	CMN_1740	Table: [SQ_CTB_BRANCH_CODE] (Instance Name: [SQ_CTB_BRANCH_CODE])
-	 Output Rows [0], Affected Rows [0], Applied Rows [0], Rejected Rows [0]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	DIRECTOR	TM_6253	Target Load Summary.
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	DIRECTOR	CMN_1740	Table: [AML_CASA_MASTER_BANCS] (Instance Name: [AML_CASA_MASTER_BANCS])
-	 Output Rows [0], Affected Rows [0], Applied Rows [0], Rejected Rows [0]
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	DIRECTOR	TM_6023	
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	DIRECTOR	TM_6023	
 ===================================================
 
-INFO	2026/11/12 下午 02:28:11	node01_dwmt	DIRECTOR	TM_6020	Session [s_m_I_CASA_MASTER_BANCS_01] completed at [Thu Nov 12 14:28:11 2026].
+INFO	2026/11/12 下午 03:12:38	node01_dwmt	DIRECTOR	TM_6020	Session [s_m_I_TD_MASTER_BANCS_01] completed at [Thu Nov 12 15:12:38 2026].
 
 
 
