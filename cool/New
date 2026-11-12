@@ -1,98 +1,39 @@
-要驗測這支預存程序（Stored Procedure）是否正確運作，確保「活人歸入 GroupID 5」、「死人歸入 GroupID 7」，且 Reference（日本金融制裁名單）與欄位對應 都正確無誤，你可以透過以下幾個步驟的 驗證 SQL 查詢 來進行檢測。
-建議你在測試環境（Test Environment）中，將這支 SP 拆解或分段執行（或在建立暫存表後先不要 DROP），並執行下列對應的檢測腳步。
-第一步：驗證來源資料與「日本金融」關聯是否正確
-首先確認 BSADB.dbo.DJ_SanctionListReference 中確實包含 'Japanese Finance'，並且對應到的 Entity 數量有多少：
--- 檢查包含 'Japanese Finance' 的總 Entity 數量及其生死狀態分佈
 SELECT 
-    ISNULL(E.Deceased, 0) AS DeceasedStatus, -- 0 或 NULL 代表活人，1 代表死人
-    COUNT(DISTINCT E.EntityId) AS EntityCount
-FROM BSADB.dbo.DJ_SanctionListReference B
-JOIN BSADB.dbo.DJ_Entity E ON B.EntityId = E.EntityId
-WHERE B.SanctionListReference LIKE '%Japanese Finance%'
-GROUP BY E.Deceased;
+    O.spec_name,
+    O.GROUPID,
+    A.EntityId,
+    A.FullName,
+    A.Deceased,
+    CASE 
+        WHEN A.EntityId IS NULL THEN '未在 DJ_Entity 找到對應'
+        WHEN A.Deceased = 0 THEN '存活 (Deceased = 0)'
+        ELSE '未知/其他'
+    END AS Status_Reason
+FROM BSADBJP..OFAC_SPEC O
+LEFT JOIN BSADBJP..BlackListData BL ON O.spec_name = BL.sdn_name
+LEFT JOIN BSADB.dbo.DJ_Entity A ON A.EntityId = O.remark
+WHERE O.GROUPID = '7'
+  AND (A.Deceased IS NULL OR A.Deceased <> 1);
 
- * 預期結果：你會看到兩行（或一行，取決於有沒有死人），分別代表活人（Deceased = 0/NULL）與死人（Deceased = 1）的數量。
-第二步：驗證暫存主檔（#tempDJBlacklistJP）的生死分類邏輯是否正確
-這是最關鍵的一步：檢查暫存表裏面的 GroupID 是否真的完美對應了 BSADB.dbo.DJ_Entity 的 Deceased 狀態。
-執行完 #tempDJBlacklistJP 的建立與 INSERT 後，執行以下檢測語法：
--- 【核心檢測】檢查是否有「分錯群組」的情況
--- 期望結果：此查詢應該回傳 0 筆資料！若有資料代表邏輯出錯。
-SELECT 
-    T.EntNum,
-    T.SdnName,
-    T.GroupID,
-    E.Deceased
-FROM #tempDJBlacklistJP T
-JOIN BSADB.dbo.DJ_Entity E ON T.EntNum = E.EntityId
-WHERE (T.GroupID = 5 AND ISNULL(E.Deceased, 0) = 1) -- 標記為活人(5)但實際上是死人(1)
-   OR (T.GroupID = 7 AND ISNULL(E.Deceased, 0) <> 1); -- 標記為死人(7)但實際上是活人(0/NULL)
 
-同時，你可以檢查第二段「補抓死亡名單」是否有確實運作：
--- 檢查被補抓進去的死人名單數量
-SELECT COUNT(*) AS AddedDeceasedCount
-FROM #tempDJBlacklistJP
-WHERE GroupID = 7;
 
-第三步：驗證明細資料完整性（地址、證件、生日、國籍）
-檢查 #tempDJBlacklistDetailsJP 是否有成功抓到關聯資料，避免因為 LEFT JOIN 導致全部變 NULL，或是因 ROW_NUMBER() = 1 抓錯：
--- 檢查是否有資料遺漏或異常
-SELECT 
-    GroupID,
-    COUNT(*) AS TotalRecords,
-    SUM(CASE WHEN Address IS NOT NULL THEN 1 ELSE 0 END) AS HasAddress,
-    SUM(CASE WHEN Country IS NOT NULL THEN 1 ELSE 0 END) AS HasCountry,
-    SUM(CASE WHEN DOB IS NOT NULL THEN 1 ELSE 0 END) AS HasDOB,
-    SUM(CASE WHEN IdentNumber IS NOT NULL THEN 1 ELSE 0 END) AS HasIdent
-FROM #tempDJBlacklistDetailsJP
-GROUP BY GroupID;
+--  SELECT * FROM BSADBJP..OFAC_SPEC WHERE GROUPID = '7' AND spec_name = 'George, Martin'
+--  SELECT * FROM BSADB.dbo.DJ_Entity WHERE EntityId = '67619'
+--10183 = 'George, Martin'
 
- * 預期結果：確認各大欄位（地址、國籍、生日、身分證號）都有一定的對應覆蓋率，且 GroupID 5 和 7 的分組數量符合預期。
-第四步：驗證目標表（BSADBJP..OFAC_SPEC）同步後的最終結果
-當整支 SP 執行完畢後，你需要檢查目標表 BSADBJP..OFAC_SPEC 中的資料狀態是否符合預期（新增、更新、軟刪除是否正常）：
-1. 檢查 Group 5 與 Group 7 的分佈與狀態（DInd）
--- 檢查目標表中 Group 5(活人) 與 Group 7(死人) 的啟用/停用狀態
--- DInd = 'N' 代表有效/活著，DInd = 'Y' 代表已刪除/軟刪除
-SELECT 
-    GROUPID,
-    DInd,
-    COUNT(*) AS RecordCount
-FROM BSADBJP..OFAC_SPEC
-WHERE GROUPID IN (5, 7)
-GROUP BY GROUPID, DInd;
+  
+SELECT DISTINCT
+    A.EntityId,
+    A.FullName,
+    BL.sdn_name,
+    O.GROUPID,
+    O.spec_name,
+    O.DInd
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B    ON A.EntityId = B.EntityId
+JOIN BSADBJP..BlackListData BL    ON BL.sdn_name = A.FullName
+LEFT JOIN BSADBJP..OFAC_SPEC O    ON O.remark = A.EntityId
+WHERE A.Deceased = 0 AND B.SanctionListReference LIKE '%Japanese Finance'
 
-2. 抽樣檢查死人名單（Group 7）在目標表中的特徵
--- 檢查 Group 7 的資料來源與標記是否正確寫入
-SELECT TOP 10 
-    ent_num,
-    spec_name,
-    GROUPID,
-    SOURCE,
-    DInd,
-    updated_date
-FROM BSADBJP..OFAC_SPEC
-WHERE GROUPID = 7;
-
- * 預期檢查點：
-   * GROUPID 必須全部是 7。
-   * SOURCE 應該包含 'MOF Sanction List (Decease) '（依據你的 INSERT 語法）。
-   * 這些名稱對應回源頭，確實應該是日本金融制裁名單中的已故者。
-3. 抽樣檢查活人名單（Group 5）
--- 檢查 Group 5 的資料
-SELECT TOP 10 
-    ent_num,
-    spec_name,
-    GROUPID,
-    SOURCE,
-    DInd,
-    updated_date
-FROM BSADBJP..OFAC_SPEC
-WHERE GROUPID = 5;
-
- * 預期檢查點：
-   * GROUPID 必須全部是 5。
-   * 這些名稱對應回源頭，是日本金融制裁名單中的在世者。
-💡 總結測試清單（Test Checklist）
-若要百分之百放心，你可以核對以下三項指標：
- * 交集檢查：目標表中 GROUPID = 7 的清單，去對照源頭 BSADB.dbo.DJ_Entity，確認其 Deceased = 1。
- * 互斥檢查：目標表中 GROUPID = 5 的清單，其 Deceased 絕對不能為 1。
- * 異動檢查（MERGE 驗證）：當來源名單有增減時，重新執行一次 SP，觀察 DInd 欄位是否會自動把「已經不在名單上的人」轉為 'Y'（軟刪除），並把新進或更新的人轉回 'N' 或進行更新。
+我現在是這樣
+你幫我改一下 因為好ˋ像是錯的
