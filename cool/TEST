@@ -1,28 +1,49 @@
-SELECT A.EntityId, A.FullName, A.Deceased
-FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
-WHERE B.SanctionListReference LIKE '%Japanese Finance%'
-  AND NOT EXISTS (
-      SELECT 1 FROM BSADBJP..OFAC_SPEC O 
-      WHERE O.remark = CAST(A.EntityId AS VARCHAR(100)) 
-        AND O.GROUPID IN (5, 7)
-  );
+對，你抓得很準！因為 DJ_List_Data_A 裡面可能沒有這筆資料（或者它的 BitCode 不符合），如果你希望這種「有掛 Japanese Finance 卻沒有名稱資料」的 Entity 也能被補進去，或是你想確保它們不會被漏掉，我們確實可以稍微調整一下同步邏輯。
+同時，我幫你把這支 SP 用到的所有 Table（資料表）角色與用途 整理成表格，並提供一組實用的 日常查詢與檢測工具箱（Query Toolkit），方便你隨時驗證死人、活人與名單對應。
+一、 關於這支 SP 的資料表用途總覽
+| 資料表名稱 | 用途說明 | 在 SP 中的角色 |
+|---|---|---|
+| BSADB.dbo.DJ_Entity | Dow Jones 實體主檔（存放基礎屬性，如是否死亡 Deceased、更新時間等）。 | 用來判斷該 Entity 是活人還是死人 (Deceased = 1)。 |
+| BSADB.dbo.DJ_SanctionListReference | 制裁名單關聯對照表。 | 用來篩選出屬於 %Japanese Finance% 的 Entity。 |
+| BSADB.dbo.DJ_List_Data_A | 實體名稱對照表（存放 Sanction 名稱與屬性 NamePropertyBitCode）。 | 撈取主名稱（SdnName）的主要來源。 |
+| BSADB.dbo.DJ_Address | 地址關聯表。 | 撈取實體的地址與城市資訊。 |
+| BSADB.dbo.DJ_IdentificationTypeInfo | 身分證件資訊表。 | 撈取護照或身分證號碼（IdentNumber）。 |
+| BSADB.dbo.DJ_DateTypeInfo | 日期資訊表（如出生日期）。 | 撈取實體的生日（DOB）。 |
+| COUNTRY_DIM | 國家代碼對照維度表。 | 將國家名稱轉換為 ISO 2 碼（如 JP）。 |
+| BSADBJP..OFAC_SPEC | 目標表（你們系統實際使用的制裁清單主檔）。 | 最終同步目的地（GROUPID = 5 是活人，GROUPID = 7 是死人）。 |
+二、 實用查詢工具箱（Query Toolkit）
+你可以把這幾段常用的檢測 SQL 存起來，日常維護或對帳時非常實用：
+1. 撈出所有「死人名單」（Group 7）
+SELECT ent_num, spec_name, updated_date, ADDRESS, COUNTRY, DOB
+FROM BSADBJP..OFAC_SPEC
+WHERE GROUPID = 7 AND DInd = 'N'; -- DInd = 'N' 代表目前有效
 
+2. 撈出所有「活人名單」（Group 5）
+SELECT ent_num, spec_name, updated_date, ADDRESS, COUNTRY, DOB
+FROM BSADBJP..OFAC_SPEC
+WHERE GROUPID = 5 AND DInd = 'N';
 
-  SELECT O.ent_num, O.spec_name, O.GROUPID
-FROM BSADBJP..OFAC_SPEC O
-WHERE O.GROUPID IN (5, 7)
-  AND NOT EXISTS (
-      SELECT 1 FROM BSADB.dbo.DJ_SanctionListReference B
-      WHERE B.EntityId = TRY_CAST(O.remark AS INT)
-        AND B.SanctionListReference LIKE '%Japanese Finance%'
-  );
+3. 檢查某個特定的 EntityId 究竟是死是活、屬於哪個群組
+(把 @EntityId 換成你想查的編號，例如 683933)
+DECLARE @EntityId INT = 683933;
 
+SELECT 
+    E.EntityId,
+    E.FullName,
+    E.Deceased,
+    O.GROUPID AS OFAC_GroupID,
+    O.spec_name AS OFAC_Name,
+    O.DInd AS Is_Deleted
+FROM BSADB.dbo.DJ_Entity E
+LEFT JOIN BSADBJP..OFAC_SPEC O ON O.remark = CAST(E.EntityId AS VARCHAR(100))
+WHERE E.EntityId = @EntityId;
 
-所以我這裡要改吧?
+4. 快速對帳：統計目標表中各 Group 的總筆數與狀態
+SELECT 
+    GROUPID,
+    DInd, -- 'N' = 正常/有效, 'Y' = 已軟刪除
+    COUNT(*) AS TotalCount
+FROM BSADBJP..OFAC_SPEC
+WHERE GROUPID IN (5, 7)
+GROUP BY GROUPID, DInd;
 
-然後
-能幫我整理一下每個table 幹嘛的
-然後給我一些查詢工具
-例如撈死人的 SELECT 
-等等
