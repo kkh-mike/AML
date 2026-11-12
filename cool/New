@@ -1,427 +1,212 @@
 
-#requires -Version 5.1
+    ============================================================
+    第二段：日本金融制裁名單同步（Japanese Finance）
+    活人：BSADBJP..OFAC_SPEC（GROUPID = 5）
+    死人：BSADBJP..OFAC_SPEC（GROUPID = 7）
+    ============================================================
+*/
 
-# ============================================================
-# Send-SwiftFromTxt.ps1
-# TXT 多筆 SWIFT 電文 -> SOAP API
-#
-# TXT 格式：一行一筆 SWIFT 電文
-# 功能：逐筆送出、記錄耗時、錯誤處理、輸出 CSV
-# ============================================================
+IF OBJECT_ID('tempdb..#tempDJBlacklistJP') IS NOT NULL DROP TABLE #tempDJBlacklistJP;
+IF OBJECT_ID('tempdb..#tempDJBlacklistDetailsJP') IS NOT NULL DROP TABLE #tempDJBlacklistDetailsJP;
 
-$ErrorActionPreference = 'Stop'
+CREATE TABLE #tempDJBlacklistJP (
+    EntNum INT NOT NULL,
+    SdnName NVARCHAR(350) NOT NULL,
+    UpdatedDate VARCHAR(8) NOT NULL,
+    GroupID INT NOT NULL
+);
 
-# ============================================================
-# 1. 基本設定
-# ============================================================
+CREATE TABLE #tempDJBlacklistDetailsJP (
+    Num INT,
+    EntNum INT NOT NULL,
+    SdnName NVARCHAR(350) NOT NULL,
+    UpdatedDate VARCHAR(8) NOT NULL,
+    Address NVARCHAR(400),
+    City NVARCHAR(200),
+    Country NVARCHAR(100), 
+    IdentType VARCHAR(2),
+    IdentNumber NVARCHAR(44),
+    DOB VARCHAR(8),
+    GroupID INT NOT NULL
+);
 
-$url = 'http://localhost:8082/SwiftProcessor.svc?wsdl'
 
-# TXT 電文檔案路徑：請依實際位置修改
-$InputFile = 'C:\SWIFT\swift_messages.txt'
+/*
+從 DJ_List_Data_A 撈取名稱資料，限 Japanese Finance 制裁名單。
+NamePropertyBitCode & 1 > 0 表示此筆是名稱資料。
+若來源 Entity 標記為死亡，歸入 GROUPID 7；否則歸入 GROUPID 5。
+*/
+INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate, GroupID)
+SELECT
+    A.EntNum, A.SdnName, MAX(A.UpdatedDate) AS UpdatedDate,
+    CASE WHEN EXISTS (
+        SELECT 1 FROM BSADB.dbo.DJ_Entity E
+        WHERE E.EntityId = A.EntNum AND E.Deceased = 1
+    ) THEN 7 ELSE 5 END AS GroupID
+FROM BSADB.dbo.DJ_List_Data_A A
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntNum = B.EntityId
+WHERE A.NamePropertyBitCode & 1 > 0
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+GROUP BY A.EntNum, A.SdnName;
 
-# 批次結果 CSV 路徑
-$OutputCsv = 'C:\SWIFT\swift_results.csv'
+/*
+    ============================================================
+    補抓死亡名單資料
+    有些死亡 Entity 可能沒有出現在上方的名稱資料中，
+    因此從 DJ_Entity 再掃描一次。
 
-# SOAP 固定參數
-$ActionCode     = 'SCAN_SWIFT'
-$BankNo         = 'TW'
-$BranchNo       = '0001'
-$Channel        = 'SWIFT'
-$MessageTypeCode = 'MT'
-$SourceID       = 'TSID'
+    -- 將前一段尚未抓到的死亡 Entity 補進暫存主檔，GroupID 設為 7。
+    -- NOT EXISTS 避免同一個 Entity 重複加入。
+    ============================================================
+*/
+INSERT INTO #tempDJBlacklistJP (EntNum, SdnName, UpdatedDate, GroupID)
+SELECT A.EntityId, A.FullName, MAX(CONVERT(VARCHAR, A.UpdatedDate_UTC, 112)) AS UpdatedDate, 7 AS GroupID
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+WHERE A.Deceased = 1
+  AND B.SanctionListReference LIKE '%Japanese Finance%'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM #tempDJBlacklistJP X
+      WHERE X.EntNum = A.EntityId
+  )
+GROUP BY A.EntityId, A.FullName;
 
-# HTTP Timeout（毫秒）
-$TimeoutMs = 60000
 
-# ============================================================
-# 2. SOAP Request 函式
-# ============================================================
-
-function Execute-SOAPRequest {
-    param (
-        [Parameter(Mandatory = $true)]
-        [xml] $SOAPRequest,
-
-        [Parameter(Mandatory = $true)]
-        [string] $URL
-    )
-
-    $soapWebRequest = [System.Net.WebRequest]::Create($URL)
-
-    $soapWebRequest.Headers.Add('SOAPAction', 'SubmitRequest')
-    $soapWebRequest.ContentType = 'text/xml; charset=utf-8'
-    $soapWebRequest.Accept = 'text/xml'
-    $soapWebRequest.Method = 'POST'
-    $soapWebRequest.Timeout = $TimeoutMs
-    $soapWebRequest.ReadWriteTimeout = $TimeoutMs
-
-    # 送出 Request
-    $requestStream = $soapWebRequest.GetRequestStream()
-
-    try {
-        # 使用 UTF-8 編碼送出 XML
-        $settings = New-Object System.Xml.XmlWriterSettings
-        $settings.Encoding = New-Object System.Text.UTF8Encoding($false)
-        $settings.Indent = $false
-        $settings.CloseOutput = $false
-
-        $writer = [System.Xml.XmlWriter]::Create(
-            $requestStream,
-            $settings
-        )
-
-        try {
-            $SOAPRequest.Save($writer)
-            $writer.Flush()
-        }
-        finally {
-            $writer.Close()
-        }
-    }
-    finally {
-        $requestStream.Close()
-    }
-
-    # 接收 Response
-    $resp = $soapWebRequest.GetResponse()
-
-    try {
-        $responseStream = $resp.GetResponseStream()
-
-        try {
-            $reader = New-Object System.IO.StreamReader(
-                $responseStream,
-                [System.Text.Encoding]::UTF8
-            )
-
-            try {
-                return $reader.ReadToEnd()
-            }
-            finally {
-                $reader.Close()
-            }
-        }
-        finally {
-            $responseStream.Close()
-        }
-    }
-    finally {
-        $resp.Close()
-    }
-}
-
-# ============================================================
-# 3. 建立 SOAP XML
-# ============================================================
-
-function New-SOAPRequest {
-    param (
-        [Parameter(Mandatory = $true)]
-        [string] $SwiftMessage,
-
-        [Parameter(Mandatory = $true)]
-        [string] $ReferenceNumber
-    )
-
-    $soapNs = 'http://schemas.xmlsoap.org/soap/envelope/'
-    $serviceNs = 'http://patriotofficer.net/SwiftService'
-
-    $xml = New-Object System.Xml.XmlDocument
-    $xml.PreserveWhitespace = $true
-
-    # XML Declaration
-    $declaration = $xml.CreateXmlDeclaration(
-        '1.0',
-        'utf-8',
-        $null
-    )
-    [void] $xml.AppendChild($declaration)
-
-    # Envelope
-    $envelope = $xml.CreateElement(
-        'soap',
-        'Envelope',
-        $soapNs
-    )
-    [void] $xml.AppendChild($envelope)
-
-    # Body
-    $body = $xml.CreateElement(
-        'soap',
-        'Body',
-        $soapNs
-    )
-    [void] $envelope.AppendChild($body)
-
-    # SubmitRequest
-    $submit = $xml.CreateElement(
-        '',
-        'SubmitRequest',
-        $serviceNs
-    )
-    [void] $body.AppendChild($submit)
-
-    # Params
-    $params = $xml.CreateElement(
-        '',
-        'Params',
-        $serviceNs
-    )
-    [void] $submit.AppendChild($params)
-
-    # 固定欄位
-    $fields = [ordered]@{
-        ActionCode      = $ActionCode
-        BankNo          = $BankNo
-        BranchNo        = $BranchNo
-        Channel         = $Channel
-    }
-
-    foreach ($field in $fields.GetEnumerator()) {
-        $element = $xml.CreateElement(
-            '',
-            $field.Key,
-            $serviceNs
-        )
-        $element.InnerText = [string]$field.Value
-        [void] $params.AppendChild($element)
-    }
-
-    # Message 使用 CDATA，保留 SWIFT 電文內容
-    $messageElement = $xml.CreateElement(
-        '',
-        'Message',
-        $serviceNs
-    )
-
-    # CDATA 不能直接包含 ]]>；遇到時改成一般文字節點，
-    # 由 XML 自動處理特殊字元
-    if ($SwiftMessage.Contains(']]>')) {
-        $messageElement.InnerText = $SwiftMessage
-    }
-    else {
-        $cdata = $xml.CreateCDataSection($SwiftMessage)
-        [void] $messageElement.AppendChild($cdata)
-    }
-
-    [void] $params.AppendChild($messageElement)
-
-    # 剩餘欄位
-    $remainingFields = [ordered]@{
-        MessageTypeCode = $MessageTypeCode
-        ReferenceNumber = $ReferenceNumber
-        SourceID        = $SourceID
-    }
-
-    foreach ($field in $remainingFields.GetEnumerator()) {
-        $element = $xml.CreateElement(
-            '',
-            $field.Key,
-            $serviceNs
-        )
-        $element.InnerText = [string]$field.Value
-        [void] $params.AppendChild($element)
-    }
-
-    return $xml
-}
-
-# ============================================================
-# 4. 檢查輸入檔案
-# ============================================================
-
-if (-not (Test-Path -LiteralPath $InputFile -PathType Leaf)) {
-    throw "找不到 TXT 檔案：$InputFile"
-}
-
-$outputDirectory = Split-Path -Parent $OutputCsv
-
-if ($outputDirectory -and
-    -not (Test-Path -LiteralPath $outputDirectory)) {
-
-    New-Item -ItemType Directory -Path $outputDirectory -Force |
-        Out-Null
-}
-
-# UTF-8 讀取，每一行視為一筆電文
-$allLines = @(
-    Get-Content -LiteralPath $InputFile -Encoding UTF8
+/*
+    ============================================================
+    整理地址、身分證明、出生日期，以及目標表既有資料
+    ============================================================
+*/
+;WITH TempAddress AS (
+    SELECT A.EntityId, A.Address, A.City, A.AddressCountry,
+           ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
+    FROM BSADB.dbo.DJ_Address A WITH (NOLOCK)
+    WHERE A.Deleted = 0
+      AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE A.EntityId = X.EntNum)
+),
+TempIdent AS (
+    SELECT A.EntityId,
+           CASE WHEN ISNULL(A.IdentificationType, '') = '' THEN NULL ELSE @OtherIdentMthCode END AS IdentificationType,
+           A.IdentificationNumber,
+           ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
+    FROM BSADB.dbo.DJ_IdentificationTypeInfo A WITH (NOLOCK)
+    WHERE A.Deleted = 0
+      AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE X.EntNum = A.EntityId)
+),
+TempDOB AS (
+    SELECT A.EntityId, A.InfoDay, A.InfoMonth, A.InfoYear,
+           ROW_NUMBER() OVER (PARTITION BY A.EntityId ORDER BY A.Id) AS RowId
+    FROM BSADB.dbo.DJ_DateTypeInfo A WITH (NOLOCK)
+    WHERE A.DateType = 'Date of Birth'
+      AND A.Deleted = 0
+      AND EXISTS (SELECT 1 FROM #tempDJBlacklistJP X WHERE X.EntNum = A.EntityId)
+),
+TempNUM AS (
+    SELECT A.spec_name, A.updated_date, A.remark, A.ent_num, A.GROUPID
+    FROM BSADBJP..OFAC_SPEC A
+    WHERE A.GROUPID IN (5, 7) AND A.DInd = 'N'
 )
 
-$messages = @(
-    foreach ($line in $allLines) {
-        $message = $line.Trim()
-
-        if ([string]::IsNullOrWhiteSpace($message)) {
-            continue
-        }
-
-        $message
-    }
+/*
+-- 組裝完整明細，準備後續 MERGE 到 OFAC_SPEC。
+-- 找得到目標表既有資料時沿用原 ent_num；
+-- 找不到時 Num 為 NULL，稍後再配置新的 ent_num。
+*/
+INSERT INTO #tempDJBlacklistDetailsJP (
+    Num, EntNum, SdnName, UpdatedDate, Address, City, Country,
+    IdentType, IdentNumber, DOB, GroupID
 )
+SELECT
+    E.ent_num, A.EntNum, A.SdnName, A.UpdatedDate, B.Address, LEFT(B.City, 100),
+    COALESCE(F.ISO_2_CountryCode, LEFT(B.AddressCountry, 100)) AS Country,
+    C.IdentificationType, LEFT(C.IdentificationNumber, 44),
+    CASE
+        WHEN D.InfoDay IS NULL OR D.InfoMonth IS NULL THEN D.InfoYear
+        ELSE CONVERT(VARCHAR(8), dbo.TryParseDate(D.InfoYear + ' ' + D.InfoMonth + ' ' + D.InfoDay), 112)
+    END,
+    A.GroupID
+FROM #tempDJBlacklistJP A
+LEFT JOIN TempAddress B ON A.EntNum = B.EntityId AND B.RowId = 1
+LEFT JOIN TempIdent C ON A.EntNum = C.EntityId AND C.RowId = 1
+LEFT JOIN TempDOB D ON A.EntNum = D.EntityId AND D.RowId = 1
+LEFT JOIN TempNUM E ON A.EntNum = E.remark AND A.SdnName = E.spec_name AND A.GroupID = E.GROUPID
+OUTER APPLY (
+    SELECT TOP 1 CD.ISO_2_CountryCode
+    FROM COUNTRY_DIM CD WITH (NOLOCK)
+    WHERE B.AddressCountry IS NOT NULL
+      AND B.AddressCountry IN (
+          CD.ISO_CountryDescription, CD.ISO_CountryDescription_zh_TW,
+          CD.ISO_CountryDescription_zh_CN, CD.ISO_CountryDescription_Default
+      )
+) F;
 
-$total = $messages.Count
+DECLARE @MAXNo INT;
 
-if ($total -eq 0) {
-    throw "TXT 沒有可處理的 SWIFT 電文：$InputFile"
-}
+SELECT @MAXNo = MAX(ent_num) FROM BSADBJP..OFAC_SPEC;
 
-Write-Host ''
-Write-Host '============================================================'
-Write-Host 'SWIFT SOAP Batch Processing'
-Write-Host '============================================================'
-Write-Host "Input File : $InputFile"
-Write-Host "SOAP URL   : $url"
-Write-Host "Total      : $total"
-Write-Host "Output CSV : $OutputCsv"
-Write-Host '============================================================'
-Write-Host ''
+UPDATE #tempDJBlacklistDetailsJP
+SET @MAXNo = @MAXNo + 1, Num = @MAXNo
+WHERE Num IS NULL;
 
-# ============================================================
-# 5. 逐筆送出 SOAP Request
-# ============================================================
+;WITH TargetTable AS (
+    SELECT * FROM BSADBJP..OFAC_SPEC WHERE GROUPID IN (5, 7)
+)
+MERGE TargetTable AS T
+USING (
+    SELECT Num, EntNum, SdnName, UpdatedDate, Address, City, Country,
+           IdentType, IdentNumber, DOB, GroupID
+    FROM #tempDJBlacklistDetailsJP
+) AS S
+    ON T.spec_name = S.SdnName
+   AND T.remark = CAST(S.EntNum AS VARCHAR(100))
+   AND T.GROUPID = S.GroupID
 
-$results = New-Object System.Collections.Generic.List[object]
-$batchWatch = [System.Diagnostics.Stopwatch]::StartNew()
+WHEN NOT MATCHED BY TARGET THEN
+    INSERT (
+        spec_name, updated_date, remark, TaxID, IDENT, IDENTO, TaxIDCD, IDNUM,
+        IssBy, DInd, creUserID, STATE, ADDRESS, COUNTRY, GROUPID, SOURCE,
+        EnterFlag, ApprovedBy, ApprovedDate, DelUserID, DelDate,
+        ApproveDelUserID, ApproveDelDate, creDate, updated_date_UTC,
+        ApprovedDate_UTC, DelDate_UTC, ApproveDelDate_UTC, creDate_UTC, ent_num, DOB
+    )
+    VALUES (
+        S.SdnName, S.UpdatedDate, S.EntNum, '', S.IdentType, S.IdentNumber, '',
+        '', 'JP', 'N', 'System Admin', ISNULL(S.City, ''), S.Address, S.Country,
+        S.GroupID, 'MOF Sanction List (Decease) ', NULL, 'System Admin', GETDATE(),
+        NULL, NULL, NULL, NULL, GETDATE(), GETUTCDATE(), GETUTCDATE(),
+        NULL, NULL, GETUTCDATE(), S.Num, S.DOB
+    )
 
-$referenceNumbers = @{}
+WHEN NOT MATCHED BY SOURCE AND T.DInd = 'N' THEN
+    UPDATE SET
+        T.DInd = 'Y',
+        T.DelUserID = 'System Admin',
+        T.DelDate = GETDATE(),
+        T.ApproveDelUserID = 'System Admin',
+        T.ApproveDelDate = GETDATE(),
+        T.DelDate_UTC = GETUTCDATE()
 
-for ($i = 0; $i -lt $total; $i++) {
+WHEN MATCHED AND (T.DInd = 'Y' OR S.UpdatedDate <> T.updated_date) THEN
+    UPDATE SET
+        T.DInd = 'N',
+        T.updated_date = S.UpdatedDate,
+        T.DelUserID = NULL,
+        T.DelDate = NULL,
+        T.ApproveDelUserID = NULL,
+        T.ApproveDelDate = NULL,
+        T.DelDate_UTC = NULL,
+        T.EnterFlag = 'D',
+        T.updated_date_UTC = GETUTCDATE(),
+        T.ADDRESS = S.Address,
+        T.STATE = ISNULL(S.City, ''),
+        T.COUNTRY = S.Country,
+        T.IDENT = S.IdentType, T.IDNUM = S.IdentNumber, T.DOB = S.DOB
 
-    $seq = $i + 1
-    $swiftMessage = $messages[$i]
 
-    # ReferenceNumber 格式：yyyyMMddHHmmssfff
-    # 避免同一毫秒產生重複編號
-    do {
-        $referenceNumber = Get-Date -Format 'yyyyMMddHHmmssfff'
 
-        if ($referenceNumbers.ContainsKey($referenceNumber)) {
-            Start-Sleep -Milliseconds 2
-        }
-    }
-    while ($referenceNumbers.ContainsKey($referenceNumber))
+上面是我的sp
 
-    $referenceNumbers[$referenceNumber] = $true
-
-    $status = 'SUCCESS'
-    $responseText = ''
-    $errorMessage = ''
-    $elapsedMs = 0
-
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-
-    Write-Host "[$seq/$total] Sending..." -ForegroundColor Cyan
-    Write-Host "ReferenceNumber : $referenceNumber"
-
-    try {
-        # 建立 XML
-        $soapRequest = New-SOAPRequest `
-            -SwiftMessage $swiftMessage `
-            -ReferenceNumber $referenceNumber
-
-        # 送出 SOAP
-        $responseText = Execute-SOAPRequest `
-            -SOAPRequest $soapRequest `
-            -URL $url
-
-        $sw.Stop()
-        $elapsedMs = [math]::Round(
-            $sw.Elapsed.TotalMilliseconds, 2
-        )
-
-        Write-Host "Status          : SUCCESS" -ForegroundColor Green
-        Write-Host "Elapsed Time    : $elapsedMs ms"
-    }
-    catch {
-        $sw.Stop()
-        $elapsedMs = [math]::Round(
-            $sw.Elapsed.TotalMilliseconds, 2
-        )
-
-        $status = 'FAILED'
-        $errorMessage = $_.Exception.Message
-
-        # 嘗試取得 HTTP 錯誤 Response 內容
-        if ($_.Exception.Response) {
-            try {
-                $errorStream = $_.Exception.Response.GetResponseStream()
-
-                if ($errorStream) {
-                    try {
-                        $errorReader = New-Object System.IO.StreamReader(
-                            $errorStream,
-                            [System.Text.Encoding]::UTF8
-                        )
-
-                        try {
-                            $responseText = $errorReader.ReadToEnd()
-                        }
-                        finally {
-                            $errorReader.Close()
-                        }
-                    }
-                    finally {
-                        $errorStream.Close()
-                    }
-                }
-            }
-            catch {
-                # 保留原始錯誤，不中斷後續電文
-            }
-        }
-
-        Write-Host "Status          : FAILED" -ForegroundColor Red
-        Write-Host "Elapsed Time    : $elapsedMs ms"
-        Write-Host "Error           : $errorMessage" -ForegroundColor Red
-    }
-
-    # 每筆結果
-    $results.Add([PSCustomObject]@{
-        Sequence        = $seq
-        ReferenceNumber = $referenceNumber
-        Status          = $status
-        ElapsedMs       = $elapsedMs
-        ErrorMessage    = $errorMessage
-        Response        = $responseText
-        Message         = $swiftMessage
-    })
-
-    Write-Host '------------------------------------------------------------'
-}
-
-$batchWatch.Stop()
-
-# ============================================================
-# 6. 輸出 CSV 結果報表
-# ============================================================
-
-$results |
-    Export-Csv -LiteralPath $OutputCsv `
-        -NoTypeInformation `
-        -Encoding UTF8
-
-$successCount = @(
-    $results | Where-Object { $_.Status -eq 'SUCCESS' }
-).Count
-
-$failedCount = @(
-    $results | Where-Object { $_.Status -eq 'FAILED' }
-).Count
-
-# ============================================================
-# 7. 批次執行摘要
-# ============================================================
-
-Write-Host ''
-Write-Host '============================================================'
-Write-Host 'Batch Summary'
-Write-Host '============================================================'
-Write-Host "Total Messages : $total"
-Write-Host "Success        : $successCount" -ForegroundColor Green
-Write-Host "Failed         : $failedCount" -ForegroundColor Red
-Write-Host "Total Time     : $([math]::Round($batchWatch.Elapsed.TotalSeconds, 2)) sec"
-Write-Host "Average Time   : $([math]::Round($batchWatch.Elapsed.TotalMilliseconds / $total, 2)) ms/message"
-Write-Host "Result CSV     : $OutputCsv"
-Write-Host '============================================================'
+我想知道怎麼驗測到底對不對
+是不是裡面都是死人 有符合條件  reference 那些
+然後裡面都是活人   有符合條件 reference 那些
