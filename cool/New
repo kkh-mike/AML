@@ -13,4 +13,37 @@ FROM BSADBJP..OFAC_SPEC O
 JOIN BSADB.dbo.DJ_Entity A ON A.EntityId = TRY_CAST(O.remark AS INT)
 WHERE O.GROUPID = 5 AND A.Deceased = 1;
 
+
+
+
+如果你是要檢查「有沒有確實符合 Japanese Finance 條件，且該抓進來的都有抓進來」，可以用下面這兩個最簡單的查詢來核對：
+1. 檢查漏網之魚：本該進來的，卻不在 OFAC_SPEC 裡
+這句會找出所有屬於 Japanese Finance 的名單，但在你的目標表 OFAC_SPEC（GroupID 5 或 7）裡面完全找不到的資料：
+SELECT A.EntityId, A.FullName, A.Deceased
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+WHERE B.SanctionListReference LIKE '%Japanese Finance%'
+  AND NOT EXISTS (
+      SELECT 1 FROM BSADBJP..OFAC_SPEC O 
+      WHERE O.remark = CAST(A.EntityId AS VARCHAR(100)) 
+        AND O.GROUPID IN (5, 7)
+  );
+
+(如果這段跑出來是 0 筆，代表所有符合條件的 Entity 都成功被寫進目標表了)
+2. 檢查多餘的幽靈資料：根本不符合條件，卻賴在 OFAC_SPEC 裡
+這句會找出 OFAC_SPEC 裡面（GroupID 5 或 7）的資料，但回頭去檢查源頭卻已經不在 Japanese Finance 名單內的資料：
+SELECT O.ent_num, O.spec_name, O.GROUPID
+FROM BSADBJP..OFAC_SPEC O
+WHERE O.GROUPID IN (5, 7)
+  AND NOT EXISTS (
+      SELECT 1 FROM BSADB.dbo.DJ_SanctionListReference B
+      WHERE B.EntityId = TRY_CAST(O.remark AS INT)
+        AND B.SanctionListReference LIKE '%Japanese Finance%'
+  );
+
+(如果這段跑出來是 0 筆，代表目標表裡沒有殘留不合條件的過期資料)
+
+
+
+
 只要這兩段查詢跑出來都是 0 筆，就代表你的 SP 邏輯完全正確，生死人分得清清楚楚！
