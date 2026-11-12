@@ -1,28 +1,28 @@
-
-SELECT 'DJ_Entity' AS TableName, EntityId FROM BSADB.dbo.DJ_Entity WHERE EntityId = 683933
-UNION ALL
-SELECT 'DJ_SanctionListReference', EntityId FROM BSADB.dbo.DJ_SanctionListReference WHERE EntityId = 683933;
-DJ_Entity	683933
-DJ_SanctionListReference	683933
-DJ_SanctionListReference	683933
-DJ_SanctionListReference	683933
-DJ_SanctionListReference	683933
-DJ_SanctionListReference	683933
-DJ_SanctionListReference	683933
-DJ_SanctionListReference	683933
-DJ_SanctionListReference	683933
-DJ_SanctionListReference	683933
-DJ_SanctionListReference	683933
-DJ_SanctionListReference	683933
-DJ_SanctionListReference	683933
-DJ_SanctionListReference	683933
-DJ_SanctionListReference	683933
-DJ_SanctionListReference	683933
-DJ_SanctionListReference	683933
+SELECT A.EntityId, A.FullName, A.Deceased
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+WHERE B.SanctionListReference LIKE '%Japanese Finance%'
+  AND NOT EXISTS (
+      SELECT 1 FROM BSADBJP..OFAC_SPEC O 
+      WHERE O.remark = CAST(A.EntityId AS VARCHAR(100)) 
+        AND O.GROUPID IN (5, 7)
+  );
 
 
+  SELECT O.ent_num, O.spec_name, O.GROUPID
+FROM BSADBJP..OFAC_SPEC O
+WHERE O.GROUPID IN (5, 7)
+  AND NOT EXISTS (
+      SELECT 1 FROM BSADB.dbo.DJ_SanctionListReference B
+      WHERE B.EntityId = TRY_CAST(O.remark AS INT)
+        AND B.SanctionListReference LIKE '%Japanese Finance%'
+  );
 
 
-SELECT EntNum, SdnName, NamePropertyBitCode
-FROM BSADB.dbo.DJ_List_Data_A
-WHERE EntNum = 683933;
+所以我這裡要改吧?
+
+然後
+能幫我整理一下每個table 幹嘛的
+然後給我一些查詢工具
+例如撈死人的 SELECT 
+等等
