@@ -1,15 +1,20 @@
+如果您想在 Oracle 中透過 INSERT INTO ... SELECT 的方式，將現有 wf_D_BANCS 的所有參數設定複製一份，並將工作流程名稱（WF_NAME）改為 wf_I_BANCS，可以使用以下 SQL 語法：
+INSERT INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT)
+SELECT 
+    'wf_I_BANCS',  -- 將 WF_NAME 欄位替換為新的名稱
+    ST_NAME, 
+    MPLT_NAME, 
+    PAR_NAME, 
+    PAR_VAL, 
+    LST_MTN_DT 
+FROM ODAML.CFG_PAR 
+WHERE WF_NAME = 'wf_D_BANCS';
 
-SELECT * FROM  ODAML.CFG_PAR WHERE WF_NAME = 'wf_D_BANCS'
-1  wf_D_BANCS  s_m_D_CUST_RP_BANCS  --------  $$BHDT  20251231  20260101
-2  wf_D_BANCS  s_m_D_CASA_MASTER_BANCS_01  --------	$$BHDT	20251231	20260101
-3	wf_D_BANCS	s_m_D_CASA_MASTER_BANCS_01	--------	$$P12MTH	20241231	20251217
-4	wf_D_BANCS	s_m_D_TD_MASTER_BANCS_01	--------	$$BHDT	20251231	20260101
-5	wf_D_BANCS	s_m_D_TD_MASTER_BANCS_01	--------	$$P12MTH	20241231	20251217
-6	wf_D_BANCS	s_m_D_LOAN_MASTER_BANCS_01	--------	$$BHDT	20251231	20260101
-7	wf_D_BANCS	s_m_D_LOAN_MASTER_BANCS_01	--------	$$P12MTH	20241231	20251217
-8	wf_D_BANCS	s_m_D_CUST_MASTER_BANCS_01	--------	$$BHDT	20251231	20260101
+-- 執行後別忘了提交交易
+COMMIT;
 
+💡 執行步驟與驗證：
+ * 執行上方語法：這會直接複製 wf_D_BANCS 的 8 筆參數資料，並將 WF_NAME 改成 wf_I_BANCS 插入表中。
+ * 驗證結果：執行完後，您可以用以下查詢來確認新增的資料是否正確：
+   SELECT * FROM ODAML.CFG_PAR WHERE WF_NAME = 'wf_I_BANCS';
 
-我oracle如果要新增
-wf_I_BANCS  後面都依樣 
-要怎麼寫
