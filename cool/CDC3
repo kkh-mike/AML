@@ -1,41 +1,65 @@
-{1:F01TSIBTWT0A6280000000000}{2:I999TSIBTWT0A628N}{4: :20:NHAH26M99999-628 :79:793 USA 111111111 TONG DA WANG AKASAKA,2-3-5 MINATO-KU NEW YORK 10780 USA HOWMET AEROSPACE INC. STRESS_TEST_DATA_LINE_01_LONG_PAYLOAD_STRING_FOR_PERFORMANCE_CHECK_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_STRESS_TEST_DATA_LINE_02_LONG_PAYLOAD_STRING_FOR_PERFORMANCE_CHECK_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_U202617012 890750004061 TWN DA MING WANG No. 207, Sec. 2, Jiuzong Rd.Neihu Dist. Taipei City 114506 TWN 793 ALUMUS33XXX -}
+了解！如果你是要單純針對這支 SP 的核心邏輯進行全盤驗測，確認它有沒有漏掉、有沒有分錯、邏輯有沒有瑕疵，我們可以用這套最直接的 4 步驗測法 來逐一檢查。
+你可以直接複製這幾段 SQL 去執行，每段都有明確的檢驗目標：
+檢測 1：生死邏輯檢驗（有沒有把活人分到死人區，或反過來？）
+這段用來驗證你的 CASE WHEN E.Deceased = 1 THEN 7 ELSE 5 END 邏輯是否確實執行：
+-- 檢查：目標表中屬 Group 7（死人），但源頭根本不是死人的資料（預期應為 0 筆）
+SELECT 'Group 7 夾雜活人' AS CheckType, O.remark AS EntityId, O.spec_name, A.Deceased
+FROM BSADBJP..OFAC_SPEC O
+JOIN BSADB.dbo.DJ_Entity A ON A.EntityId = TRY_CAST(O.remark AS INT)
+WHERE O.GROUPID = 7 AND ISNULL(A.Deceased, 0) <> 1
 
+UNION ALL
 
+-- 檢查：目標表中屬 Group 5（活人），但源頭其實是死人的資料（預期應為 0 筆）
+SELECT 'Group 5 夾雜死人', O.remark, O.spec_name, A.Deceased
+FROM BSADBJP..OFAC_SPEC O
+JOIN BSADB.dbo.DJ_Entity A ON A.EntityId = TRY_CAST(O.remark AS INT)
+WHERE O.GROUPID = 5 AND A.Deceased = 1;
 
+ * 結果判定：這兩行如果查出來都是 0 筆，代表你的生死群組切分邏輯（Group 5 vs Group 7）100% 正確。
+檢測 2：漏網之魚檢驗（有沒有本該進來卻沒進來的？）
+這段用來驗證你的 SP 前段抓取（Japanese Finance 與 DJ_List_Data_A 篩選）會不會過濾掉不該過濾的資料：
+-- 檢查：屬於 Japanese Finance 但卻沒被同步進 OFAC_SPEC (Group 5 或 7) 的名單
+SELECT A.EntityId, A.FullName, A.Deceased
+FROM BSADB.dbo.DJ_Entity A
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+WHERE B.SanctionListReference LIKE '%Japanese Finance%'
+  AND NOT EXISTS (
+      SELECT 1 FROM BSADBJP..OFAC_SPEC O 
+      WHERE O.remark = CAST(A.EntityId AS VARCHAR(100)) 
+        AND O.GROUPID IN (5, 7)
+  );
 
-{1:F01TSIBTWT0A6280000000000}{2:I999TSIBTWT0A628N}{4: :20:NHAH26M99999-628 :79:SPLIT_STRESS_TEST_START_DATA_BLOCK_00001_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00002_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00003_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00004_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00005_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00006_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00007_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00008_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00009_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00010_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00011_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00012_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00013_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00014_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00015_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00016_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00017_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00018_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00019_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_SPLIT_STRESS_TEST_DATA_BLOCK_00020_ABCDEFGHIJKLMN_OPQRSTUVW_XYZ_0123456789_END_OF_PAYLOAD -}
+ * 結果判定：像剛剛查出 683933 這一筆，如果它在 DJ_List_Data_A 找不到名字，那它進不去 OFAC_SPEC 是邏輯上的預期行為（因為沒名字無法塞進 spec_name）。如果查出來的其他筆都有名字卻被漏掉，那就要檢查 SP 第一步的 NamePropertyBitCode & 1 > 0 是否太嚴格。
+檢測 3：幽靈資料檢驗（有沒有不符合條件卻留在表裡的？）
+這段用來驗證你的 WHEN NOT MATCHED BY SOURCE（軟刪除 DInd = 'Y'）邏輯有沒有正常運作：
+-- 檢查：OFAC_SPEC 裡有資料，但源頭的 Japanese Finance 已經找不到這筆的資料
+SELECT O.ent_num, O.spec_name, O.GROUPID, O.DInd
+FROM BSADBJP..OFAC_SPEC O
+WHERE O.GROUPID IN (5, 7)
+  AND NOT EXISTS (
+      SELECT 1 FROM BSADB.dbo.DJ_SanctionListReference B
+      WHERE B.EntityId = TRY_CAST(O.remark AS INT)
+        AND B.SanctionListReference LIKE '%Japanese Finance%'
+  );
 
+ * 結果判定：正常情況下，如果名單被移除，SP 的 WHEN NOT MATCHED BY SOURCE 應該會把它們標記為 DInd = 'Y'（軟刪除）。如果這段撈出 DInd = 'N'（還活著、有效）的資料，就代表你 SP 的 MERGE 刪除同步條件可能漏掉了。
+檢測 4：更新與明細欄位檢驗（地址、生日、證件有沒有正常帶入？）
+這段用來抽樣檢查經由 SP MERGE 進去的資料，其地址、國籍、生日欄位是否為空：
+-- 檢查：抽樣看最近同步的資料，重要明細是否都有成功帶過去
+SELECT TOP 20 
+    ent_num, 
+    spec_name, 
+    GROUPID, 
+    DInd,
+    ADDRESS, 
+    COUNTRY, 
+    DOB, 
+    IDNUM, 
+    updated_date
+FROM BSADBJP..OFAC_SPEC
+WHERE GROUPID IN (5, 7)
+ORDER BY updated_date_UTC DESC;
 
-PS D:\AML_Source\Source\1141923> D:\AML_Source\Source\1141923\SWIFTMT\TEST_TXT.ps1
-
-============================================================
-SWIFT SOAP Batch Processing (Block Mode)
-============================================================
-Input File : D:\AML_Source\Source\1141923\SWIFTMT\swift_messages_long.txt
-SOAP URL   : http://localhost:8082/SwiftProcessor.svc?wsdl
-Total      : 1
-Output CSV : D:\AML_Source\Source\1141923\SWIFTMT\swift_results.csv
-============================================================
-
-[1/1] Sending...
-ReferenceNumber : 20261030090320004
-Status          : SUCCESS
-Elapsed Time    : 165.22 ms
-------------------------------------------------------------
-
-============================================================
-Batch Summary
-============================================================
-Total Messages : 1
-Success        : 1
-Failed         : 0
-Total Time     : 0.17 sec
-Average Time   : 171.02 ms/message
-Result CSV     : D:\AML_Source\Source\1141923\SWIFTMT\swift_results.csv
-============================================================
-
-PS D:\AML_Source\Source\1141923> 
-
-還是很快結束耶
-還是他可以很多個訊息算一筆?
-我ps1要改?
+ * 結果判定：確保 ADDRESS、COUNTRY、DOB 不是大面積的空白，代表你的 LEFT JOIN TempAddress、TempIdent、TempDOB 都有正確對應到 RowId = 1。
+只要這 4 個檢測點都過關，這支 SP 的邏輯（抓取、分類、MERGE 更新、軟刪除）就已經非常完美了！
