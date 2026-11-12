@@ -21,3 +21,12 @@ WHERE O.GROUPID IN (5, 7)
   );
 
   沒資料
+
+
+
+SELECT A.EntNum, A.SdnName, A.NamePropertyBitCode
+FROM BSADB.dbo.DJ_List_Data_A A
+WHERE A.EntNum = 683933;
+
+
+
