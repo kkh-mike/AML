@@ -1,39 +1,51 @@
+你這兩個查詢會卡住或覺得怪怪的，主要是因為幾個關鍵欄位在 JOIN 時對不上型態 或 邏輯覆蓋不完整（例如：O.remark 是字串型態 VARCHAR，而 A.EntityId 是整數；另外你的第二個查詢 BL.sdn_name = A.FullName 往往會因為 Dow Jones 名稱微調或空白而導致漏掉資料）。
+我幫你把這兩個檢測 SQL 修正並優化。你可以直接複製以下這兩段去跑，用來精準抓出「群組歸錯類（例如把活人放到死人 Group 7）」的資料：
+第一段：抓出「不小心掉進 Group 7（死人區），但實際上根本不是死人」的錯誤資料
+這段對應你原本第一段的邏輯，但修正了型態轉換（CAST(A.EntityId AS VARCHAR(100))）與 Deceased 判斷條件：
 SELECT 
+    O.ent_num,
     O.spec_name,
     O.GROUPID,
+    O.remark AS EntNum_In_OFAC,
     A.EntityId,
     A.FullName,
     A.Deceased,
     CASE 
-        WHEN A.EntityId IS NULL THEN '未在 DJ_Entity 找到對應'
-        WHEN A.Deceased = 0 THEN '存活 (Deceased = 0)'
-        ELSE '未知/其他'
-    END AS Status_Reason
+        WHEN A.EntityId IS NULL THEN '來源 DJ_Entity 找不到此 EntityId'
+        WHEN ISNULL(A.Deceased, 0) = 0 THEN '❌ 錯誤：這是活人卻被分到 Group 7'
+        ELSE '✔ 正確：確實是死人'
+    END AS Error_Reason
 FROM BSADBJP..OFAC_SPEC O
-LEFT JOIN BSADBJP..BlackListData BL ON O.spec_name = BL.sdn_name
-LEFT JOIN BSADB.dbo.DJ_Entity A ON A.EntityId = O.remark
-WHERE O.GROUPID = '7'
-  AND (A.Deceased IS NULL OR A.Deceased <> 1);
+LEFT JOIN BSADB.dbo.DJ_Entity A ON A.EntityId = TRY_CAST(O.remark AS INT)
+WHERE O.GROUPID = 7
+  AND (A.EntityId IS NULL OR ISNULL(A.Deceased, 0) <> 1);
 
-
-
---  SELECT * FROM BSADBJP..OFAC_SPEC WHERE GROUPID = '7' AND spec_name = 'George, Martin'
---  SELECT * FROM BSADB.dbo.DJ_Entity WHERE EntityId = '67619'
---10183 = 'George, Martin'
-
-  
-SELECT DISTINCT
+ * 這段在查什麼：如果這支查詢有跑出資料，代表你的 SP 邏輯有漏洞，把活人（Deceased = 0 或 NULL）塞進了死人的 Group 7。
+第二段：檢查「日本金融名單（Japanese Finance）」中，真正是死人卻沒進 Group 7、或是活人卻進錯群組的完整檢測
+你原本的第二段直接用 BL.sdn_name = A.FullName 去 JOIN，很容易因為對不到而漏掉。我們直接用 BSADB.dbo.DJ_SanctionListReference（跟你的 SP 來源邏輯完全一致） 來重新核對：
+-- 檢測：檢查日本金融名單中，所有人的生死狀態與目前落入的 OFAC_SPEC GroupID 是否正確
+SELECT 
     A.EntityId,
     A.FullName,
-    BL.sdn_name,
-    O.GROUPID,
-    O.spec_name,
-    O.DInd
+    A.Deceased,
+    B.SanctionListReference,
+    O.GROUPID AS Current_GroupID_In_OFAC,
+    O.DInd AS Is_Deleted_In_OFAC,
+    CASE 
+        WHEN A.Deceased = 1 AND ISNULL(O.GROUPID, 0) <> 7 THEN '❌ 漏網之魚：這人是死人，但沒有正確進入 Group 7'
+        WHEN ISNULL(A.Deceased, 0) = 0 AND O.GROUPID = 7 THEN '❌ 錯置：這人是活人，卻被放到 Group 7'
+        ELSE '✔ 狀態正常'
+    END AS Status_Check
 FROM BSADB.dbo.DJ_Entity A
-JOIN BSADB.dbo.DJ_SanctionListReference B    ON A.EntityId = B.EntityId
-JOIN BSADBJP..BlackListData BL    ON BL.sdn_name = A.FullName
-LEFT JOIN BSADBJP..OFAC_SPEC O    ON O.remark = A.EntityId
-WHERE A.Deceased = 0 AND B.SanctionListReference LIKE '%Japanese Finance'
+JOIN BSADB.dbo.DJ_SanctionListReference B ON A.EntityId = B.EntityId
+LEFT JOIN BSADBJP..OFAC_SPEC O ON O.remark = CAST(A.EntityId AS VARCHAR(100)) AND O.GROUPID IN (5, 7)
+WHERE B.SanctionListReference LIKE '%Japanese Finance%'
+  -- 如果只想看有問題的資料，可以打開下面這行過濾條件：
+  -- AND (
+  --     (A.Deceased = 1 AND ISNULL(O.GROUPID, 0) <> 7) OR 
+  --     (ISNULL(A.Deceased, 0) = 0 AND O.GROUPID = 7)
+  -- )
+;
 
-我現在是這樣
-你幫我改一下 因為好ˋ像是錯的
+ * 這段在查什麼：這會把所有屬於 Japanese Finance 的名單全部列出來，並直接比對 DJ_Entity 的 Deceased 狀態與 OFAC_SPEC 裡的 GROUPID。最右邊的 Status_Check 會直接告訴你哪幾筆資料分錯群組了。
+你可以先跑跑看上面這兩段，就能馬上看出目前資料庫裡有沒有因為 SP 邏輯不夠嚴謹而跑錯邊的紀錄！
