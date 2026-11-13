@@ -1,3 +1,9 @@
+這項工作的工作說明（Job Description / Responsibilities）可以精簡地這樣寫：
+ * AML 客戶風險與 PEP 檢核異常調查：負責檢視與釐清 AML 系統中風險評估分數（Risk Modeling Score Details）與客戶風險資訊（Customer Risk section）之欄位對應邏輯，並針對主體（客戶本人與關聯戶/Appointee）的 PEP 命中差異進行分析與說明。
+
+
+
+
 這封簡短的英文回信供你參考：
 Dear Kau,
 Regarding your query, please note that the PEP hit in [Risk Modeling Score Details] belongs to the account holder’s appointee (a related party) rather than the primary customer.
