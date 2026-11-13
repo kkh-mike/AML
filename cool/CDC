@@ -1,142 +1,25 @@
-SELECT 
-    b.customerno AS [Customer CIF],
-    a.CUST_NME AS [Customer Name],
-    a.OPEN_DTE AS [Open Date],
-    a.CLOSED_DTE AS [Closed Date],
-    a.BRNCH_NBR AS [Business Workgroup],
-    b.HIGHRISK AS [Risk Level],
-    b.RiskScore AS [Risk Score],
-    
-    -- 1. 客戶本身的負面新聞
-    MAX(CASE WHEN sub.type_source = 'Customer' THEN 'Y' END) AS [The account holder has negative news : Yes],
-    
-    -- 2. 授權人/高階主管等 appointee (對應原本無獨立表時先預留，若有可自行對應)
-    MAX(CASE WHEN sub.type_source = 'Appointee' THEN 'Y' END) AS [The account holder's appointee (Ex: Authorized Signer,President,CEO,Accounting Manager) has negative news : Yes],
-    
-    -- 3. 受益人 (BF)
-    MAX(CASE WHEN sub.type_source = 'BF' THEN 'Y' END) AS [The account holder's Beneficiary has negative news],
-    
-    -- 4. 董事會成員 (PB_BoardOfDirector_Fact)
-    MAX(CASE WHEN sub.type_source = 'BoardOfDirector' THEN 'Y' END) AS [The account holder's board of director member has negative news : Yes],
-    
-    -- 5. 控制人 (CTR)
-    MAX(CASE WHEN sub.type_source = 'CTR' THEN 'Y' END) AS [The account holder's Controller has negative news],
-    
-    -- 6. 捐贈者/設立人 (DN)
-    MAX(CASE WHEN sub.type_source = 'DN' THEN 'Y' END) AS [The account holder's Donor/Setter has negative news],
-    
-    -- 7. 保證人 (GUT)
-    MAX(CASE WHEN sub.type_source = 'GUT' THEN 'Y' END) AS [The account holder's Guarantor has negative news],
-    
-    -- 8. 高階主管 (HLM)
-    MAX(CASE WHEN sub.type_source = 'HLM' THEN 'Y' END) AS [The account holder's High Level Managers has negative news],
-    
-    -- 9. 法定代理人 (JAH)
-    MAX(CASE WHEN sub.type_source = 'JAH' THEN 'Y' END) AS [The account holder's legal agent has negative news : Yes],
-    
-    -- 10. 主要股東 (PB_MainShareHolder_Fact)
-    MAX(CASE WHEN sub.type_source = 'MainShareHolder' THEN 'Y' END) AS [The account holder's main share holder has negative news : Yes],
-    
-    -- 11. 其他相關方 (OT)
-    MAX(CASE WHEN sub.type_source = 'OT' THEN 'Y' END) AS [The account holder's Other Related Party has negative news],
-    
-    -- 12. 受託人 (TT)
-    MAX(CASE WHEN sub.type_source = 'TT' THEN 'Y' END) AS [The account holder's Trustee has negative news]
+Declare @Refno Table(
+    referno varchar(50)
+)
 
-FROM PB_Customer_FACT a
-INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
 
--- 透過 CROSS APPLY 將所有負面新聞來源橫向展開匯聚
-CROSS APPLY (
-    -- 1. 客戶本身
-    SELECT 'Customer' AS type_source
-    FROM BSA_SUB_CUST_FACT_Extension c 
-    WHERE c.CIF_KEY = b.CIF_KEY AND c.PEPBitwiseCode & 4 = 4
 
-    UNION ALL
+INSERT INTO @Refno VALUES('SWIFTe87b868f8de240818f8b8ca5eb4fe830');
+INSERT INTO @Refno VALUES('SWIFT6e7a93c728f041a885bd62c8de85bd5e');
 
-    -- 2. 受益人 (BF)
-    SELECT 'BF' AS type_source
-    FROM PB_OtherRelatedParty_Fact e 
-    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey -- 註：請確認兩者實際關聯鍵
-    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'BF'
 
-    UNION ALL
 
-    -- 3. 董事會成員
-    SELECT 'BoardOfDirector' AS type_source
-    FROM PB_BoardOfDirector_Fact e 
-    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4
 
-    UNION ALL
 
-    -- 4. 控制人 (CTR)
-    SELECT 'CTR' AS type_source
-    FROM PB_OtherRelatedParty_Fact e 
-    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey
-    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'CTR'
+SELECT A.Block4_UserReference MESSAGE_ID,D.Progress, A.MT_KEY REF_NO, A.MessageType TYPE, '' HIT_TAG, replace(replace(B.FullName,char(10),''),char(13),'') DETECTED_NAME, replace(replace(C.SdnName,char(10),''),char(13),'') SdnName, C.SdnType, C.EntNum, C.RC
+FROM SWIFT_MTHeader_Main A
+LEFT JOIN MESSAGEDATABASE..Swift_MTRaw D ON A.MT_KEY = D.ID
+LEFT JOIN SWIFT_ResultGroups C ON A.MT_KEY = C.SourceKey
+LEFT JOIN SWIFT_ResultNames B ON A.MT_KEY = B.SourceKey and C.nameID = B.nameid
+WHERE A.Block4_UserReference IN (SELECT referno FROM @Refno)
+order by A.Created_Date
 
-    UNION ALL
 
-    -- 5. 捐贈者/設立人 (DN)
-    SELECT 'DN' AS type_source
-    FROM PB_OtherRelatedParty_Fact e 
-    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey
-    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'DN'
 
-    UNION ALL
 
-    -- 6. 保證人 (GUT)
-    SELECT 'GUT' AS type_source
-    FROM PB_OtherRelatedParty_Fact e 
-    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey
-    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'GUT'
-
-    UNION ALL
-
-    -- 7. 高階主管 (HLM)
-    SELECT 'HLM' AS type_source
-    FROM PB_OtherRelatedParty_Fact e 
-    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey
-    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'HLM'
-
-    UNION ALL
-
-    -- 8. 法定代理人 (JAH)
-    SELECT 'JAH' AS type_source
-    FROM PB_OtherRelatedParty_Fact e 
-    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey
-    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'JAH'
-
-    UNION ALL
-
-    -- 9. 主要股東
-    SELECT 'MainShareHolder' AS type_source
-    FROM PB_MainShareHolder_Fact e 
-    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4
-
-    UNION ALL
-
-    -- 10. 其他 (OT)
-    SELECT 'OT' AS type_source
-    FROM PB_OtherRelatedParty_Fact e 
-    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey
-    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'OT'
-
-    UNION ALL
-
-    -- 11. 受託人 (TT)
-    SELECT 'TT' AS type_source
-    FROM PB_OtherRelatedParty_Fact e 
-    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey
-    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'TT'
-) AS sub  -- 👈 這裡明確給定別名 `AS sub` 解決了行 132 附近語法錯誤
-
-GROUP BY 
-    b.customerno,
-    a.CUST_NME,
-    a.OPEN_DTE,
-    a.CLOSED_DTE,
-    a.BRNCH_NBR,
-    b.HIGHRISK,
-    b.RiskScore;
+給我一個是合的檔案名稱
