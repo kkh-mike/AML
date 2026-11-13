@@ -8,44 +8,45 @@ SELECT
     b.RiskScore AS [Risk Score],
     
     -- 1. 客戶本身的負面新聞
-    MAX(CASE WHEN type_source = 'Customer' THEN 'Y' END) AS [The account holder has negative news :[Y]Yes],
+    MAX(CASE WHEN sub.type_source = 'Customer' THEN 'Y' END) AS [The account holder has negative news : Yes],
     
-    -- 2. 授權人/高階主管等 appointee (對應原本的 HLM, JAH 等或其他代表性身份，視需求而定，此處示範常見關聯)
-    MAX(CASE WHEN type_source = 'Appointee' THEN 'Y' END) AS [The account holder's appointee (Ex: Authorized Signer,President,CEO,Accounting Manager) has negative news :[Y]Yes],
+    -- 2. 授權人/高階主管等 appointee (對應原本無獨立表時先預留，若有可自行對應)
+    MAX(CASE WHEN sub.type_source = 'Appointee' THEN 'Y' END) AS [The account holder's appointee (Ex: Authorized Signer,President,CEO,Accounting Manager) has negative news : Yes],
     
     -- 3. 受益人 (BF)
-    MAX(CASE WHEN type_source = 'BF' THEN 'Y' END) AS [The account holder's Beneficiary has negative news.],
+    MAX(CASE WHEN sub.type_source = 'BF' THEN 'Y' END) AS [The account holder's Beneficiary has negative news],
     
     -- 4. 董事會成員 (PB_BoardOfDirector_Fact)
-    MAX(CASE WHEN type_source = 'BoardOfDirector' THEN 'Y' END) AS [The account holder's board of director member has negative news :[Y]Yes],
+    MAX(CASE WHEN sub.type_source = 'BoardOfDirector' THEN 'Y' END) AS [The account holder's board of director member has negative news : Yes],
     
     -- 5. 控制人 (CTR)
-    MAX(CASE WHEN type_source = 'CTR' THEN 'Y' END) AS [The account holder's Controller has negative news.],
+    MAX(CASE WHEN sub.type_source = 'CTR' THEN 'Y' END) AS [The account holder's Controller has negative news],
     
     -- 6. 捐贈者/設立人 (DN)
-    MAX(CASE WHEN type_source = 'DN' THEN 'Y' END) AS [The account holder's Donor/Setter has negative news.],
+    MAX(CASE WHEN sub.type_source = 'DN' THEN 'Y' END) AS [The account holder's Donor/Setter has negative news],
     
     -- 7. 保證人 (GUT)
-    MAX(CASE WHEN type_source = 'GUT' THEN 'Y' END) AS [The account holder's Guarantor has negative news.],
+    MAX(CASE WHEN sub.type_source = 'GUT' THEN 'Y' END) AS [The account holder's Guarantor has negative news],
     
     -- 8. 高階主管 (HLM)
-    MAX(CASE WHEN type_source = 'HLM' THEN 'Y' END) AS [The account holder's High Level Managers has negative news.],
+    MAX(CASE WHEN sub.type_source = 'HLM' THEN 'Y' END) AS [The account holder's High Level Managers has negative news],
     
     -- 9. 法定代理人 (JAH)
-    MAX(CASE WHEN type_source = 'JAH' THEN 'Y' END) AS [The account holder's legal agent has negative news :[Y]Yes],
+    MAX(CASE WHEN sub.type_source = 'JAH' THEN 'Y' END) AS [The account holder's legal agent has negative news : Yes],
     
     -- 10. 主要股東 (PB_MainShareHolder_Fact)
-    MAX(CASE WHEN type_source = 'MainShareHolder' THEN 'Y' END) AS [The account holder's main share holder has negative news :[Y]Yes],
+    MAX(CASE WHEN sub.type_source = 'MainShareHolder' THEN 'Y' END) AS [The account holder's main share holder has negative news : Yes],
     
     -- 11. 其他相關方 (OT)
-    MAX(CASE WHEN type_source = 'OT' THEN 'Y' END) AS [The account holder's Other Related Party has negative news.],
+    MAX(CASE WHEN sub.type_source = 'OT' THEN 'Y' END) AS [The account holder's Other Related Party has negative news],
     
     -- 12. 受託人 (TT)
-    MAX(CASE WHEN type_source = 'TT' THEN 'Y' END) AS [The account holder's Trustee has negative news.]
+    MAX(CASE WHEN sub.type_source = 'TT' THEN 'Y' END) AS [The account holder's Trustee has negative news]
 
 FROM PB_Customer_FACT a
 INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
--- 將所有可能的負面新聞來源先透過 UNION ALL 匯聚，並給予一個標籤 (type_source)
+
+-- 透過 CROSS APPLY 將所有負面新聞來源橫向展開匯聚
 CROSS APPLY (
     -- 1. 客戶本身
     SELECT 'Customer' AS type_source
@@ -57,7 +58,7 @@ CROSS APPLY (
     -- 2. 受益人 (BF)
     SELECT 'BF' AS type_source
     FROM PB_OtherRelatedParty_Fact e 
-    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey -- 註：請確認兩者關聯欄位
+    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey -- 註：請確認兩者實際關聯鍵
     WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'BF'
 
     UNION ALL
@@ -129,7 +130,8 @@ CROSS APPLY (
     FROM PB_OtherRelatedParty_Fact e 
     INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey
     WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'TT'
-) sub
+) AS sub  -- 👈 這裡明確給定別名 `AS sub` 解決了行 132 附近語法錯誤
+
 GROUP BY 
     b.customerno,
     a.CUST_NME,
@@ -138,11 +140,3 @@ GROUP BY
     a.BRNCH_NBR,
     b.HIGHRISK,
     b.RiskScore;
-
-
-
-訊息 102，層級 15，狀態 1，行 11
-接近 'Yes' 之處的語法不正確。
-訊息 102，層級 15，狀態 1，行 132
-接近 'sub' 之處的語法不正確。
-
