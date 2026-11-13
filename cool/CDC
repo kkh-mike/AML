@@ -1,23 +1,239 @@
-The account holder's appointee (Ex: Authorized Signer,President,CEO,Accounting Manager) has negative news :[Y]Yes	帳戶持有人的委任人（例如：授權簽署人、總裁、執行長、會計經理）有負面新聞：[是]	Related Appointee → PB_Appointer_Fact
-The account holder's Beneficiary has negative news.	帳戶持有人的受益人有負面新聞。	Other Related Party → PB_OtherRelatedParty_Fact
-The account holder's board of director member has negative news :[Y]Yes	帳戶持有人的董事會成員有負面新聞：[是]	Related Board Of Director → PB_BoardOfDirector_Fact
-The account holder's Controller has negative news.	帳戶持有人的控制人（實際控制人）有負面新聞。	Other Related Party → PB_OtherRelatedParty_Fact
-The account holder's Donor/Setter has negative news.	帳戶持有人的捐贈者/設立人（信託設立人）有負面新聞。	Other Related Party → PB_OtherRelatedParty_Fact
-The account holder's Guarantor has negative news.	帳戶持有人的保證人有負面新聞。	Other Related Party → PB_OtherRelatedParty_Fact
-The account holder's High Level Managers has negative news.	帳戶持有人的高階主管有負面新聞。	Related Appointee → PB_Appointer_Fact
-The account holder's legal agent has negative news :[Y]Yes	   > 帳戶持有人的法定代理人有負面新聞：[是]	Related Legal Agent → PB_LegalAgent_Fact
-The account holder's main share holder has negative news :[Y]Yes	   > 帳戶持有人的主要股東有負面新聞：[是]	Related Main Share Holder → PB_MainShareHolder_Fact
-The account holder's Other Related Party has negative news.	   > 帳戶持有人的其他相關利害關係人有負面新聞。	Other Related Party → PB_OtherRelatedParty_Fact
-The account holder's Trustee has negative news.	   > 帳戶持有人的受託人有負面新聞。	Other Related Party → PB_OtherRelatedParty_Fact
+
+-- 1. 客戶本身的負面新聞
+SELECT 
+    b.customerno,
+    a.CUST_NME,
+    a.OPEN_DTE,
+    a.CLOSED_DTE,
+    a.BRNCH_NBR,
+    b.HIGHRISK,
+    b.RiskScore,
+    'The account holder has negative news' AS NN_Type,
+    'Y' AS NN_Flag
+FROM PB_Customer_FACT a
+INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
+INNER JOIN BSA_SUB_CUST_FACT_Extension c ON c.CIF_KEY = b.CIF_KEY
+WHERE c.PEPBitwiseCode & 4 = 4
+
+UNION ALL
+
+-- 5. 捐贈者/設立人（DN）的負面新聞
+SELECT 
+    b.customerno,
+    a.CUST_NME,
+    a.OPEN_DTE,
+    a.CLOSED_DTE,
+    a.BRNCH_NBR,
+    b.HIGHRISK,
+    b.RiskScore,
+    'Beneficiary has negative news' AS NN_Type,
+    'Y' AS NN_Flag
+FROM PB_Customer_FACT a
+INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
+INNER JOIN PB_OtherRelatedParty_Fact e ON e.CIFKey = b.CIF_KEY
+INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON f.CIFKey = b.CIF_KEY
+WHERE e.PEPBitwiseCode & 4 = 4 
+AND f.SubTypeCodes = 'BF'
+
+UNION ALL
+
+-- 帳戶持有人的董事會成員有負面新聞：[是]
+SELECT 
+    b.customerno,
+    a.CUST_NME,
+    a.OPEN_DTE,
+    a.CLOSED_DTE,
+    a.BRNCH_NBR,
+    b.HIGHRISK,
+    b.RiskScore,
+    'PB_BoardOfDirector_Fact' AS NN_Type,
+    'Y' AS NN_Flag
+FROM PB_Customer_FACT a
+INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
+INNER JOIN PB_BoardOfDirector_Fact e ON e.CIFKey = b.CIF_KEY
+WHERE e.PEPBitwiseCode & 4 = 4 
 
 
-因為我只知道
- PB_OtherRelatedParty_Fact
-看起來有重複
+UNION ALL
 
-要怎麼問廠商有沒有什麼別的欄位或table 可以再細分
-帳戶持有人的控制人（實際控制人）有負面新聞。
-帳戶持有人的捐贈者/設立人（信託設立人）有負面新聞。
-帳戶持有人的保證人有負面新聞。
+-- 帳戶持有人的控制人（實際控制人）有負面新聞。
+SELECT 
+    b.customerno,
+    a.CUST_NME,
+    a.OPEN_DTE,
+    a.CLOSED_DTE,
+    a.BRNCH_NBR,
+    b.HIGHRISK,
+    b.RiskScore,
+    'Controller has negative news.' AS NN_Type,
+    'Y' AS NN_Flag
+FROM PB_Customer_FACT a
+INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
+INNER JOIN PB_OtherRelatedParty_Fact e ON e.CIFKey = b.CIF_KEY
+INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON f.CIFKey = b.CIF_KEY
+WHERE e.PEPBitwiseCode & 4 = 4 
+AND f.SubTypeCodes = 'CTR'
 
-之類的
+UNION ALL
+
+-- 帳戶持有人的捐贈者/設立人（信託設立人）有負面新聞。
+SELECT 
+    b.customerno,
+    a.CUST_NME,
+    a.OPEN_DTE,
+    a.CLOSED_DTE,
+    a.BRNCH_NBR,
+    b.HIGHRISK,
+    b.RiskScore,
+    'Donor/Setter has negative news.' AS NN_Type,
+    'Y' AS NN_Flag
+FROM PB_Customer_FACT a
+INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
+INNER JOIN PB_OtherRelatedParty_Fact e ON e.CIFKey = b.CIF_KEY
+INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON f.CIFKey = b.CIF_KEY
+WHERE e.PEPBitwiseCode & 4 = 4 
+AND f.SubTypeCodes = 'DN'
+
+
+UNION ALL
+
+-- 帳戶持有人的保證人有負面新聞。
+SELECT 
+    b.customerno,
+    a.CUST_NME,
+    a.OPEN_DTE,
+    a.CLOSED_DTE,
+    a.BRNCH_NBR,
+    b.HIGHRISK,
+    b.RiskScore,
+    'GUT' AS NN_Type,
+    'Y' AS NN_Flag
+FROM PB_Customer_FACT a
+INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
+INNER JOIN PB_OtherRelatedParty_Fact e ON e.CIFKey = b.CIF_KEY
+INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON f.CIFKey = b.CIF_KEY
+WHERE e.PEPBitwiseCode & 4 = 4 
+AND f.SubTypeCodes = 'GUT'
+
+
+
+
+
+UNION ALL
+
+-- 帳戶持有人的高階主管有負面新聞。
+SELECT 
+    b.customerno,
+    a.CUST_NME,
+    a.OPEN_DTE,
+    a.CLOSED_DTE,
+    a.BRNCH_NBR,
+    b.HIGHRISK,
+    b.RiskScore,
+    'HLM' AS NN_Type,
+    'Y' AS NN_Flag
+FROM PB_Customer_FACT a
+INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
+INNER JOIN PB_OtherRelatedParty_Fact e ON e.CIFKey = b.CIF_KEY
+INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON f.CIFKey = b.CIF_KEY
+WHERE e.PEPBitwiseCode & 4 = 4 
+AND f.SubTypeCodes = 'HLM'
+
+UNION ALL
+
+-- 帳戶持有人的法定代理人有負面新聞：[是]
+SELECT 
+    b.customerno,
+    a.CUST_NME,
+    a.OPEN_DTE,
+    a.CLOSED_DTE,
+    a.BRNCH_NBR,
+    b.HIGHRISK,
+    b.RiskScore,
+    'JAH' AS NN_Type,
+    'Y' AS NN_Flag
+FROM PB_Customer_FACT a
+INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
+INNER JOIN PB_OtherRelatedParty_Fact e ON e.CIFKey = b.CIF_KEY
+INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON f.CIFKey = b.CIF_KEY
+WHERE e.PEPBitwiseCode & 4 = 4 
+AND f.SubTypeCodes = 'JAH'
+
+
+
+UNION ALL
+
+-- 帳戶持有人的主要股東有負面新聞：[是]
+SELECT 
+    b.customerno,
+    a.CUST_NME,
+    a.OPEN_DTE,
+    a.CLOSED_DTE,
+    a.BRNCH_NBR,
+    b.HIGHRISK,
+    b.RiskScore,
+    'PB_MainShareHolder_Fact' AS NN_Type,
+    'Y' AS NN_Flag
+FROM PB_Customer_FACT a
+INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
+INNER JOIN PB_MainShareHolder_Fact e ON e.CIFKey = b.CIF_KEY
+WHERE e.PEPBitwiseCode & 4 = 4 
+
+
+
+
+UNION ALL
+
+-- 帳戶持有人的法定代理人有負面新聞：[是]
+SELECT 
+    b.customerno,
+    a.CUST_NME,
+    a.OPEN_DTE,
+    a.CLOSED_DTE,
+    a.BRNCH_NBR,
+    b.HIGHRISK,
+    b.RiskScore,
+    'OT' AS NN_Type,
+    'Y' AS NN_Flag
+FROM PB_Customer_FACT a
+INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
+INNER JOIN PB_OtherRelatedParty_Fact e ON e.CIFKey = b.CIF_KEY
+INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON f.CIFKey = b.CIF_KEY
+WHERE e.PEPBitwiseCode & 4 = 4 
+AND f.SubTypeCodes = 'OT'
+
+
+UNION ALL
+
+-- 帳戶持有人的法定代理人有負面新聞：[是]
+SELECT 
+    b.customerno,
+    a.CUST_NME,
+    a.OPEN_DTE,
+    a.CLOSED_DTE,
+    a.BRNCH_NBR,
+    b.HIGHRISK,
+    b.RiskScore,
+    'OT' AS NN_Type,
+    'Y' AS NN_Flag
+FROM PB_Customer_FACT a
+INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
+INNER JOIN PB_OtherRelatedParty_Fact e ON e.CIFKey = b.CIF_KEY
+INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON f.CIFKey = b.CIF_KEY
+WHERE e.PEPBitwiseCode & 4 = 4 
+AND f.SubTypeCodes = 'TT'
+
+
+
+
+幫我整理一下
+
+如果我想要改成欄位是這樣可以改?
+Customer CIF	Customer Name	Open Date	Closed Date	Business Workgroup	Risk Level	Risk Score	The account holder has negative news :[Y]Yes	The account holder's appointee (Ex: Authorized Signer,President,CEO,Accounting Manager) has negative news :[Y]Yes	The account holder's Beneficiary has negative news.	The account holder's board of director member has negative news :[Y]Yes	The account holder's Controller has negative news.	The account holder's Donor/Setter has negative news.	The account holder's Guarantor has negative news.	The account holder's High Level Managers has negative news.	The account holder's legal agent has negative news :[Y]Yes	The account holder's main share holder has negative news :[Y]Yes	The account holder's Other Related Party has negative news.	The account holder's Trustee has negative news.
+
+橫向的
+
+
+
+
+
