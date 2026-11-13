@@ -1,49 +1,45 @@
+為您加上 BEFORE 與 AFTER（包含執行前的檢查提示與執行後的提交、確認），並且已經幫您改為獨立的多行 INSERT 語法，不需要再用 DUAL：
+-- ==========================================
+-- BEFORE: 執行前的檢查與提示
+-- ==========================================
+-- 提示：若需確認目前設定，可先取消下方註解查詢
+-- SELECT * FROM ODAML.CFG_PAR WHERE WF_NAME = 'wf_I_BANCS';
 
-INSERT ALL
+PROMPT [BEFORE] 開始寫入參數至 ODAML.CFG_PAR...
 
-  INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
-  VALUES ('wf_I_BANCS', 's_m_I_CUST_RP_BANCS', '--------', '$$BHDT', '20260102', '20260103')
-  
-  INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
-  VALUES ('wf_I_BANCS', 's_m_I_CASA_MASTER_BANCS_01', '--------', '$$BHDT', '20260102', '20260103')
+-- ==========================================
+-- 執行主體 (多筆獨立 INSERT)
+-- ==========================================
+INSERT INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
+VALUES ('wf_I_BANCS', 's_m_I_CUST_RP_BANCS', '--------', '$$BHDT', '20260102', '20260103');
 
+INSERT INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
+VALUES ('wf_I_BANCS', 's_m_I_CASA_MASTER_BANCS_01', '--------', '$$BHDT', '20260102', '20260103');
 
-  INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
-  VALUES ('wf_I_BANCS', 's_m_I_TD_MASTER_BANCS_01', '--------', '$$BHDT', '20260102', '20260103')
-  
-    INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
-  VALUES ('wf_I_BANCS', 's_m_I_LOAN_MASTER_BANCS_01', '--------', '$$BHDT', '20260102', '20260103')
-    
-    INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
-  VALUES ('wf_I_BANCS', 's_m_I_CUST_MASTER_BANCS_01', '--------', '$$BHDT', '20260102', '20260103')
-  
-  
-  
-  
-      INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
-  VALUES ('wf_I_BANCS', 's_m_I_CASA_MASTER_BANCS_01', '--------', '$$P12MTH', '20260102', '20260103')
-  
-  
-  
-      INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
-  VALUES ('wf_I_BANCS', 's_m_I_TD_MASTER_BANCS_01', '--------', '$$P12MTH', '20260102', '20260103')
-  
-  
-  
-      INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
-  VALUES ('wf_I_BANCS', 's_m_I_LOAN_MASTER_BANCS_01', '--------', '$$P12MTH', '20260102', '20260103')
-  
-  
-  
-  
+INSERT INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
+VALUES ('wf_I_BANCS', 's_m_I_TD_MASTER_BANCS_01', '--------', '$$BHDT', '20260102', '20260103');
 
-SELECT * FROM DUAL;
+INSERT INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
+VALUES ('wf_I_BANCS', 's_m_I_LOAN_MASTER_BANCS_01', '--------', '$$BHDT', '20260102', '20260103');
 
--- 執行後提交
+INSERT INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
+VALUES ('wf_I_BANCS', 's_m_I_CUST_MASTER_BANCS_01', '--------', '$$BHDT', '20260102', '20260103');
+
+INSERT INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
+VALUES ('wf_I_BANCS', 's_m_I_CASA_MASTER_BANCS_01', '--------', '$$P12MTH', '20260102', '20260103');
+
+INSERT INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
+VALUES ('wf_I_BANCS', 's_m_I_TD_MASTER_BANCS_01', '--------', '$$P12MTH', '20260102', '20260103');
+
+INSERT INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
+VALUES ('wf_I_BANCS', 's_m_I_LOAN_MASTER_BANCS_01', '--------', '$$P12MTH', '20260102', '20260103');
+
+-- ==========================================
+-- AFTER: 執行後的提交與確認
+-- ==========================================
 COMMIT;
 
-
-幫我加上before after
-
-SELECT * FROM DUAL; 這幹嘛阿 是不是不用
+PROMPT [AFTER] 資料寫入完畢，已執行 COMMIT 交易提交。
+-- 提示：若需驗證結果，可執行下方查詢
+-- SELECT * FROM ODAML.CFG_PAR WHERE WF_NAME = 'wf_I_BANCS' AND LST_MTN_DT = '20260103';
 
