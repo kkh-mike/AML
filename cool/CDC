@@ -1,52 +1,14 @@
-要確認 GROUPID = '7' 的名單是否全部都是死人，核心邏輯是：從 OFAC_SPEC（Group 7 的來源）出發，透過你原本串接的邏輯去檢查對應的 DJ_Entity.Deceased 狀態。
-如果查詢結果中出現 Deceased = 0、NULL（找不到對應實體），就代表「並非全部都是死人」。
-以下提供三種不同角度的 SQL 查詢方式來協助你確認：
-方法一：直接找出「例外」名單（最快）
-這支查詢會找出 Group 7 當中，不是死人、或是根本無法在 Entity 資料庫中找到對應的人。如果這支語法執行後 查無資料（0 筆），就代表 Group 7 的所有人確實都標記為身故。
-SELECT 
-    O.spec_name,
-    O.GROUPID,
-    A.EntityId,
-    A.FullName,
-    A.Deceased,
-    CASE 
-        WHEN A.EntityId IS NULL THEN '未在 DJ_Entity 找到對應'
-        WHEN A.Deceased = 0 THEN '存活 (Deceased = 0)'
-        ELSE '未知/其他'
-    END AS Status_Reason
-FROM BSADBJP..OFAC_SPEC O
-LEFT JOIN BSADBJP..BlackListData BL ON O.spec_name = BL.sdn_name
-LEFT JOIN BSADB.dbo.DJ_Entity A ON BL.sdn_name = A.FullName
-WHERE O.GROUPID = '7'
-  AND (A.Deceased IS NULL OR A.Deceased <> 1);
+The account holder's appointee (Ex: Authorized Signer,President,CEO,Accounting Manager) has negative news :[Y]Yes
+The account holder's Beneficiary has negative news.
+The account holder's board of director member has negative news :[Y]Yes
+The account holder's Controller has negative news.
+The account holder's Donor/Setter has negative news.
+The account holder's Guarantor has negative news.
+The account holder's High Level Managers has negative news.
+The account holder's legal agent has negative news :[Y]Yes
+The account holder's main share holder has negative news :[Y]Yes
+The account holder's Other Related Party has negative news.
+The account holder's Trustee has negative news.
 
-方法二：檢視 Group 7 完整名單與其身故狀態（明細審查）
-如果你想把 Group 7 的所有成員一目了然地列出來，並檢查每個人目前的 Deceased 狀態：
-SELECT 
-    O.spec_name,
-    O.GROUPID,
-    ISNULL(CAST(A.EntityId AS VARCHAR), '無對應 Entity') AS EntityId,
-    ISNULL(A.FullName, '無對應 FullName') AS FullName,
-    ISNULL(CAST(A.Deceased AS VARCHAR), '無資料') AS Deceased_Flag,
-    CASE 
-        WHEN A.Deceased = 1 THEN '已身故'
-        WHEN A.Deceased = 0 THEN '存活'
-        ELSE '未匹配/無效'
-    END AS Status_Desc
-FROM BSADBJP..OFAC_SPEC O
-LEFT JOIN BSADBJP..BlackListData BL ON O.spec_name = BL.sdn_name
-LEFT JOIN BSADB.dbo.DJ_Entity A ON BL.sdn_name = A.FullName
-WHERE O.GROUPID = '7';
 
-方法三：統計數據摘要
-用來快速比對 Group 7 的總人數中，有多少人是真的被標記為死人，有多少人沒有：
-SELECT 
-    COUNT(O.spec_name) AS Total_Group7_Count,
-    SUM(CASE WHEN A.Deceased = 1 THEN 1 ELSE 0 END) AS Deceased_Count,
-    SUM(CASE WHEN A.Deceased = 0 OR A.Deceased IS NULL THEN 1 ELSE 0 END) AS Not_Deceased_Or_Unmatched_Count
-FROM BSADBJP..OFAC_SPEC O
-LEFT JOIN BSADBJP..BlackListData BL ON O.spec_name = BL.sdn_name
-LEFT JOIN BSADB.dbo.DJ_Entity A ON BL.sdn_name = A.FullName
-WHERE O.GROUPID = '7';
-
- * 判斷標準：當 Total_Group7_Count 等於 Deceased_Count，且 Not_Deceased_Or_Unmatched_Count 為 0 時，就百分之百可以確認 Group 7 全部都是死人。
+分別中文意思
