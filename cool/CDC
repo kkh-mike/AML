@@ -1,239 +1,140 @@
-
--- 1. 客戶本身的負面新聞
 SELECT 
+    b.customerno AS [Customer CIF],
+    a.CUST_NME AS [Customer Name],
+    a.OPEN_DTE AS [Open Date],
+    a.CLOSED_DTE AS [Closed Date],
+    a.BRNCH_NBR AS [Business Workgroup],
+    b.HIGHRISK AS [Risk Level],
+    b.RiskScore AS [Risk Score],
+    
+    -- 1. 客戶本身的負面新聞
+    MAX(CASE WHEN type_source = 'Customer' THEN 'Y' END) AS [The account holder has negative news :[Y]Yes],
+    
+    -- 2. 授權人/高階主管等 appointee (對應原本的 HLM, JAH 等或其他代表性身份，視需求而定，此處示範常見關聯)
+    MAX(CASE WHEN type_source = 'Appointee' THEN 'Y' END) AS [The account holder's appointee (Ex: Authorized Signer,President,CEO,Accounting Manager) has negative news :[Y]Yes],
+    
+    -- 3. 受益人 (BF)
+    MAX(CASE WHEN type_source = 'BF' THEN 'Y' END) AS [The account holder's Beneficiary has negative news.],
+    
+    -- 4. 董事會成員 (PB_BoardOfDirector_Fact)
+    MAX(CASE WHEN type_source = 'BoardOfDirector' THEN 'Y' END) AS [The account holder's board of director member has negative news :[Y]Yes],
+    
+    -- 5. 控制人 (CTR)
+    MAX(CASE WHEN type_source = 'CTR' THEN 'Y' END) AS [The account holder's Controller has negative news.],
+    
+    -- 6. 捐贈者/設立人 (DN)
+    MAX(CASE WHEN type_source = 'DN' THEN 'Y' END) AS [The account holder's Donor/Setter has negative news.],
+    
+    -- 7. 保證人 (GUT)
+    MAX(CASE WHEN type_source = 'GUT' THEN 'Y' END) AS [The account holder's Guarantor has negative news.],
+    
+    -- 8. 高階主管 (HLM)
+    MAX(CASE WHEN type_source = 'HLM' THEN 'Y' END) AS [The account holder's High Level Managers has negative news.],
+    
+    -- 9. 法定代理人 (JAH)
+    MAX(CASE WHEN type_source = 'JAH' THEN 'Y' END) AS [The account holder's legal agent has negative news :[Y]Yes],
+    
+    -- 10. 主要股東 (PB_MainShareHolder_Fact)
+    MAX(CASE WHEN type_source = 'MainShareHolder' THEN 'Y' END) AS [The account holder's main share holder has negative news :[Y]Yes],
+    
+    -- 11. 其他相關方 (OT)
+    MAX(CASE WHEN type_source = 'OT' THEN 'Y' END) AS [The account holder's Other Related Party has negative news.],
+    
+    -- 12. 受託人 (TT)
+    MAX(CASE WHEN type_source = 'TT' THEN 'Y' END) AS [The account holder's Trustee has negative news.]
+
+FROM PB_Customer_FACT a
+INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
+-- 將所有可能的負面新聞來源先透過 UNION ALL 匯聚，並給予一個標籤 (type_source)
+CROSS APPLY (
+    -- 1. 客戶本身
+    SELECT 'Customer' AS type_source
+    FROM BSA_SUB_CUST_FACT_Extension c 
+    WHERE c.CIF_KEY = b.CIF_KEY AND c.PEPBitwiseCode & 4 = 4
+
+    UNION ALL
+
+    -- 2. 受益人 (BF)
+    SELECT 'BF' AS type_source
+    FROM PB_OtherRelatedParty_Fact e 
+    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey -- 註：請確認兩者關聯欄位
+    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'BF'
+
+    UNION ALL
+
+    -- 3. 董事會成員
+    SELECT 'BoardOfDirector' AS type_source
+    FROM PB_BoardOfDirector_Fact e 
+    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4
+
+    UNION ALL
+
+    -- 4. 控制人 (CTR)
+    SELECT 'CTR' AS type_source
+    FROM PB_OtherRelatedParty_Fact e 
+    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey
+    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'CTR'
+
+    UNION ALL
+
+    -- 5. 捐贈者/設立人 (DN)
+    SELECT 'DN' AS type_source
+    FROM PB_OtherRelatedParty_Fact e 
+    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey
+    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'DN'
+
+    UNION ALL
+
+    -- 6. 保證人 (GUT)
+    SELECT 'GUT' AS type_source
+    FROM PB_OtherRelatedParty_Fact e 
+    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey
+    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'GUT'
+
+    UNION ALL
+
+    -- 7. 高階主管 (HLM)
+    SELECT 'HLM' AS type_source
+    FROM PB_OtherRelatedParty_Fact e 
+    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey
+    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'HLM'
+
+    UNION ALL
+
+    -- 8. 法定代理人 (JAH)
+    SELECT 'JAH' AS type_source
+    FROM PB_OtherRelatedParty_Fact e 
+    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey
+    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'JAH'
+
+    UNION ALL
+
+    -- 9. 主要股東
+    SELECT 'MainShareHolder' AS type_source
+    FROM PB_MainShareHolder_Fact e 
+    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4
+
+    UNION ALL
+
+    -- 10. 其他 (OT)
+    SELECT 'OT' AS type_source
+    FROM PB_OtherRelatedParty_Fact e 
+    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey
+    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'OT'
+
+    UNION ALL
+
+    -- 11. 受託人 (TT)
+    SELECT 'TT' AS type_source
+    FROM PB_OtherRelatedParty_Fact e 
+    INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON e.CIFKey = f.CIFKey
+    WHERE e.CIFKey = b.CIF_KEY AND e.PEPBitwiseCode & 4 = 4 AND f.SubTypeCodes = 'TT'
+) sub
+GROUP BY 
     b.customerno,
     a.CUST_NME,
     a.OPEN_DTE,
     a.CLOSED_DTE,
     a.BRNCH_NBR,
     b.HIGHRISK,
-    b.RiskScore,
-    'The account holder has negative news' AS NN_Type,
-    'Y' AS NN_Flag
-FROM PB_Customer_FACT a
-INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
-INNER JOIN BSA_SUB_CUST_FACT_Extension c ON c.CIF_KEY = b.CIF_KEY
-WHERE c.PEPBitwiseCode & 4 = 4
-
-UNION ALL
-
--- 5. 捐贈者/設立人（DN）的負面新聞
-SELECT 
-    b.customerno,
-    a.CUST_NME,
-    a.OPEN_DTE,
-    a.CLOSED_DTE,
-    a.BRNCH_NBR,
-    b.HIGHRISK,
-    b.RiskScore,
-    'Beneficiary has negative news' AS NN_Type,
-    'Y' AS NN_Flag
-FROM PB_Customer_FACT a
-INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
-INNER JOIN PB_OtherRelatedParty_Fact e ON e.CIFKey = b.CIF_KEY
-INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON f.CIFKey = b.CIF_KEY
-WHERE e.PEPBitwiseCode & 4 = 4 
-AND f.SubTypeCodes = 'BF'
-
-UNION ALL
-
--- 帳戶持有人的董事會成員有負面新聞：[是]
-SELECT 
-    b.customerno,
-    a.CUST_NME,
-    a.OPEN_DTE,
-    a.CLOSED_DTE,
-    a.BRNCH_NBR,
-    b.HIGHRISK,
-    b.RiskScore,
-    'PB_BoardOfDirector_Fact' AS NN_Type,
-    'Y' AS NN_Flag
-FROM PB_Customer_FACT a
-INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
-INNER JOIN PB_BoardOfDirector_Fact e ON e.CIFKey = b.CIF_KEY
-WHERE e.PEPBitwiseCode & 4 = 4 
-
-
-UNION ALL
-
--- 帳戶持有人的控制人（實際控制人）有負面新聞。
-SELECT 
-    b.customerno,
-    a.CUST_NME,
-    a.OPEN_DTE,
-    a.CLOSED_DTE,
-    a.BRNCH_NBR,
-    b.HIGHRISK,
-    b.RiskScore,
-    'Controller has negative news.' AS NN_Type,
-    'Y' AS NN_Flag
-FROM PB_Customer_FACT a
-INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
-INNER JOIN PB_OtherRelatedParty_Fact e ON e.CIFKey = b.CIF_KEY
-INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON f.CIFKey = b.CIF_KEY
-WHERE e.PEPBitwiseCode & 4 = 4 
-AND f.SubTypeCodes = 'CTR'
-
-UNION ALL
-
--- 帳戶持有人的捐贈者/設立人（信託設立人）有負面新聞。
-SELECT 
-    b.customerno,
-    a.CUST_NME,
-    a.OPEN_DTE,
-    a.CLOSED_DTE,
-    a.BRNCH_NBR,
-    b.HIGHRISK,
-    b.RiskScore,
-    'Donor/Setter has negative news.' AS NN_Type,
-    'Y' AS NN_Flag
-FROM PB_Customer_FACT a
-INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
-INNER JOIN PB_OtherRelatedParty_Fact e ON e.CIFKey = b.CIF_KEY
-INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON f.CIFKey = b.CIF_KEY
-WHERE e.PEPBitwiseCode & 4 = 4 
-AND f.SubTypeCodes = 'DN'
-
-
-UNION ALL
-
--- 帳戶持有人的保證人有負面新聞。
-SELECT 
-    b.customerno,
-    a.CUST_NME,
-    a.OPEN_DTE,
-    a.CLOSED_DTE,
-    a.BRNCH_NBR,
-    b.HIGHRISK,
-    b.RiskScore,
-    'GUT' AS NN_Type,
-    'Y' AS NN_Flag
-FROM PB_Customer_FACT a
-INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
-INNER JOIN PB_OtherRelatedParty_Fact e ON e.CIFKey = b.CIF_KEY
-INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON f.CIFKey = b.CIF_KEY
-WHERE e.PEPBitwiseCode & 4 = 4 
-AND f.SubTypeCodes = 'GUT'
-
-
-
-
-
-UNION ALL
-
--- 帳戶持有人的高階主管有負面新聞。
-SELECT 
-    b.customerno,
-    a.CUST_NME,
-    a.OPEN_DTE,
-    a.CLOSED_DTE,
-    a.BRNCH_NBR,
-    b.HIGHRISK,
-    b.RiskScore,
-    'HLM' AS NN_Type,
-    'Y' AS NN_Flag
-FROM PB_Customer_FACT a
-INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
-INNER JOIN PB_OtherRelatedParty_Fact e ON e.CIFKey = b.CIF_KEY
-INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON f.CIFKey = b.CIF_KEY
-WHERE e.PEPBitwiseCode & 4 = 4 
-AND f.SubTypeCodes = 'HLM'
-
-UNION ALL
-
--- 帳戶持有人的法定代理人有負面新聞：[是]
-SELECT 
-    b.customerno,
-    a.CUST_NME,
-    a.OPEN_DTE,
-    a.CLOSED_DTE,
-    a.BRNCH_NBR,
-    b.HIGHRISK,
-    b.RiskScore,
-    'JAH' AS NN_Type,
-    'Y' AS NN_Flag
-FROM PB_Customer_FACT a
-INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
-INNER JOIN PB_OtherRelatedParty_Fact e ON e.CIFKey = b.CIF_KEY
-INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON f.CIFKey = b.CIF_KEY
-WHERE e.PEPBitwiseCode & 4 = 4 
-AND f.SubTypeCodes = 'JAH'
-
-
-
-UNION ALL
-
--- 帳戶持有人的主要股東有負面新聞：[是]
-SELECT 
-    b.customerno,
-    a.CUST_NME,
-    a.OPEN_DTE,
-    a.CLOSED_DTE,
-    a.BRNCH_NBR,
-    b.HIGHRISK,
-    b.RiskScore,
-    'PB_MainShareHolder_Fact' AS NN_Type,
-    'Y' AS NN_Flag
-FROM PB_Customer_FACT a
-INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
-INNER JOIN PB_MainShareHolder_Fact e ON e.CIFKey = b.CIF_KEY
-WHERE e.PEPBitwiseCode & 4 = 4 
-
-
-
-
-UNION ALL
-
--- 帳戶持有人的法定代理人有負面新聞：[是]
-SELECT 
-    b.customerno,
-    a.CUST_NME,
-    a.OPEN_DTE,
-    a.CLOSED_DTE,
-    a.BRNCH_NBR,
-    b.HIGHRISK,
-    b.RiskScore,
-    'OT' AS NN_Type,
-    'Y' AS NN_Flag
-FROM PB_Customer_FACT a
-INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
-INNER JOIN PB_OtherRelatedParty_Fact e ON e.CIFKey = b.CIF_KEY
-INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON f.CIFKey = b.CIF_KEY
-WHERE e.PEPBitwiseCode & 4 = 4 
-AND f.SubTypeCodes = 'OT'
-
-
-UNION ALL
-
--- 帳戶持有人的法定代理人有負面新聞：[是]
-SELECT 
-    b.customerno,
-    a.CUST_NME,
-    a.OPEN_DTE,
-    a.CLOSED_DTE,
-    a.BRNCH_NBR,
-    b.HIGHRISK,
-    b.RiskScore,
-    'OT' AS NN_Type,
-    'Y' AS NN_Flag
-FROM PB_Customer_FACT a
-INNER JOIN BSA_SUB_CUST_FACT b ON a.CIF_KEY = b.CIF_KEY
-INNER JOIN PB_OtherRelatedParty_Fact e ON e.CIFKey = b.CIF_KEY
-INNER JOIN PB_OtherRelatedParty_SubTypeCodes f ON f.CIFKey = b.CIF_KEY
-WHERE e.PEPBitwiseCode & 4 = 4 
-AND f.SubTypeCodes = 'TT'
-
-
-
-
-幫我整理一下
-
-如果我想要改成欄位是這樣可以改?
-Customer CIF	Customer Name	Open Date	Closed Date	Business Workgroup	Risk Level	Risk Score	The account holder has negative news :[Y]Yes	The account holder's appointee (Ex: Authorized Signer,President,CEO,Accounting Manager) has negative news :[Y]Yes	The account holder's Beneficiary has negative news.	The account holder's board of director member has negative news :[Y]Yes	The account holder's Controller has negative news.	The account holder's Donor/Setter has negative news.	The account holder's Guarantor has negative news.	The account holder's High Level Managers has negative news.	The account holder's legal agent has negative news :[Y]Yes	The account holder's main share holder has negative news :[Y]Yes	The account holder's Other Related Party has negative news.	The account holder's Trustee has negative news.
-
-橫向的
-
-
-
-
-
+    b.RiskScore;
