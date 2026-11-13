@@ -1,25 +1,23 @@
-這是一份為您整理好的工作交接、進度追蹤或日報清單，採用條理分明的格式，方便您直接複製使用：
-1. 龍潭電文測試與名單設定
- * 電文測試與結果導出：執行龍潭電文相關測試，並將產出的電文結果匯出至 UATTRM06，提供給 User 進行檢核與確認。
- * Dow Jones 制裁名單調整：開啟/啟用 Dow Jones 制裁名單中 50% 股權相關規則的名單比對（MT 格式部分）。
- * 電文重打作業：完成設定與調整後，重新送出/重打相關電文進行驗證。
-2. SwiftMX 免掃功能測試與邏輯梳理
- * 功能測試與規劃：
-   * 進行 TC（Test Case / 測試案例） 測試。
-   * 規劃 TK（Task / 測試任務） 派送給 User 進行 UAT 測試。
- * 邏輯與關聯表（Table）解析：深入了解 SwiftMX 免掃功能的運作邏輯，並理清背後的資料庫關聯表架構。
+Dear 貫軒,
+
+For below list of clients, please assist to investigate why [Risk Assessment Information - Customer Risk section] does not reflect PEP detail (score of 100) as per [Risk Modeling Score Details].
+
+Client CIF No.
+	SG2100163
+	SG2100160
+	SG2100159
+	SG2100138
+	SG2200226
+	SG2100157
+	SG2280021
+
+Taking SG2100163 as an example,
+
+[Risk Assessment Information - Customer Risk section] – No PEP hit identified
 
 
 
+因為他看的地方為客戶的資訊
+detail 顯示Account holder’s appointee 這個為關聯戶
 
-1.龍潭電文測試，
-匯出電文結果到UATTRM06給user
-開啟Dowjones 制裁50%名單 MT部分
-重打電文
-
-
-2.SwiftMX免掃功能測試
-TC測試，以及規劃TK給user 測試
-了解邏輯跟關聯table
-
-這說明幫我寫好點
+客戶資訊沒有是正確
