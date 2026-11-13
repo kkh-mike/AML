@@ -1,53 +1,49 @@
 
+INSERT ALL
 
-以下是您提供的各個項目之中文翻譯：
- * The account holder's appointee (Ex: Authorized Signer,President,CEO,Accounting Manager) has negative news :[Y]Yes
-   > 帳戶持有人的委任人（例如：授權簽署人、總裁、執行長、會計經理）有負面新聞：[是]
-   > 
- * The account holder's Beneficiary has negative news.
-   > 帳戶持有人的受益人有負面新聞。
-   > 
- * The account holder's board of director member has negative news :[Y]Yes
-   > 帳戶持有人的董事會成員有負面新聞：[是]
-   > 
- * The account holder's Controller has negative news.
-   > 帳戶持有人的控制人（實際控制人）有負面新聞。
-   > 
- * The account holder's Donor/Setter has negative news.
-   > 帳戶持有人的捐贈者/設立人（信託設立人）有負面新聞。
-   > 
- * The account holder's Guarantor has negative news.
-   > 帳戶持有人的保證人有負面新聞。
-   > 
- * The account holder's High Level Managers has negative news.
-   > 帳戶持有人的高階主管有負面新聞。
-   > 
- * The account holder's legal agent has negative news :[Y]Yes
-   > 帳戶持有人的法定代理人有負面新聞：[是]
-   > 
- * The account holder's main share holder has negative news :[Y]Yes
-   > 帳戶持有人的主要股東有負面新聞：[是]
-   > 
- * The account holder's Other Related Party has negative news.
-   > 帳戶持有人的其他相關利害關係人有負面新聞。
-   > 
- * The account holder's Trustee has negative news.
-   > 帳戶持有人的受託人有負面新聞。
-   > 
+  INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
+  VALUES ('wf_I_BANCS', 's_m_I_CUST_RP_BANCS', '--------', '$$BHDT', '20260102', '20260103')
+  
+  INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
+  VALUES ('wf_I_BANCS', 's_m_I_CASA_MASTER_BANCS_01', '--------', '$$BHDT', '20260102', '20260103')
 
 
+  INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
+  VALUES ('wf_I_BANCS', 's_m_I_TD_MASTER_BANCS_01', '--------', '$$BHDT', '20260102', '20260103')
+  
+    INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
+  VALUES ('wf_I_BANCS', 's_m_I_LOAN_MASTER_BANCS_01', '--------', '$$BHDT', '20260102', '20260103')
+    
+    INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
+  VALUES ('wf_I_BANCS', 's_m_I_CUST_MASTER_BANCS_01', '--------', '$$BHDT', '20260102', '20260103')
+  
+  
+  
+  
+      INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
+  VALUES ('wf_I_BANCS', 's_m_I_CASA_MASTER_BANCS_01', '--------', '$$P12MTH', '20260102', '20260103')
+  
+  
+  
+      INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
+  VALUES ('wf_I_BANCS', 's_m_I_TD_MASTER_BANCS_01', '--------', '$$P12MTH', '20260102', '20260103')
+  
+  
+  
+      INTO ODAML.CFG_PAR (WF_NAME, ST_NAME, MPLT_NAME, PAR_NAME, PAR_VAL, LST_MTN_DT) 
+  VALUES ('wf_I_BANCS', 's_m_I_LOAN_MASTER_BANCS_01', '--------', '$$P12MTH', '20260102', '20260103')
+  
+  
+  
+  
 
-The account holder's appointee (Ex: Authorized Signer,President,CEO,Accounting Manager) has negative news :[Y]Yes
-The account holder's Beneficiary has negative news.
-The account holder's board of director member has negative news :[Y]Yes
-The account holder's Controller has negative news.
-The account holder's Donor/Setter has negative news.
-The account holder's Guarantor has negative news.
-The account holder's High Level Managers has negative news.
-The account holder's legal agent has negative news :[Y]Yes
-The account holder's main share holder has negative news :[Y]Yes
-The account holder's Other Related Party has negative news.
-The account holder's Trustee has negative news.
+SELECT * FROM DUAL;
+
+-- 執行後提交
+COMMIT;
 
 
-分別中文意思
+幫我加上before after
+
+SELECT * FROM DUAL; 這幹嘛阿 是不是不用
+
