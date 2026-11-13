@@ -1,23 +1,7 @@
-Dear 貫軒,
-
-For below list of clients, please assist to investigate why [Risk Assessment Information - Customer Risk section] does not reflect PEP detail (score of 100) as per [Risk Modeling Score Details].
-
-Client CIF No.
-	SG2100163
-	SG2100160
-	SG2100159
-	SG2100138
-	SG2200226
-	SG2100157
-	SG2280021
-
-Taking SG2100163 as an example,
-
-[Risk Assessment Information - Customer Risk section] – No PEP hit identified
-
-
-
-因為他看的地方為客戶的資訊
-detail 顯示Account holder’s appointee 這個為關聯戶
-
-客戶資訊沒有是正確
+這封簡短的英文回信供你參考：
+Dear Kau,
+Regarding your query, please note that the PEP hit in [Risk Modeling Score Details] belongs to the account holder’s appointee (a related party) rather than the primary customer.
+Therefore, the [Risk Assessment Information - Customer Risk section] correctly reflects "No" since it evaluates the customer directly.
+Please let me know if you need any further assistance!
+Best regards,
+貫軒
