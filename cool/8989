@@ -1,341 +1,164 @@
-#requires -Version 5.1
-
-# ============================================================
-# Send-SwiftFromTxt-PS51-Parallel.ps1
-# ============================================================
-
-$ErrorActionPreference = 'Stop'
-
-# ============================================================
-# Config
-# ============================================================
-
-$url = 'http://localhost:8082/SwiftProcessor.svc'
-
-$MessageFolder = Join-Path $PSScriptRoot 'messages'
-
-$ActionCode      = 'SCAN_SWIFT'
-$BankNo          = 'JP'
-$BranchNo        = '0923'
-$Channel         = 'SWIFT'
-$MessageTypeCode = 'MT'
-$SourceID        = 'TSID'
-
-$TimeoutMs = 60000
-
-# 同時執行的執行緒數量（設定為 3）
-$MaxThreads = 3
-
-# ============================================================
-# Input Folder Check & Read Files
-# ============================================================
-
-if (-not (Test-Path -LiteralPath $MessageFolder -PathType Container)) {
-    throw "找不到電文資料夾：$MessageFolder"
+$header = @{
+    Accept = "application/json"
 }
 
-$files = @(
-    Get-ChildItem -LiteralPath $MessageFolder -Filter 'TW*.txt' -File |
-    Sort-Object Name
-)
+function Get-ReferenceNoFromFileName {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$MessageFile
+    )
 
-$total = $files.Count
+    $fileNameWithoutExtension = [System.IO.Path]::GetFileNameWithoutExtension($MessageFile)
 
-if ($total -eq 0) {
-    throw "在資料夾中找不到以 TW 開頭的 TXT 檔案：$MessageFolder"
-}
-
-Write-Host ""
-Write-Host "============================================================"
-Write-Host "Start SWIFT Batch (PowerShell 5.1 Multi-threaded Runspace)"
-Write-Host "============================================================"
-Write-Host "Input Folder   : $MessageFolder"
-Write-Host "Total Files    : $total"
-Write-Host "Max Threads    : $MaxThreads"
-Write-Host ""
-
-# ============================================================
-# Pre-check ReferenceNumber Uniqueness & Build Task List
-# ============================================================
-
-$fileDataList = [System.Collections.Generic.List[Object]]::new()
-$referenceNumbers = @{}
-
-foreach ($file in $files) {
-    $fileNameWithoutExt = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
-
-    if ($fileNameWithoutExt -notmatch '^(?<BankNo>[^_]+)_(?<CreatedDate>[^_]+)_(?<ClientReferenceNo>.+)_(?<Sequence>[^_]+)$') {
-        throw "檔名格式不正確，預期格式為 BankNo_CreatedDate_ClientReferenceNo_流水號.txt：$($file.Name)"
+    # 前兩段是 BankNo、CompletedDate；最後一段是流水號；
+    # 中間部分（包含底線）是 ClientReferenceNo。
+    if ($fileNameWithoutExtension -notmatch '^[^_]+_[^_]+_(?<ClientReferenceNo>.+)_[^_]+$') {
+        throw "檔名格式不正確，預期格式為 BankNo_CompletedDate_ClientReferenceNo_流水號.txt：$MessageFile"
     }
 
     $clientReferenceNo = $Matches['ClientReferenceNo']
-    $referenceNumber = $clientReferenceNo + '99'
 
-    if ($referenceNumbers.ContainsKey($referenceNumber)) {
-        throw "ReferenceNumber 重複：$referenceNumber（檔案：$($file.Name)）"
-    }
-    $referenceNumbers[$referenceNumber] = $true
-
-    # 讀取檔案內容並預先處理
-    $swiftMessage = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8).Trim()
-    if ([string]::IsNullOrWhiteSpace($swiftMessage)) {
-        throw "電文檔案是空的：$($file.FullName)"
-    }
-    if (-not $swiftMessage.EndsWith('-}')) {
-        $swiftMessage = "$swiftMessage-}"
+    if ([string]::IsNullOrWhiteSpace($clientReferenceNo)) {
+        throw "檔名中的 ClientReferenceNo 不可為空：$MessageFile"
     }
 
-    $fileDataList.Add([PSCustomObject]@{
-        FileFullName    = $file.FullName
-        FileName        = $file.Name
-        ReferenceNumber = $referenceNumber
-        SwiftMessage    = $swiftMessage
-    })
+    return $clientReferenceNo + '0'
 }
 
-# ============================================================
-# Create Runspace Pool
-# ============================================================
+# 各國 API 設定
+$countryConfig = @{
+    "HK" = @{
+        SourceId        = "SwiftMX"
+        BankNo          = "HK"
+        BranchNo        = "0900"
+        Channel         = "SwiftMX"
+        MessageTypeCode = "pacs.008.001.08"
+    }
 
-$runspacePool = [Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(1, $MaxThreads)
-$runspacePool.Open()
+    "SG" = @{
+        SourceId        = "SwiftMX"
+        BankNo          = "SG"
+        BranchNo        = "0001"
+        Channel         = "SwiftMX"
+        MessageTypeCode = "pacs.008.001.08"
+    }
 
-$jobs = [System.Collections.Generic.List[PSCustomObject]]::new()
-$batchWatch = [System.Diagnostics.Stopwatch]::StartNew()
+    "AU" = @{
+        SourceId        = "SwiftMX"
+        BankNo          = "AU"
+        BranchNo        = "0200"
+        Channel         = "SwiftMX"
+        MessageTypeCode = "pacs.008.001.08"
+    }
 
-# 每個執行緒要執行的 ScriptBlock
-$scriptBlock = {
+    "JP" = @{
+        SourceId        = "SwiftMX"
+        BankNo          = "JP"
+        BranchNo        = "0300"
+        Channel         = "SwiftMX"
+        MessageTypeCode = "pacs.008.001.08"
+    }
+
+    "TW" = @{
+        SourceId        = "SwiftMX"
+        BankNo          = "TW"
+        BranchNo        = "0014"
+        Channel         = "SwiftMX"
+        MessageTypeCode = "pacs.008.001.08"
+    }
+}
+
+function Submit-SwiftMX {
     param(
-        $task,
-        $url,
-        $ActionCode,
-        $BankNo,
-        $BranchNo,
-        $Channel,
-        $MessageTypeCode,
-        $SourceID,
-        $TimeoutMs
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("HK", "SG", "AU", "JP", "TW")]
+        [string]$Country,
+
+        [Parameter(Mandatory = $true)]
+        [string]$MessageFile
     )
 
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    $status = 'SUCCESS'
-    $responseText = ''
-    $errorMessage = ''
+    $cfg = $countryConfig[$Country]
+
+    if (-not $cfg) {
+        throw "Unsupported country: $Country"
+    }
+
+    if (-not (Test-Path -LiteralPath $MessageFile -PathType Leaf)) {
+        throw "找不到電文檔案：$MessageFile"
+    }
+
+    # 從檔名取得 ClientReferenceNo，並在末尾補 0
+    $referenceNo = Get-ReferenceNoFromFileName -MessageFile $MessageFile
+
+    $rawMessage = [System.IO.File]::ReadAllText(
+        $MessageFile,
+        [System.Text.Encoding]::UTF8
+    )
+
+    if ([string]::IsNullOrWhiteSpace($rawMessage)) {
+        throw "電文檔案是空的：$MessageFile"
+    }
+
+    $body = @{
+        SourceId        = $cfg.SourceId
+        ReferenceNo     = $referenceNo
+        BankNo          = $cfg.BankNo
+        BranchNo        = $cfg.BranchNo
+        Channel         = $cfg.Channel
+        MessageTypeCode = $cfg.MessageTypeCode
+        RawMessage      = $rawMessage
+    } | ConvertTo-Json -Depth 20
+
+    $uri = "http://localhost:8087/SwiftMX/SubmitMessage"
+
+    Invoke-RestMethod `
+        -Method Post `
+        -Uri $uri `
+        -Headers $header `
+        -ContentType "application/json; charset=utf-8" `
+        -Body $body
+}
+
+# 讀取 messages 資料夾中所有檔名以 TW 開頭的 TXT
+$country = "TW"
+$messageFolder = Join-Path $PSScriptRoot "messages"
+
+if (-not (Test-Path -LiteralPath $messageFolder -PathType Container)) {
+    throw "找不到電文資料夾：$messageFolder"
+}
+
+$files = @(
+    Get-ChildItem `
+        -LiteralPath $messageFolder `
+        -Filter "TW*.txt" `
+        -File |
+    Sort-Object Name
+)
+
+if ($files.Count -eq 0) {
+    throw "在資料夾中找不到以 TW 開頭的 TXT 檔案：$messageFolder"
+}
+
+foreach ($file in $files) {
+    Write-Host "送出檔案：$($file.Name)"
 
     try {
-        # 組裝 SOAP XML
-        $soapNs    = 'http://schemas.xmlsoap.org/soap/envelope/'
-        $serviceNs = 'http://patriotofficer.net/SwiftService'
+        $referenceNo = Get-ReferenceNoFromFileName -MessageFile $file.FullName
+        Write-Host "ReferenceNo：$referenceNo"
 
-        $xml = New-Object System.Xml.XmlDocument
-        $xml.PreserveWhitespace = $true
+        $result = Submit-SwiftMX `
+            -Country $country `
+            -MessageFile $file.FullName
 
-        $declaration = $xml.CreateXmlDeclaration('1.0', 'utf-8', $null)
-        [void]$xml.AppendChild($declaration)
-
-        $envelope = $xml.CreateElement('soap', 'Envelope', $soapNs)
-        [void]$xml.AppendChild($envelope)
-
-        $body = $xml.CreateElement('soap', 'Body', $soapNs)
-        [void]$envelope.AppendChild($body)
-
-        $submit = $xml.CreateElement('', 'SubmitRequest', $serviceNs)
-        [void]$body.AppendChild($submit)
-
-        $params = $xml.CreateElement('', 'Params', $serviceNs)
-        [void]$submit.AppendChild($params)
-
-        $fields = [ordered]@{
-            ActionCode = $ActionCode
-            BankNo     = $BankNo
-            BranchNo   = $BranchNo
-            Channel    = $Channel
-        }
-        foreach ($f in $fields.GetEnumerator()) {
-            $el = $xml.CreateElement('', $f.Key, $serviceNs)
-            $el.InnerText = [string]$f.Value
-            [void]$params.AppendChild($el)
-        }
-
-        $messageElement = $xml.CreateElement('', 'Message', $serviceNs)
-        if ($task.SwiftMessage.Contains(']]>')) {
-            $messageElement.InnerText = $task.SwiftMessage
-        }
-        else {
-            $cdata = $xml.CreateCDataSection($task.SwiftMessage)
-            [void]$messageElement.AppendChild($cdata)
-        }
-        [void]$params.AppendChild($messageElement)
-
-        $remainingFields = [ordered]@{
-            MessageTypeCode = $MessageTypeCode
-            ReferenceNumber = $task.ReferenceNumber
-            SourceID        = $SourceID
-        }
-        foreach ($f in $remainingFields.GetEnumerator()) {
-            $el = $xml.CreateElement('', $f.Key, $serviceNs)
-            $el.InnerText = [string]$f.Value
-            [void]$params.AppendChild($el)
-        }
-
-        # 發送 WebRequest
-        $soapWebRequest = [System.Net.WebRequest]::Create($url)
-        $soapWebRequest.Headers.Add('SOAPAction', 'SubmitRequest')
-        $soapWebRequest.ContentType = 'text/xml; charset=utf-8'
-        $soapWebRequest.Accept = 'text/xml'
-        $soapWebRequest.Method = 'POST'
-        $soapWebRequest.Timeout = $TimeoutMs
-        $soapWebRequest.ReadWriteTimeout = $TimeoutMs
-
-        $requestStream = $soapWebRequest.GetRequestStream()
-        try {
-            $settings = New-Object System.Xml.XmlWriterSettings
-            $settings.Encoding = New-Object System.Text.UTF8Encoding($false)
-            $settings.Indent = $false
-            $settings.CloseOutput = $false
-
-            $writer = [System.Xml.XmlWriter]::Create($requestStream, $settings)
-            try {
-                $xml.Save($writer)
-                $writer.Flush()
-            }
-            finally {
-                $writer.Close()
-            }
-        }
-        finally {
-            $requestStream.Close()
-        }
-
-        $resp = $soapWebRequest.GetResponse()
-        try {
-            $responseStream = $resp.GetResponseStream()
-            try {
-                $reader = New-Object System.IO.StreamReader($responseStream, [System.Text.Encoding]::UTF8)
-                try {
-                    $responseText = $reader.ReadToEnd()
-                }
-                finally {
-                    $reader.Close()
-                }
-            }
-            finally {
-                $responseStream.Close()
-            }
-        }
-        finally {
-            $resp.Close()
-        }
-
-        $sw.Stop()
-        return [PSCustomObject]@{
-            Status          = 'SUCCESS'
-            ReferenceNumber = $task.ReferenceNumber
-            MessageFile     = $task.FileName
-            ElapsedMs       = [math]::Round($sw.Elapsed.TotalMilliseconds, 2)
-            ResponseText    = $responseText
-            ErrorMessage    = $null
-        }
+        Write-Host "完成：$($file.Name)"
+        $result
     }
     catch {
-        $sw.Stop()
-        return [PSCustomObject]@{
-            Status          = 'FAILED'
-            ReferenceNumber = $task.ReferenceNumber
-            MessageFile     = $task.FileName
-            ElapsedMs       = [math]::Round($sw.Elapsed.TotalMilliseconds, 2)
-            ResponseText    = $null
-            ErrorMessage    = $_.Exception.Message
-        }
+        Write-Error "送出失敗：$($file.Name)；錯誤：$($_.Exception.Message)"
     }
 }
 
-# ============================================================
-# Submit Tasks to Runspace Pool
-# ============================================================
 
-foreach ($task in $fileDataList) {
-    $powershell = [PowerShell]::Create().AddScript($scriptBlock).AddArgument($task).AddArgument($url).AddArgument($ActionCode).AddArgument($BankNo).AddArgument($BranchNo).AddArgument($Channel).AddArgument($MessageTypeCode).AddArgument($SourceID).AddArgument($TimeoutMs)
-    $powershell.RunspacePool = $runspacePool
 
-    $jobs.Add([PSCustomObject]@{
-        Pipe   = $powershell
-        Result = $powershell.BeginInvoke()
-    })
-}
-
-# ============================================================
-# Collect Results
-# ============================================================
-
-$successCount = 0
-$failedCount = 0
-$ReferenceList = [System.Collections.Generic.List[Object]]::new()
-$results = [System.Collections.Generic.List[Object]]::new()
-
-$seq = 1
-foreach ($job in $jobs) {
-    $res = $job.Pipe.EndInvoke($job.Result)
-    $job.Pipe.Dispose()
-
-    $results.Add($res)
-
-    if ($res.Status -eq 'SUCCESS') {
-        $successCount++
-        Write-Host "[$seq/$total] [SUCCESS] File: $($res.MessageFile) | Ref: $($res.ReferenceNumber) | Time: $($res.ElapsedMs) ms" -ForegroundColor Green
-    }
-    else {
-        $failedCount++
-        Write-Host "[$seq/$total] [FAILED ] File: $($res.MessageFile) | Ref: $($res.ReferenceNumber) | Error: $($res.ErrorMessage)" -ForegroundColor Red
-    }
-
-    $ReferenceList.Add([PSCustomObject]@{
-        ReferenceNumber = $res.ReferenceNumber
-        ActionCode      = $ActionCode
-        BankNo          = $BankNo
-        BranchNo        = $BranchNo
-        Channel         = $Channel
-        MessageTypeCode = $MessageTypeCode
-        SourceID        = $SourceID
-        MessageFile     = $res.MessageFile
-    })
-    $seq++
-}
-
-$runspacePool.Close()
-$runspacePool.Dispose()
-$batchWatch.Stop()
-
-# ============================================================
-# Summary & Reference List
-# ============================================================
-
-Write-Host ""
-Write-Host "============================================================"
-Write-Host "Batch Summary"
-Write-Host "============================================================"
-Write-Host "Total      : $total"
-Write-Host "Success    : $successCount" -ForegroundColor Green
-Write-Host "Failed     : $failedCount" -ForegroundColor Red
-Write-Host "Total Time : $([math]::Round($batchWatch.Elapsed.TotalSeconds, 2)) sec"
-Write-Host "============================================================"
-
-Write-Host ""
-Write-Host "============================================================"
-Write-Host "Reference List"
-Write-Host "============================================================"
-
-foreach ($Ref in $ReferenceList) {
-    Write-Host ""
-    Write-Host "ReferenceNumber : $($Ref.ReferenceNumber)"
-    Write-Host "ActionCode      : $($Ref.ActionCode)"
-    Write-Host "BankNo          : $($Ref.BankNo)"
-    Write-Host "BranchNo        : $($Ref.BranchNo)"
-    Write-Host "Channel         : $($Ref.Channel)"
-    Write-Host "MessageTypeCode : $($Ref.MessageTypeCode)"
-    Write-Host "SourceID        : $($Ref.SourceID)"
-    Write-Host "MessageFile     : $($Ref.MessageFile)"
-}
-
-Write-Host ""
-Write-Host "Batch Completed." -ForegroundColor Cyan
+我這要改成多執行要怎麼改
