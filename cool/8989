@@ -1,6 +1,341 @@
+#requires -Version 5.1
 
+# ============================================================
+# Send-SwiftFromTxt-PS51-Parallel.ps1
+# ============================================================
 
-PS D:\TEST> D:\TEST\1141923\連續MT_THREAD\V2MTRUN_conti.ps1
-無法執行 'V2MTRUN_conti.ps1' 指令碼，因為它包含指定 Windows PowerShell 7.0 的 "#requires" 陳述式。指令碼所需的 Windows PowerShell 版本與目前執行中的 Windows PowerShell 5.1.17763.8276 不符。
-    + CategoryInfo          : ResourceUnavailable: (V2MTRUN_conti.ps1:String) [], ParentContainsErrorRecordException
-    + FullyQualifiedErrorId : ScriptRequiresUnmatchedPSVersion
+$ErrorActionPreference = 'Stop'
+
+# ============================================================
+# Config
+# ============================================================
+
+$url = 'http://localhost:8082/SwiftProcessor.svc'
+
+$MessageFolder = Join-Path $PSScriptRoot 'messages'
+
+$ActionCode      = 'SCAN_SWIFT'
+$BankNo          = 'JP'
+$BranchNo        = '0923'
+$Channel         = 'SWIFT'
+$MessageTypeCode = 'MT'
+$SourceID        = 'TSID'
+
+$TimeoutMs = 60000
+
+# 同時執行的執行緒數量（設定為 3）
+$MaxThreads = 3
+
+# ============================================================
+# Input Folder Check & Read Files
+# ============================================================
+
+if (-not (Test-Path -LiteralPath $MessageFolder -PathType Container)) {
+    throw "找不到電文資料夾：$MessageFolder"
+}
+
+$files = @(
+    Get-ChildItem -LiteralPath $MessageFolder -Filter 'TW*.txt' -File |
+    Sort-Object Name
+)
+
+$total = $files.Count
+
+if ($total -eq 0) {
+    throw "在資料夾中找不到以 TW 開頭的 TXT 檔案：$MessageFolder"
+}
+
+Write-Host ""
+Write-Host "============================================================"
+Write-Host "Start SWIFT Batch (PowerShell 5.1 Multi-threaded Runspace)"
+Write-Host "============================================================"
+Write-Host "Input Folder   : $MessageFolder"
+Write-Host "Total Files    : $total"
+Write-Host "Max Threads    : $MaxThreads"
+Write-Host ""
+
+# ============================================================
+# Pre-check ReferenceNumber Uniqueness & Build Task List
+# ============================================================
+
+$fileDataList = [System.Collections.Generic.List[Object]]::new()
+$referenceNumbers = @{}
+
+foreach ($file in $files) {
+    $fileNameWithoutExt = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+
+    if ($fileNameWithoutExt -notmatch '^(?<BankNo>[^_]+)_(?<CreatedDate>[^_]+)_(?<ClientReferenceNo>.+)_(?<Sequence>[^_]+)$') {
+        throw "檔名格式不正確，預期格式為 BankNo_CreatedDate_ClientReferenceNo_流水號.txt：$($file.Name)"
+    }
+
+    $clientReferenceNo = $Matches['ClientReferenceNo']
+    $referenceNumber = $clientReferenceNo + '99'
+
+    if ($referenceNumbers.ContainsKey($referenceNumber)) {
+        throw "ReferenceNumber 重複：$referenceNumber（檔案：$($file.Name)）"
+    }
+    $referenceNumbers[$referenceNumber] = $true
+
+    # 讀取檔案內容並預先處理
+    $swiftMessage = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8).Trim()
+    if ([string]::IsNullOrWhiteSpace($swiftMessage)) {
+        throw "電文檔案是空的：$($file.FullName)"
+    }
+    if (-not $swiftMessage.EndsWith('-}')) {
+        $swiftMessage = "$swiftMessage-}"
+    }
+
+    $fileDataList.Add([PSCustomObject]@{
+        FileFullName    = $file.FullName
+        FileName        = $file.Name
+        ReferenceNumber = $referenceNumber
+        SwiftMessage    = $swiftMessage
+    })
+}
+
+# ============================================================
+# Create Runspace Pool
+# ============================================================
+
+$runspacePool = [Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(1, $MaxThreads)
+$runspacePool.Open()
+
+$jobs = [System.Collections.Generic.List[PSCustomObject]]::new()
+$batchWatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+# 每個執行緒要執行的 ScriptBlock
+$scriptBlock = {
+    param(
+        $task,
+        $url,
+        $ActionCode,
+        $BankNo,
+        $BranchNo,
+        $Channel,
+        $MessageTypeCode,
+        $SourceID,
+        $TimeoutMs
+    )
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $status = 'SUCCESS'
+    $responseText = ''
+    $errorMessage = ''
+
+    try {
+        # 組裝 SOAP XML
+        $soapNs    = 'http://schemas.xmlsoap.org/soap/envelope/'
+        $serviceNs = 'http://patriotofficer.net/SwiftService'
+
+        $xml = New-Object System.Xml.XmlDocument
+        $xml.PreserveWhitespace = $true
+
+        $declaration = $xml.CreateXmlDeclaration('1.0', 'utf-8', $null)
+        [void]$xml.AppendChild($declaration)
+
+        $envelope = $xml.CreateElement('soap', 'Envelope', $soapNs)
+        [void]$xml.AppendChild($envelope)
+
+        $body = $xml.CreateElement('soap', 'Body', $soapNs)
+        [void]$envelope.AppendChild($body)
+
+        $submit = $xml.CreateElement('', 'SubmitRequest', $serviceNs)
+        [void]$body.AppendChild($submit)
+
+        $params = $xml.CreateElement('', 'Params', $serviceNs)
+        [void]$submit.AppendChild($params)
+
+        $fields = [ordered]@{
+            ActionCode = $ActionCode
+            BankNo     = $BankNo
+            BranchNo   = $BranchNo
+            Channel    = $Channel
+        }
+        foreach ($f in $fields.GetEnumerator()) {
+            $el = $xml.CreateElement('', $f.Key, $serviceNs)
+            $el.InnerText = [string]$f.Value
+            [void]$params.AppendChild($el)
+        }
+
+        $messageElement = $xml.CreateElement('', 'Message', $serviceNs)
+        if ($task.SwiftMessage.Contains(']]>')) {
+            $messageElement.InnerText = $task.SwiftMessage
+        }
+        else {
+            $cdata = $xml.CreateCDataSection($task.SwiftMessage)
+            [void]$messageElement.AppendChild($cdata)
+        }
+        [void]$params.AppendChild($messageElement)
+
+        $remainingFields = [ordered]@{
+            MessageTypeCode = $MessageTypeCode
+            ReferenceNumber = $task.ReferenceNumber
+            SourceID        = $SourceID
+        }
+        foreach ($f in $remainingFields.GetEnumerator()) {
+            $el = $xml.CreateElement('', $f.Key, $serviceNs)
+            $el.InnerText = [string]$f.Value
+            [void]$params.AppendChild($el)
+        }
+
+        # 發送 WebRequest
+        $soapWebRequest = [System.Net.WebRequest]::Create($url)
+        $soapWebRequest.Headers.Add('SOAPAction', 'SubmitRequest')
+        $soapWebRequest.ContentType = 'text/xml; charset=utf-8'
+        $soapWebRequest.Accept = 'text/xml'
+        $soapWebRequest.Method = 'POST'
+        $soapWebRequest.Timeout = $TimeoutMs
+        $soapWebRequest.ReadWriteTimeout = $TimeoutMs
+
+        $requestStream = $soapWebRequest.GetRequestStream()
+        try {
+            $settings = New-Object System.Xml.XmlWriterSettings
+            $settings.Encoding = New-Object System.Text.UTF8Encoding($false)
+            $settings.Indent = $false
+            $settings.CloseOutput = $false
+
+            $writer = [System.Xml.XmlWriter]::Create($requestStream, $settings)
+            try {
+                $xml.Save($writer)
+                $writer.Flush()
+            }
+            finally {
+                $writer.Close()
+            }
+        }
+        finally {
+            $requestStream.Close()
+        }
+
+        $resp = $soapWebRequest.GetResponse()
+        try {
+            $responseStream = $resp.GetResponseStream()
+            try {
+                $reader = New-Object System.IO.StreamReader($responseStream, [System.Text.Encoding]::UTF8)
+                try {
+                    $responseText = $reader.ReadToEnd()
+                }
+                finally {
+                    $reader.Close()
+                }
+            }
+            finally {
+                $responseStream.Close()
+            }
+        }
+        finally {
+            $resp.Close()
+        }
+
+        $sw.Stop()
+        return [PSCustomObject]@{
+            Status          = 'SUCCESS'
+            ReferenceNumber = $task.ReferenceNumber
+            MessageFile     = $task.FileName
+            ElapsedMs       = [math]::Round($sw.Elapsed.TotalMilliseconds, 2)
+            ResponseText    = $responseText
+            ErrorMessage    = $null
+        }
+    }
+    catch {
+        $sw.Stop()
+        return [PSCustomObject]@{
+            Status          = 'FAILED'
+            ReferenceNumber = $task.ReferenceNumber
+            MessageFile     = $task.FileName
+            ElapsedMs       = [math]::Round($sw.Elapsed.TotalMilliseconds, 2)
+            ResponseText    = $null
+            ErrorMessage    = $_.Exception.Message
+        }
+    }
+}
+
+# ============================================================
+# Submit Tasks to Runspace Pool
+# ============================================================
+
+foreach ($task in $fileDataList) {
+    $powershell = [PowerShell]::Create().AddScript($scriptBlock).AddArgument($task).AddArgument($url).AddArgument($ActionCode).AddArgument($BankNo).AddArgument($BranchNo).AddArgument($Channel).AddArgument($MessageTypeCode).AddArgument($SourceID).AddArgument($TimeoutMs)
+    $powershell.RunspacePool = $runspacePool
+
+    $jobs.Add([PSCustomObject]@{
+        Pipe   = $powershell
+        Result = $powershell.BeginInvoke()
+    })
+}
+
+# ============================================================
+# Collect Results
+# ============================================================
+
+$successCount = 0
+$failedCount = 0
+$ReferenceList = [System.Collections.Generic.List[Object]]::new()
+$results = [System.Collections.Generic.List[Object]]::new()
+
+$seq = 1
+foreach ($job in $jobs) {
+    $res = $job.Pipe.EndInvoke($job.Result)
+    $job.Pipe.Dispose()
+
+    $results.Add($res)
+
+    if ($res.Status -eq 'SUCCESS') {
+        $successCount++
+        Write-Host "[$seq/$total] [SUCCESS] File: $($res.MessageFile) | Ref: $($res.ReferenceNumber) | Time: $($res.ElapsedMs) ms" -ForegroundColor Green
+    }
+    else {
+        $failedCount++
+        Write-Host "[$seq/$total] [FAILED ] File: $($res.MessageFile) | Ref: $($res.ReferenceNumber) | Error: $($res.ErrorMessage)" -ForegroundColor Red
+    }
+
+    $ReferenceList.Add([PSCustomObject]@{
+        ReferenceNumber = $res.ReferenceNumber
+        ActionCode      = $ActionCode
+        BankNo          = $BankNo
+        BranchNo        = $BranchNo
+        Channel         = $Channel
+        MessageTypeCode = $MessageTypeCode
+        SourceID        = $SourceID
+        MessageFile     = $res.MessageFile
+    })
+    $seq++
+}
+
+$runspacePool.Close()
+$runspacePool.Dispose()
+$batchWatch.Stop()
+
+# ============================================================
+# Summary & Reference List
+# ============================================================
+
+Write-Host ""
+Write-Host "============================================================"
+Write-Host "Batch Summary"
+Write-Host "============================================================"
+Write-Host "Total      : $total"
+Write-Host "Success    : $successCount" -ForegroundColor Green
+Write-Host "Failed     : $failedCount" -ForegroundColor Red
+Write-Host "Total Time : $([math]::Round($batchWatch.Elapsed.TotalSeconds, 2)) sec"
+Write-Host "============================================================"
+
+Write-Host ""
+Write-Host "============================================================"
+Write-Host "Reference List"
+Write-Host "============================================================"
+
+foreach ($Ref in $ReferenceList) {
+    Write-Host ""
+    Write-Host "ReferenceNumber : $($Ref.ReferenceNumber)"
+    Write-Host "ActionCode      : $($Ref.ActionCode)"
+    Write-Host "BankNo          : $($Ref.BankNo)"
+    Write-Host "BranchNo        : $($Ref.BranchNo)"
+    Write-Host "Channel         : $($Ref.Channel)"
+    Write-Host "MessageTypeCode : $($Ref.MessageTypeCode)"
+    Write-Host "SourceID        : $($Ref.SourceID)"
+    Write-Host "MessageFile     : $($Ref.MessageFile)"
+}
+
+Write-Host ""
+Write-Host "Batch Completed." -ForegroundColor Cyan
