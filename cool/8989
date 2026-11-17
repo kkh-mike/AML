@@ -1,7 +1,7 @@
-#requires -Version 5.1
+#requires -Version 7.0
 
 # ============================================================
-# Send-SwiftFromTxt.ps1
+# Send-SwiftFromTxt-Parallel.ps1
 # ============================================================
 
 $ErrorActionPreference = 'Stop'
@@ -23,12 +23,14 @@ $SourceID        = 'TSID'
 
 $TimeoutMs = 60000
 
+# 同時執行的執行緒數量（對應您的需求：分三個執行緒）
+$ThrottleLimit = 3
+
 # ============================================================
-# SOAP Request Function
+# SOAP Request Function (內部共用)
 # ============================================================
 
 function Execute-SOAPRequest {
-
     param (
         [Parameter(Mandatory = $true)]
         [xml]$SOAPRequest,
@@ -38,7 +40,6 @@ function Execute-SOAPRequest {
     )
 
     $soapWebRequest = [System.Net.WebRequest]::Create($URL)
-
     $soapWebRequest.Headers.Add('SOAPAction', 'SubmitRequest')
     $soapWebRequest.ContentType = 'text/xml; charset=utf-8'
     $soapWebRequest.Accept = 'text/xml'
@@ -47,19 +48,13 @@ function Execute-SOAPRequest {
     $soapWebRequest.ReadWriteTimeout = $TimeoutMs
 
     $requestStream = $soapWebRequest.GetRequestStream()
-
     try {
-
         $settings = New-Object System.Xml.XmlWriterSettings
         $settings.Encoding = New-Object System.Text.UTF8Encoding($false)
         $settings.Indent = $false
         $settings.CloseOutput = $false
 
-        $writer = [System.Xml.XmlWriter]::Create(
-            $requestStream,
-            $settings
-        )
-
+        $writer = [System.Xml.XmlWriter]::Create($requestStream, $settings)
         try {
             $SOAPRequest.Save($writer)
             $writer.Flush()
@@ -73,18 +68,10 @@ function Execute-SOAPRequest {
     }
 
     $resp = $soapWebRequest.GetResponse()
-
     try {
-
         $responseStream = $resp.GetResponseStream()
-
         try {
-
-            $reader = New-Object System.IO.StreamReader(
-                $responseStream,
-                [System.Text.Encoding]::UTF8
-            )
-
+            $reader = New-Object System.IO.StreamReader($responseStream, [System.Text.Encoding]::UTF8)
             try {
                 return $reader.ReadToEnd()
             }
@@ -102,11 +89,10 @@ function Execute-SOAPRequest {
 }
 
 # ============================================================
-# Build SOAP XML
+# Build SOAP XML Function
 # ============================================================
 
 function New-SOAPRequest {
-
     param (
         [string]$SwiftMessage,
         [string]$ReferenceNumber
@@ -118,44 +104,19 @@ function New-SOAPRequest {
     $xml = New-Object System.Xml.XmlDocument
     $xml.PreserveWhitespace = $true
 
-    $declaration = $xml.CreateXmlDeclaration(
-        '1.0',
-        'utf-8',
-        $null
-    )
-
+    $declaration = $xml.CreateXmlDeclaration('1.0', 'utf-8', $null)
     [void]$xml.AppendChild($declaration)
 
-    $envelope = $xml.CreateElement(
-        'soap',
-        'Envelope',
-        $soapNs
-    )
-
+    $envelope = $xml.CreateElement('soap', 'Envelope', $soapNs)
     [void]$xml.AppendChild($envelope)
 
-    $body = $xml.CreateElement(
-        'soap',
-        'Body',
-        $soapNs
-    )
-
+    $body = $xml.CreateElement('soap', 'Body', $soapNs)
     [void]$envelope.AppendChild($body)
 
-    $submit = $xml.CreateElement(
-        '',
-        'SubmitRequest',
-        $serviceNs
-    )
-
+    $submit = $xml.CreateElement('', 'SubmitRequest', $serviceNs)
     [void]$body.AppendChild($submit)
 
-    $params = $xml.CreateElement(
-        '',
-        'Params',
-        $serviceNs
-    )
-
+    $params = $xml.CreateElement('', 'Params', $serviceNs)
     [void]$submit.AppendChild($params)
 
     $fields = [ordered]@{
@@ -166,24 +127,12 @@ function New-SOAPRequest {
     }
 
     foreach ($field in $fields.GetEnumerator()) {
-
-        $element = $xml.CreateElement(
-            '',
-            $field.Key,
-            $serviceNs
-        )
-
+        $element = $xml.CreateElement('', $field.Key, $serviceNs)
         $element.InnerText = [string]$field.Value
-
         [void]$params.AppendChild($element)
     }
 
-    $messageElement = $xml.CreateElement(
-        '',
-        'Message',
-        $serviceNs
-    )
-
+    $messageElement = $xml.CreateElement('', 'Message', $serviceNs)
     if ($SwiftMessage.Contains(']]>')) {
         $messageElement.InnerText = $SwiftMessage
     }
@@ -191,7 +140,6 @@ function New-SOAPRequest {
         $cdata = $xml.CreateCDataSection($SwiftMessage)
         [void]$messageElement.AppendChild($cdata)
     }
-
     [void]$params.AppendChild($messageElement)
 
     $remainingFields = [ordered]@{
@@ -201,15 +149,8 @@ function New-SOAPRequest {
     }
 
     foreach ($field in $remainingFields.GetEnumerator()) {
-
-        $element = $xml.CreateElement(
-            '',
-            $field.Key,
-            $serviceNs
-        )
-
+        $element = $xml.CreateElement('', $field.Key, $serviceNs)
         $element.InnerText = [string]$field.Value
-
         [void]$params.AppendChild($element)
     }
 
@@ -217,22 +158,15 @@ function New-SOAPRequest {
 }
 
 # ============================================================
-# Input Folder Check
+# Input Folder Check & Read Files
 # ============================================================
 
 if (-not (Test-Path -LiteralPath $MessageFolder -PathType Container)) {
     throw "找不到電文資料夾：$MessageFolder"
 }
 
-# ============================================================
-# Read TXT Files
-# ============================================================
-
 $files = @(
-    Get-ChildItem `
-        -LiteralPath $MessageFolder `
-        -Filter 'TW*.txt' `
-        -File |
+    Get-ChildItem -LiteralPath $MessageFolder -Filter 'TW*.txt' -File |
     Sort-Object Name
 )
 
@@ -244,76 +178,75 @@ if ($total -eq 0) {
 
 Write-Host ""
 Write-Host "================================="
-Write-Host "Start SWIFT Batch"
+Write-Host "Start SWIFT Batch (Multi-threaded)"
 Write-Host "================================="
-Write-Host "Input Folder : $MessageFolder"
-Write-Host "Total        : $total"
+Write-Host "Input Folder   : $MessageFolder"
+Write-Host "Total Files    : $total"
+Write-Host "Throttle Limit : $ThrottleLimit threads"
 Write-Host ""
 
 # ============================================================
-# Process Messages
+# Pre-check ReferenceNumber Uniqueness
 # ============================================================
 
-$ReferenceList = New-Object System.Collections.Generic.List[Object]
-$batchWatch = [System.Diagnostics.Stopwatch]::StartNew()
+$fileDataList = [System.Collections.Generic.List[Object]]::new()
 $referenceNumbers = @{}
 
-$successCount = 0
-$failedCount = 0
+foreach ($file in $files) {
+    $fileNameWithoutExt = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
 
-for ($i = 0; $i -lt $total; $i++) {
+    if ($fileNameWithoutExt -notmatch '^(?<BankNo>[^_]+)_(?<CreatedDate>[^_]+)_(?<ClientReferenceNo>.+)_(?<Sequence>[^_]+)$') {
+        throw "檔名格式不正確，預期格式為 BankNo_CreatedDate_ClientReferenceNo_流水號.txt：$($file.Name)"
+    }
 
-    $seq = $i + 1
-    $file = $files[$i]
-
-    # 依檔名格式讀取 ClientReferenceNo，並在最後補 0
-
-
-$fileNameWithoutExt = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
-
-if ($fileNameWithoutExt -notmatch '^(?<BankNo>[^_]+)_(?<CreatedDate>[^_]+)_(?<ClientReferenceNo>.+)_(?<Sequence>[^_]+)$') {
-    throw "檔名格式不正確，預期格式為 BankNo_CreatedDate_ClientReferenceNo_流水號.txt：$($file.Name)"
-}
-
-$clientReferenceNo = $Matches['ClientReferenceNo']
-$referenceNumber = $clientReferenceNo + '99'
-
-
+    $clientReferenceNo = $Matches['ClientReferenceNo']
+    $referenceNumber = $clientReferenceNo + '99'
 
     if ($referenceNumbers.ContainsKey($referenceNumber)) {
         throw "ReferenceNumber 重複：$referenceNumber（檔案：$($file.Name)）"
     }
-
     $referenceNumbers[$referenceNumber] = $true
 
-    $ReferenceList.Add([PSCustomObject]@{
-        ReferenceNumber = $referenceNumber
-        ActionCode      = $ActionCode
-        BankNo          = $BankNo
-        BranchNo        = $BranchNo
-        Channel         = $Channel
-        MessageTypeCode = $MessageTypeCode
-        SourceID        = $SourceID
-        MessageFile     = $file.Name
+    $fileDataList.Add([PSCustomObject]@{
+        File             = $file
+        ReferenceNumber  = $referenceNumber
     })
+}
 
-    $status = 'SUCCESS'
+# ============================================================
+# Process Messages in Parallel
+# ============================================================
+
+$batchWatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+# 透過 PowerShell 7 的 ForEach-Object -Parallel 進行多執行緒發送
+$results = $fileDataList | ForEach-Object -ThrottleLimit $ThrottleLimit -Parallel {
+
+    # 由於在平行區塊中，需重新宣告或使用傳入的變數 (透過 $using:)
+    $file            = $_.File
+    $referenceNumber = $_.ReferenceNumber
+    $url             = $using:url
+    $ActionCode      = $using:ActionCode
+    $BankNo          = $using:BankNo
+    $BranchNo        = $using:BranchNo
+    $Channel         = $using:Channel
+    $MessageTypeCode = $using:MessageTypeCode
+    $SourceID        = $using:SourceID
+    $TimeoutMs       = $using:TimeoutMs
+
+    # 內嵌 SOAP 呼叫函式或直接呼叫（在平行區塊內需要確保函式存在或直接寫入邏輯）
+    # 這裡我們將 Execute-SOAPRequest 與 New-SOAPRequest 的邏輯或呼叫帶入
+    # 註：PowerShell 7 Parallel 區塊內可以呼叫在 script 範疇定義好的函式
+
+    $status       = 'SUCCESS'
     $responseText = ''
     $errorMessage = ''
-    $elapsedMs = 0
-
-    Write-Host "[$seq/$total] Processing..." -ForegroundColor Cyan
-    Write-Host "File            : $($file.Name)"
-    Write-Host "ReferenceNumber : $referenceNumber"
+    $elapsedMs    = 0
 
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
     try {
-
-        $swiftMessage = [System.IO.File]::ReadAllText(
-            $file.FullName,
-            [System.Text.Encoding]::UTF8
-        ).Trim()
+        $swiftMessage = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8).Trim()
 
         if ([string]::IsNullOrWhiteSpace($swiftMessage)) {
             throw "電文檔案是空的：$($file.FullName)"
@@ -323,60 +256,72 @@ $referenceNumber = $clientReferenceNo + '99'
             $swiftMessage = "$swiftMessage-}"
         }
 
-        $soapRequest = New-SOAPRequest `
-            -SwiftMessage $swiftMessage `
-            -ReferenceNumber $referenceNumber
+        # 組合 XML (呼叫外部定義的 New-SOAPRequest)
+        $soapRequest = New-SOAPRequest -SwiftMessage $swiftMessage -ReferenceNumber $referenceNumber
 
-        $responseText = Execute-SOAPRequest `
-            -SOAPRequest $soapRequest `
-            -URL $url
+        # 執行 SOAP 請求 (呼叫外部定義的 Execute-SOAPRequest)
+        $responseText = Execute-SOAPRequest -SOAPRequest $soapRequest -URL $url
 
         $sw.Stop()
+        $elapsedMs = [math]::Round($sw.Elapsed.TotalMilliseconds, 2)
 
-        $elapsedMs = [math]::Round(
-            $sw.Elapsed.TotalMilliseconds,
-            2
-        )
-
-        $successCount++
-
-        Write-Host "[SUCCESS] ReferenceNumber : $referenceNumber" `
-            -ForegroundColor Green
-
-        Write-Host "Elapsed Time    : $elapsedMs ms"
-        Write-Host "Response        : $responseText"
+        [PSCustomObject]@{
+            Status          = 'SUCCESS'
+            ReferenceNumber = $referenceNumber
+            MessageFile     = $file.Name
+            ElapsedMs       = $elapsedMs
+            ResponseText    = $responseText
+            ErrorMessage    = $null
+        }
     }
     catch {
-
         $sw.Stop()
+        $elapsedMs = [math]::Round($sw.Elapsed.TotalMilliseconds, 2)
 
-        $elapsedMs = [math]::Round(
-            $sw.Elapsed.TotalMilliseconds,
-            2
-        )
-
-        $status = 'FAILED'
-        $errorMessage = $_.Exception.Message
-        $failedCount++
-
-        Write-Host "[FAILED ] ReferenceNumber : $referenceNumber" `
-            -ForegroundColor Red
-
-        Write-Host "Elapsed Time    : $elapsedMs ms"
-        Write-Host "Error           : $errorMessage" `
-            -ForegroundColor Red
+        [PSCustomObject]@{
+            Status          = 'FAILED'
+            ReferenceNumber = $referenceNumber
+            MessageFile     = $file.Name
+            ElapsedMs       = $elapsedMs
+            ResponseText    = $null
+            ErrorMessage    = $_.Exception.Message
+        }
     }
-
-    Write-Host "---------------------------------"
-
-    Start-Sleep -Milliseconds 10
 }
 
 $batchWatch.Stop()
 
 # ============================================================
-# Summary
+# Summary & Output Processing
 # ============================================================
+
+$successCount = 0
+$failedCount = 0
+$ReferenceList = [System.Collections.Generic.List[Object]]::new()
+
+$seq = 1
+foreach ($res in $results) {
+    if ($res.Status -eq 'SUCCESS') {
+        $successCount++
+        Write-Host "[$seq/$total] [SUCCESS] File: $($res.MessageFile) | Ref: $($res.ReferenceNumber) | Time: $($res.ElapsedMs) ms" -ForegroundColor Green
+    }
+    else {
+        $failedCount++
+        Write-Host "[$seq/$total] [FAILED ] File: $($res.MessageFile) | Ref: $($res.ReferenceNumber) | Error: $($res.ErrorMessage)" -ForegroundColor Red
+    }
+
+    $ReferenceList.Add([PSCustomObject]@{
+        ReferenceNumber = $res.ReferenceNumber
+        ActionCode      = $ActionCode
+        BankNo          = $BankNo
+        BranchNo        = $BranchNo
+        Channel         = $Channel
+        MessageTypeCode = $MessageTypeCode
+        SourceID        = $SourceID
+        MessageFile     = $res.MessageFile
+    })
+    $seq++
+}
 
 Write-Host ""
 Write-Host "================================="
@@ -398,7 +343,6 @@ Write-Host "Reference List"
 Write-Host "================================="
 
 foreach ($Ref in $ReferenceList) {
-
     Write-Host ""
     Write-Host "ReferenceNumber : $($Ref.ReferenceNumber)"
     Write-Host "ActionCode      : $($Ref.ActionCode)"
@@ -412,13 +356,3 @@ foreach ($Ref in $ReferenceList) {
 
 Write-Host ""
 Write-Host "Batch Completed." -ForegroundColor Cyan
-
-
-現在是讀取message folder 每個txt 來打
-
-但我想做多執行續
-
-可能分三個執行續
-平行打200筆電文
-
-怎麼寫ps1
