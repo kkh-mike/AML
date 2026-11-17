@@ -1,164 +1,221 @@
+#requires -Version 5.1
+
+# ============================================================
+# Send-SwiftMX-PS51-Parallel.ps1
+# ============================================================
+
+$ErrorActionPreference = 'Stop'
+
+# ============================================================
+# Config & Definitions
+# ============================================================
+
 $header = @{
     Accept = "application/json"
 }
 
-function Get-ReferenceNoFromFileName {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$MessageFile
-    )
-
-    $fileNameWithoutExtension = [System.IO.Path]::GetFileNameWithoutExtension($MessageFile)
-
-    # 前兩段是 BankNo、CompletedDate；最後一段是流水號；
-    # 中間部分（包含底線）是 ClientReferenceNo。
-    if ($fileNameWithoutExtension -notmatch '^[^_]+_[^_]+_(?<ClientReferenceNo>.+)_[^_]+$') {
-        throw "檔名格式不正確，預期格式為 BankNo_CompletedDate_ClientReferenceNo_流水號.txt：$MessageFile"
-    }
-
-    $clientReferenceNo = $Matches['ClientReferenceNo']
-
-    if ([string]::IsNullOrWhiteSpace($clientReferenceNo)) {
-        throw "檔名中的 ClientReferenceNo 不可為空：$MessageFile"
-    }
-
-    return $clientReferenceNo + '0'
-}
-
-# 各國 API 設定
-$countryConfig = @{
-    "HK" = @{
-        SourceId        = "SwiftMX"
-        BankNo          = "HK"
-        BranchNo        = "0900"
-        Channel         = "SwiftMX"
-        MessageTypeCode = "pacs.008.001.08"
-    }
-
-    "SG" = @{
-        SourceId        = "SwiftMX"
-        BankNo          = "SG"
-        BranchNo        = "0001"
-        Channel         = "SwiftMX"
-        MessageTypeCode = "pacs.008.001.08"
-    }
-
-    "AU" = @{
-        SourceId        = "SwiftMX"
-        BankNo          = "AU"
-        BranchNo        = "0200"
-        Channel         = "SwiftMX"
-        MessageTypeCode = "pacs.008.001.08"
-    }
-
-    "JP" = @{
-        SourceId        = "SwiftMX"
-        BankNo          = "JP"
-        BranchNo        = "0300"
-        Channel         = "SwiftMX"
-        MessageTypeCode = "pacs.008.001.08"
-    }
-
-    "TW" = @{
-        SourceId        = "SwiftMX"
-        BankNo          = "TW"
-        BranchNo        = "0014"
-        Channel         = "SwiftMX"
-        MessageTypeCode = "pacs.008.001.08"
-    }
-}
-
-function Submit-SwiftMX {
-    param(
-        [Parameter(Mandatory = $true)]
-        [ValidateSet("HK", "SG", "AU", "JP", "TW")]
-        [string]$Country,
-
-        [Parameter(Mandatory = $true)]
-        [string]$MessageFile
-    )
-
-    $cfg = $countryConfig[$Country]
-
-    if (-not $cfg) {
-        throw "Unsupported country: $Country"
-    }
-
-    if (-not (Test-Path -LiteralPath $MessageFile -PathType Leaf)) {
-        throw "找不到電文檔案：$MessageFile"
-    }
-
-    # 從檔名取得 ClientReferenceNo，並在末尾補 0
-    $referenceNo = Get-ReferenceNoFromFileName -MessageFile $MessageFile
-
-    $rawMessage = [System.IO.File]::ReadAllText(
-        $MessageFile,
-        [System.Text.Encoding]::UTF8
-    )
-
-    if ([string]::IsNullOrWhiteSpace($rawMessage)) {
-        throw "電文檔案是空的：$MessageFile"
-    }
-
-    $body = @{
-        SourceId        = $cfg.SourceId
-        ReferenceNo     = $referenceNo
-        BankNo          = $cfg.BankNo
-        BranchNo        = $cfg.BranchNo
-        Channel         = $cfg.Channel
-        MessageTypeCode = $cfg.MessageTypeCode
-        RawMessage      = $rawMessage
-    } | ConvertTo-Json -Depth 20
-
-    $uri = "http://localhost:8087/SwiftMX/SubmitMessage"
-
-    Invoke-RestMethod `
-        -Method Post `
-        -Uri $uri `
-        -Headers $header `
-        -ContentType "application/json; charset=utf-8" `
-        -Body $body
-}
-
-# 讀取 messages 資料夾中所有檔名以 TW 開頭的 TXT
+$uri = "http://localhost:8087/SwiftMX/SubmitMessage"
 $country = "TW"
-$messageFolder = Join-Path $PSScriptRoot "messages"
+$MessageFolder = Join-Path $PSScriptRoot "messages"
 
-if (-not (Test-Path -LiteralPath $messageFolder -PathType Container)) {
-    throw "找不到電文資料夾：$messageFolder"
+# 同時執行的執行緒數量（設定為 3）
+$MaxThreads = 3
+
+# 各國 API 設定（需一併帶入 Runspace 內部使用）
+$countryConfig = @{
+    "HK" = @{ SourceId = "SwiftMX"; BankNo = "HK"; BranchNo = "0900"; Channel = "SwiftMX"; MessageTypeCode = "pacs.008.001.08" }
+    "SG" = @{ SourceId = "SwiftMX"; BankNo = "SG"; BranchNo = "0001"; Channel = "SwiftMX"; MessageTypeCode = "pacs.008.001.08" }
+    "AU" = @{ SourceId = "SwiftMX"; BankNo = "AU"; BranchNo = "0200"; Channel = "SwiftMX"; MessageTypeCode = "pacs.008.001.08" }
+    "JP" = @{ SourceId = "SwiftMX"; BankNo = "JP"; BranchNo = "0300"; Channel = "SwiftMX"; MessageTypeCode = "pacs.008.001.08" }
+    "TW" = @{ SourceId = "SwiftMX"; BankNo = "TW"; BranchNo = "0014"; Channel = "SwiftMX"; MessageTypeCode = "pacs.008.001.08" }
+}
+
+# ============================================================
+# Input Folder Check & Read Files
+# ============================================================
+
+if (-not (Test-Path -LiteralPath $MessageFolder -PathType Container)) {
+    throw "找不到電文資料夾：$MessageFolder"
 }
 
 $files = @(
-    Get-ChildItem `
-        -LiteralPath $messageFolder `
-        -Filter "TW*.txt" `
-        -File |
+    Get-ChildItem -LiteralPath $MessageFolder -Filter "$country*.txt" -File |
     Sort-Object Name
 )
 
-if ($files.Count -eq 0) {
-    throw "在資料夾中找不到以 TW 開頭的 TXT 檔案：$messageFolder"
+$total = $files.Count
+
+if ($total -eq 0) {
+    throw "在資料夾中找不到以 $country 開頭的 TXT 檔案：$MessageFolder"
 }
+
+Write-Host ""
+Write-Host "============================================================"
+Write-Host "Start SwiftMX Batch (PowerShell 5.1 Multi-threaded Runspace)"
+Write-Host "============================================================"
+Write-Host "Input Folder   : $MessageFolder"
+Write-Host "Total Files    : $total"
+Write-Host "Max Threads    : $MaxThreads"
+Write-Host ""
+
+# ============================================================
+# Pre-check & Prepare Task List
+# ============================================================
+
+$fileDataList = [System.Collections.Generic.List[Object]]::new()
+$referenceNumbers = @{}
 
 foreach ($file in $files) {
-    Write-Host "送出檔案：$($file.Name)"
+    $fileNameWithoutExtension = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+
+    if ($fileNameWithoutExtension -notmatch '^[^_]+_[^_]+_(?<ClientReferenceNo>.+)_[^_]+$') {
+        throw "檔名格式不正確，預期格式為 BankNo_CompletedDate_ClientReferenceNo_流水號.txt：$($file.Name)"
+    }
+
+    $clientReferenceNo = $Matches['ClientReferenceNo']
+    if ([string]::IsNullOrWhiteSpace($clientReferenceNo)) {
+        throw "檔名中的 ClientReferenceNo 不可為空：$($file.Name)"
+    }
+
+    $referenceNo = $clientReferenceNo + '0'
+
+    if ($referenceNumbers.ContainsKey($referenceNo)) {
+        throw "ReferenceNo 重複：$referenceNo（檔案：$($file.Name)）"
+    }
+    $referenceNumbers[$referenceNo] = $true
+
+    # 預先讀取檔案內容
+    $rawMessage = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8)
+    if ([string]::IsNullOrWhiteSpace($rawMessage)) {
+        throw "電文檔案是空的：$($file.FullName)"
+    }
+
+    $fileDataList.Add([PSCustomObject]@{
+        FileName    = $file.Name
+        ReferenceNo = $referenceNo
+        RawMessage  = $rawMessage
+    })
+}
+
+# ============================================================
+# Create Runspace Pool
+# ============================================================
+
+$runspacePool = [Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(1, $MaxThreads)
+$runspacePool.Open()
+
+$jobs = [System.Collections.Generic.List[PSCustomObject]]::new()
+$batchWatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+# 每個執行緒要執行的 ScriptBlock
+$scriptBlock = {
+    param(
+        $task,
+        $country,
+        $countryConfig,
+        $uri,
+        $header
+    )
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $cfg = $countryConfig[$country]
 
     try {
-        $referenceNo = Get-ReferenceNoFromFileName -MessageFile $file.FullName
-        Write-Host "ReferenceNo：$referenceNo"
+        $bodyObj = @{
+            SourceId        = $cfg.SourceId
+            ReferenceNo     = $task.ReferenceNo
+            BankNo          = $cfg.BankNo
+            BranchNo        = $cfg.BranchNo
+            Channel         = $cfg.Channel
+            MessageTypeCode = $cfg.MessageTypeCode
+            RawMessage      = $task.RawMessage
+        }
 
-        $result = Submit-SwiftMX `
-            -Country $country `
-            -MessageFile $file.FullName
+        # 在 PowerShell 5.1 的背景 Runspace 中，若直接呼叫 ConvertTo-Json 可能需要確保型別正確
+        $bodyJson = $bodyObj | ConvertTo-Json -Depth 20 -Compress
 
-        Write-Host "完成：$($file.Name)"
-        $result
+        $result = Invoke-RestMethod `
+            -Method Post `
+            -Uri $uri `
+            -Headers $header `
+            -ContentType "application/json; charset=utf-8" `
+            -Body $bodyJson
+
+        $sw.Stop()
+        return [PSCustomObject]@{
+            Status       = 'SUCCESS'
+            FileName     = $task.FileName
+            ReferenceNo  = $task.ReferenceNo
+            ElapsedMs    = [math]::Round($sw.Elapsed.TotalMilliseconds, 2)
+            Response     = $result
+            ErrorMessage = $null
+        }
     }
     catch {
-        Write-Error "送出失敗：$($file.Name)；錯誤：$($_.Exception.Message)"
+        $sw.Stop()
+        return [PSCustomObject]@{
+            Status       = 'FAILED'
+            FileName     = $task.FileName
+            ReferenceNo  = $task.ReferenceNo
+            ElapsedMs    = [math]::Round($sw.Elapsed.TotalMilliseconds, 2)
+            Response     = $null
+            ErrorMessage = $_.Exception.Message
+        }
     }
 }
 
+# ============================================================
+# Submit Tasks to Runspace Pool
+# ============================================================
 
+foreach ($task in $fileDataList) {
+    $powershell = [PowerShell]::Create().AddScript($scriptBlock).AddArgument($task).AddArgument($country).AddArgument($countryConfig).AddArgument($uri).AddArgument($header)
+    $powershell.RunspacePool = $runspacePool
 
-我這要改成多執行要怎麼改
+    $jobs.Add([PSCustomObject]@{
+        Pipe   = $powershell
+        Result = $powershell.BeginInvoke()
+    })
+}
+
+# ============================================================
+# Collect Results
+# ============================================================
+
+$successCount = 0
+$failedCount = 0
+$seq = 1
+
+foreach ($job in $jobs) {
+    $res = $job.Pipe.EndInvoke($job.Result)
+    $job.Pipe.Dispose()
+
+    if ($res.Status -eq 'SUCCESS') {
+        $successCount++
+        Write-Host "[$seq/$total] [SUCCESS] File: $($res.FileName) | RefNo: $($res.ReferenceNo) | Time: $($res.ElapsedMs) ms" -ForegroundColor Green
+    }
+    else {
+        $failedCount++
+        Write-Host "[$seq/$total] [FAILED ] File: $($res.FileName) | RefNo: $($res.ReferenceNo) | Error: $($res.ErrorMessage)" -ForegroundColor Red
+    }
+    $seq++
+}
+
+$runspacePool.Close()
+$runspacePool.Dispose()
+$batchWatch.Stop()
+
+# ============================================================
+# Summary
+# ============================================================
+
+Write-Host ""
+Write-Host "============================================================"
+Write-Host "Batch Summary"
+Write-Host "============================================================"
+Write-Host "Total      : $total"
+Write-Host "Success    : $successCount" -ForegroundColor Green
+Write-Host "Failed     : $failedCount" -ForegroundColor Red
+Write-Host "Total Time : $([math]::Round($batchWatch.Elapsed.TotalSeconds, 2)) sec"
+Write-Host "============================================================"
+Write-Host "Batch Completed." -ForegroundColor Cyan
