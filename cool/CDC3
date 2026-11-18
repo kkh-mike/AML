@@ -1,28 +1,46 @@
 WITH QueryA AS (
-    -- 舊 Config (例如 11/07)
-    SELECT D.ClientReferenceNo, A.Block4_UserReference MESSAGE_ID, D.Progress, A.MT_KEY REF_NO, 
-           A.MessageType TYPE, replace(replace(B.FullName,char(10),''),char(13),'') DETECTED_NAME, 
-           replace(replace(C.SdnName,char(10),''),char(13),'') SdnName, C.SdnType, C.EntNum, C.RC
+    -- 11/07 資料 (尾碼假設為 _1)
+    SELECT 
+        D.ClientReferenceNo,
+        -- 把尾碼去掉，用純 Base Key 來對齊
+        LEFT(D.ClientReferenceNo, CHARINDEX('_', D.ClientReferenceNo + '_') - 1) AS BaseRefNo,
+        A.Block4_UserReference AS MESSAGE_ID, 
+        D.Progress, 
+        A.MT_KEY AS REF_NO, 
+        A.MessageType AS TYPE, 
+        REPLACE(REPLACE(B.FullName, CHAR(10), ''), CHAR(13), '') AS DETECTED_NAME, 
+        REPLACE(REPLACE(C.SdnName, CHAR(10), ''), CHAR(13), '') AS SdnName, 
+        C.SdnType, 
+        C.EntNum, 
+        C.RC
     FROM SWIFT_MTHeader_Main A
     LEFT JOIN MESSAGEDATABASE..Swift_MTRaw D ON A.MT_KEY = D.ID
     LEFT JOIN SWIFT_ResultGroups C ON A.MT_KEY = C.SourceKey
-    LEFT JOIN SWIFT_ResultNames B ON A.MT_KEY = B.SourceKey and C.nameID = B.nameid
+    LEFT JOIN SWIFT_ResultNames B ON A.MT_KEY = B.SourceKey AND C.nameID = B.nameid
     WHERE D.CreatedDate >= '2026-11-07 08:23:44.8600000' AND D.CreatedDate < '2026-11-07 10:12:17.4866667'
 ),
 QueryB AS (
-    -- 新 Config (例如 11/08)
-    SELECT D.ClientReferenceNo, A.Block4_UserReference MESSAGE_ID, D.Progress, A.MT_KEY REF_NO, 
-           A.MessageType TYPE, replace(replace(B.FullName,char(10),''),char(13),'') DETECTED_NAME, 
-           replace(replace(C.SdnName,char(10),''),char(13),'') SdnName, C.SdnType, C.EntNum, C.RC
+    -- 11/08 資料 (尾碼假設為 _0)
+    SELECT 
+        D.ClientReferenceNo,
+        LEFT(D.ClientReferenceNo, CHARINDEX('_', D.ClientReferenceNo + '_') - 1) AS BaseRefNo,
+        A.Block4_UserReference AS MESSAGE_ID, 
+        D.Progress, 
+        A.MT_KEY AS REF_NO, 
+        A.MessageType AS TYPE, 
+        REPLACE(REPLACE(B.FullName, CHAR(10), ''), CHAR(13), '') AS DETECTED_NAME, 
+        REPLACE(REPLACE(C.SdnName, CHAR(10), ''), CHAR(13), '') AS SdnName, 
+        C.SdnType, 
+        C.EntNum, 
+        C.RC
     FROM SWIFT_MTHeader_Main A
     LEFT JOIN MESSAGEDATABASE..Swift_MTRaw D ON A.MT_KEY = D.ID
     LEFT JOIN SWIFT_ResultGroups C ON A.MT_KEY = C.SourceKey
-    LEFT JOIN SWIFT_ResultNames B ON A.MT_KEY = B.SourceKey and C.nameID = B.nameid
+    LEFT JOIN SWIFT_ResultNames B ON A.MT_KEY = B.SourceKey AND C.nameID = B.nameid
     WHERE D.CreatedDate >= '2026-11-08 08:23:44.8600000' AND D.CreatedDate < '2026-11-08 10:12:17.4866667'
 )
 SELECT 
-    COALESCE(A.MESSAGE_ID, B.MESSAGE_ID) AS MESSAGE_ID,
-    COALESCE(A.REF_NO, B.REF_NO) AS REF_NO,
+    COALESCE(A.BaseRefNo, B.BaseRefNo) AS Base_ClientReferenceNo,
     A.ClientReferenceNo AS Ref_07,
     B.ClientReferenceNo AS Ref_08,
     A.EntNum AS EntNum_07,
@@ -30,10 +48,10 @@ SELECT
     A.SdnName AS SdnName_07,
     B.SdnName AS SdnName_08,
     CASE 
-        WHEN A.MESSAGE_ID IS NULL THEN 'New in 11/08 (Config 新增命中)'
-        WHEN B.MESSAGE_ID IS NULL THEN 'Missing in 11/08 (Config 過濾掉)'
-        WHEN A.EntNum <> B.EntNum THEN 'Hit Changed (命中名單不同)'
+        WHEN A.BaseRefNo IS NULL THEN 'New in 11/08'
+        WHEN B.BaseRefNo IS NULL THEN 'Missing in 11/08 (被 Config 濾掉)'
+        WHEN A.EntNum <> B.EntNum THEN 'Hit List Changed (命中清單不同)'
         ELSE 'Identical'
     END AS Diff_Status
 FROM QueryA A
-FULL OUTER JOIN QueryB B ON A.MESSAGE_ID = B.MESSAGE_ID AND A.EntNum = B.EntNum; -- 視情況可用 EntNum 或 SdnName 輔助對齊
+FULL OUTER JOIN QueryB B ON A.BaseRefNo = B.BaseRefNo AND A.EntNum = B.EntNum;
