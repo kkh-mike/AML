@@ -1,13 +1,11 @@
-
-這是一封幫您修飾得更為專業、語氣流暢且具備良好禮貌的郵件文字，您可以直接複製使用：
-Dear 儀仲：
-關於提案單 IT20202611021005（AML權限來源調整與維護優化），附件中的 SC-007-F04 使用者驗收測試計劃 已整理完畢。
-再麻煩協助撥冗確認內容，若無問題即可進行後續流程。
-謝謝！
-
-
-
-Dear 儀仲
-提案單IT20202611021005，AML權限來源調整與維護優化_
-SC-007-F04 使用者驗收測試計劃
-需協助確認，謝謝
+這起錯誤的主要原因與發生經過可以歸納為以下三個重點：
+1. 表面現象：PowerShell 收到 HTTP 500 錯誤
+ * 當你使用 PowerShell 進行多執行緒（$MaxThreads = 5）大量送單（總計約 20 萬筆）時，部分請求在執行到一半時，PowerShell 收到了來自 Web API 的 (500) 內部伺服器錯誤。
+2. 根本原因：後端 WCF 具名管道連線逾時（TimeoutException）
+從你提供的 Windows Event Log 可以看到，後端 .NET / WCF 服務在處理 /SwiftMX/SubmitMessage 時發生了嚴重阻塞：
+ * 瓶頸點：錯誤堆疊指向 System.ServiceModel.Channels.PipeConnection.WaitForSyncRead 與 ClientFramingDuplexSessionChannel.OnOpen。
+ * 白話解釋：後端服務彼此之間（或與資料庫/內部模組溝通）預設使用了 Windows 的 具名管道（Named Pipe / net.pipe） 進行行程間通訊。當 5 個執行緒同時湧入大量請求時，管道連線池（Connection Pool）發生了嚴重的連線排隊與競爭（Contention）。
+ * 逾時崩潰：系統無法在預設的 1 分鐘（00:01:00） 內完成管道開啟與讀取，因而全面爆出 TimeoutException，最終導致 API 回傳 HTTP 500。
+3. 為什麼會這樣？（高併發與架構衝突）
+ * 瞬間流量過大：程式雖然只開 5 個執行緒，但因為處理速度極快，短時間內的累積併發請求超過了後端 WCF 管道通訊的負荷能力。
+ * Named Pipe 的特性限制：Named Pipe 雖然在單機本機通訊效率很好，但在高併發、大量短連線的壓測情境下，很容易因為通道建立不及而發生阻塞和逾時。
