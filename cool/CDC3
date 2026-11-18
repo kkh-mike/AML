@@ -1,9 +1,9 @@
 WITH QueryA AS (
-    -- 11/07 資料 (尾碼假設為 _1)
+    -- 舊 Config (例如 11/07)
     SELECT 
         D.ClientReferenceNo,
-        -- 把尾碼去掉，用純 Base Key 來對齊
-        LEFT(D.ClientReferenceNo, CHARINDEX('_', D.ClientReferenceNo + '_') - 1) AS BaseRefNo,
+        -- 只切掉最後 1 個字元（去掉結尾的 0 或 1）
+        LEFT(D.ClientReferenceNo, LEN(D.ClientReferenceNo) - 1) AS BaseRefNo,
         A.Block4_UserReference AS MESSAGE_ID, 
         D.Progress, 
         A.MT_KEY AS REF_NO, 
@@ -20,10 +20,10 @@ WITH QueryA AS (
     WHERE D.CreatedDate >= '2026-11-07 08:23:44.8600000' AND D.CreatedDate < '2026-11-07 10:12:17.4866667'
 ),
 QueryB AS (
-    -- 11/08 資料 (尾碼假設為 _0)
+    -- 新 Config (例如 11/08)
     SELECT 
         D.ClientReferenceNo,
-        LEFT(D.ClientReferenceNo, CHARINDEX('_', D.ClientReferenceNo + '_') - 1) AS BaseRefNo,
+        LEFT(D.ClientReferenceNo, LEN(D.ClientReferenceNo) - 1) AS BaseRefNo,
         A.Block4_UserReference AS MESSAGE_ID, 
         D.Progress, 
         A.MT_KEY AS REF_NO, 
@@ -49,8 +49,8 @@ SELECT
     B.SdnName AS SdnName_08,
     CASE 
         WHEN A.BaseRefNo IS NULL THEN 'New in 11/08'
-        WHEN B.BaseRefNo IS NULL THEN 'Missing in 11/08 (被 Config 濾掉)'
-        WHEN A.EntNum <> B.EntNum THEN 'Hit List Changed (命中清單不同)'
+        WHEN B.BaseRefNo IS NULL THEN 'Missing in 11/08'
+        WHEN A.EntNum <> B.EntNum THEN 'Hit List Changed'
         ELSE 'Identical'
     END AS Diff_Status
 FROM QueryA A
