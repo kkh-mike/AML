@@ -1,27 +1,266 @@
-這段文字是心理懸疑小說《沉默的病人》（The Silent Patient）的開頭。以下為您整理成「英文一句、中文一句」的對照：
-ALICIA BERENSON WAS THIRTY-THREE YEARS OLD when she killed her husband.
-艾莉西亞・貝倫森（Alicia Berenson）謀殺丈夫時年三十三歲。
-They had been married for seven years.
-他們結婚七年了。
-They were both artists—Alicia was a painter, and Gabriel was a well-known fashion photographer.
-兩人都是藝術家——艾莉西亞是畫家，蓋布瑞（Gabriel）則是知名的時尚攝影師。
-He had a distinctive style, shooting semi-starved, semi-naked women in strange, unflattering angles.
-他有獨特的風格，專門拍攝半飢餓、半裸的女性，角度奇特且不討喜。
-Since his death, the price of his photographs has increased astronomically.
-自他死後，他的攝影作品價格暴漲。
-I find his stuff rather slick and shallow, to be honest.
-老實說，我覺得他的東西相當圓滑而膚淺。
-It has none of the visceral quality of Alicia’s best work.
-它完全沒有艾莉西亞優秀作品那種直擊人心的力量。
-I don’t know enough about art to say whether Alicia Berenson will stand the test of time as a painter.
-我對藝術了解不夠深，無法斷言艾莉西亞・貝倫森身為畫家是否禁得起時間的考驗。
-Her talent will always be overshadowed by her notoriety, so it’s hard to be objective.
-她的才華永遠會被她的惡名所掩蓋，所以很難做到客觀。
-And you might well accuse me of being biased.
-而你大可指責我有偏見。
-All I can offer is my opinion, for what it’s worth.
-我能提供的只有我的看法，儘管它或許微不足道。
-And to me, Alicia was a kind of genius.
-但在我眼裡，艾莉西亞堪稱某種天才。
-Apart from her technical skill, her paintings have an uncanny ability to grab your attention—by the throat, almost—and hold it in a viselike grip.
-除了精湛的技藝外，她的畫作還有一種不可思議的力量，能抓住你的注意力——簡直像掐住你的喉嚨一樣——並用虎鉗般的緊握力將其扣留。
+#requires -Version 5.1
+
+# ============================================================
+# Send-SwiftMX-PS51-BatchChunked.ps1
+# ============================================================
+
+$ErrorActionPreference = 'Stop'
+
+# ============================================================
+# Config & Definitions
+# ============================================================
+
+$header = @{
+    Accept = "application/json"
+}
+
+$uri = "http://localhost:8087/SwiftMX/SubmitMessage"
+$country = "TW"
+$MessageFolder = Join-Path $PSScriptRoot "messages"
+
+# 相關併發設定
+$MaxThreads = 3          # 每個小批次內同時執行的執行緒數
+$BatchSize = 1000        # 每批次處理的檔案數量（可根據壓測狀況調整為 500 或 1000）
+$SleepIntervalSec = 2    # 每批次跑完後的休息時間（秒）
+
+# 各國 API 設定
+$countryConfig = @{
+    "HK" = @{ SourceId = "SwiftMX"; BankNo = "HK"; BranchNo = "0900"; Channel = "SwiftMX"; MessageTypeCode = "pacs.008.001.08" }
+    "SG" = @{ SourceId = "SwiftMX"; BankNo = "SG"; BranchNo = "0001"; Channel = "SwiftMX"; MessageTypeCode = "pacs.008.001.08" }
+    "AU" = @{ SourceId = "SwiftMX"; BankNo = "SwiftMX"; BankNo = "AU"; BranchNo = "0200"; Channel = "SwiftMX"; MessageTypeCode = "pacs.008.001.08" }
+    "JP" = @{ SourceId = "SwiftMX"; BankNo = "JP"; BranchNo = "0300"; Channel = "SwiftMX"; MessageTypeCode = "pacs.008.001.08" }
+    "TW" = @{ SourceId = "SwiftMX"; BankNo = "TW"; BranchNo = "0014"; Channel = "SwiftMX"; MessageTypeCode = "pacs.008.001.08" }
+}
+
+# ============================================================
+# Input Folder Check & Read Files
+# ============================================================
+
+if (-not (Test-Path -LiteralPath $MessageFolder -PathType Container)) {
+    throw "找不到電文資料夾：$MessageFolder"
+}
+
+Write-Host "正在掃描資料夾檔案..."
+$files = @(
+    Get-ChildItem -LiteralPath $MessageFolder -Filter "$country*.txt" -File |
+    Sort-Object Name
+)
+
+$total = $files.Count
+
+if ($total -eq 0) {
+    throw "在資料夾中找不到以 $country 開頭的 TXT 檔案：$MessageFolder"
+}
+
+Write-Host ""
+Write-Host "============================================================"
+Write-Host "Start SwiftMX Chunked Batch (PS 5.1 Multi-threaded)"
+Write-Host "============================================================"
+Write-Host "Input Folder   : $MessageFolder"
+Write-Host "Total Files    : $total"
+Write-Host "Batch Size     : $BatchSize files / batch"
+Write-Host "Max Threads    : $MaxThreads"
+Write-Host "Sleep Interval : $SleepIntervalSec sec"
+Write-Host ""
+
+# ============================================================
+# Pre-check & Prepare Task List
+# ============================================================
+
+$fileDataList = [System.Collections.Generic.List[Object]]::new()
+$referenceNumbers = @{}
+
+foreach ($file in $files) {
+    $fileNameWithoutExtension = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+
+    if ($fileNameWithoutExtension -notmatch '^[^_]+_[^_]+_(?<ClientReferenceNo>.+)_[^_]+$') {
+        throw "檔名格式不正確，預期格式為 BankNo_CompletedDate_ClientReferenceNo_流水號.txt：$($file.Name)"
+    }
+
+    $clientReferenceNo = $Matches['ClientReferenceNo']
+    if ([string]::IsNullOrWhiteSpace($clientReferenceNo)) {
+        throw "檔名中的 ClientReferenceNo 不可為空：$($file.Name)"
+    }
+
+    $referenceNo = $clientReferenceNo + '0'
+
+    if ($referenceNumbers.ContainsKey($referenceNo)) {
+        throw "ReferenceNo 重複：$referenceNo（檔案：$($file.Name)）"
+    }
+    $referenceNumbers[$referenceNo] = $true
+
+    # 預先讀取檔案內容
+    $rawMessage = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8)
+    if ([string]::IsNullOrWhiteSpace($rawMessage)) {
+        throw "電文檔案是空的：$($file.FullName)"
+    }
+
+    $fileDataList.Add([PSCustomObject]@{
+        FileName    = $file.Name
+        ReferenceNo = $referenceNo
+        RawMessage  = $rawMessage
+    })
+}
+
+# ============================================================
+# Chunking Logic (相容 PowerShell 5.1 的陣列切塊)
+# ============================================================
+
+$batches = @()
+for ($i = 0; $i -lt $fileDataList.Count; $i += $BatchSize) {
+    $count = [Math]::Min($BatchSize, $fileDataList.Count - $i)
+    $batches += ,@($fileDataList.GetRange($i, $count))
+}
+
+$totalBatches = $batches.Count
+$globalSuccessCount = 0
+$globalFailedCount = 0
+$globalSeq = 1
+$batchWatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+# 每個執行緒要執行的 ScriptBlock（內含自動重試）
+$scriptBlock = {
+    param(
+        $task,
+        $country,
+        $countryConfig,
+        $uri,
+        $header
+    )
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $cfg = $countryConfig[$country]
+
+    $bodyObj = @{
+        SourceId        = $cfg.SourceId
+        ReferenceNo     = $task.ReferenceNo
+        BankNo          = $cfg.BankNo
+        BranchNo        = $cfg.BranchNo
+        Channel         = $cfg.Channel
+        MessageTypeCode = $cfg.MessageTypeCode
+        RawMessage      = $task.RawMessage
+    }
+
+    $bodyJson = $bodyObj | ConvertTo-Json -Depth 20 -Compress
+
+    $maxRetries = 3
+    $retryCount = 0
+    $success = $false
+    $result = $null
+    $lastError = $null
+
+    while ($retryCount -lt $maxRetries -and -not $success) {
+        try {
+            $result = Invoke-RestMethod `
+                -Method Post `
+                -Uri $uri `
+                -Headers $header `
+                -ContentType "application/json; charset=utf-8" `
+                -Body $bodyJson
+
+            $success = $true
+        }
+        catch {
+            $retryCount++
+            $lastError = $_.Exception.Message
+            if ($retryCount -lt $maxRetries) {
+                Start-Sleep -Seconds 2
+            }
+        }
+    }
+
+    $sw.Stop()
+
+    if ($success) {
+        return [PSCustomObject]@{
+            Status       = 'SUCCESS'
+            FileName     = $task.FileName
+            ReferenceNo  = $task.ReferenceNo
+            ElapsedMs    = [math]::Round($sw.Elapsed.TotalMilliseconds, 2)
+            Response     = $result
+            ErrorMessage = $null
+        }
+    }
+    else {
+        return [PSCustomObject]@{
+            Status       = 'FAILED'
+            FileName     = $task.FileName
+            ReferenceNo  = $task.ReferenceNo
+            ElapsedMs    = [math]::Round($sw.Elapsed.TotalMilliseconds, 2)
+            Response     = $null
+            ErrorMessage = "$lastError (Tried $maxRetries times)"
+        }
+    }
+}
+
+# ============================================================
+# Execute by Batch
+# ============================================================
+
+for ($b = 0; $b -lt $totalBatches; $b++) {
+    $currentBatch = $batches[$b]
+    $batchNum = $b + 1
+    $batchSizeActual = $currentBatch.Count
+
+    Write-Host "------------------------------------------------------------"
+    Write-Host "Processing Batch $batchNum / $totalBatches (Items: $batchSizeActual)..."
+    Write-Host "------------------------------------------------------------"
+
+    # 建立該批次的 Runspace Pool
+    $runspacePool = [Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(1, $MaxThreads)
+    $runspacePool.Open()
+
+    $jobs = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    foreach ($task in $currentBatch) {
+        $powershell = [PowerShell]::Create().AddScript($scriptBlock).AddArgument($task).AddArgument($country).AddArgument($countryConfig).AddArgument($uri).AddArgument($header)
+        $powershell.RunspacePool = $runspacePool
+
+        $jobs.Add([PSCustomObject]@{
+            Pipe   = $powershell
+            Result = $powershell.BeginInvoke()
+        })
+    }
+
+    # 收集該批次結果
+    foreach ($job in $jobs) {
+        $res = $job.Pipe.EndInvoke($job.Result)
+        $job.Pipe.Dispose()
+
+        if ($res.Status -eq 'SUCCESS') {
+            $globalSuccessCount++
+            Write-Host "[$globalSeq/$total] [SUCCESS] File: $($res.FileName) | RefNo: $($res.ReferenceNo) | Time: $($res.ElapsedMs) ms" -ForegroundColor Green
+        }
+        else {
+            $globalFailedCount++
+            Write-Host "[$globalSeq/$total] [FAILED ] File: $($res.FileName) | RefNo: $($res.ReferenceNo) | Error: $($res.ErrorMessage)" -ForegroundColor Red
+        }
+        $globalSeq++
+    }
+
+    $runspacePool.Close()
+    $runspacePool.Dispose()
+
+    # 如果不是最後一批，休息指定秒數讓後端喘息
+    if ($batchNum -lt $totalBatches) {
+        Write-Host "Batch $batchNum completed. Resting for $SleepIntervalSec seconds..." -ForegroundColor Yellow
+        Start-Sleep -Seconds $SleepIntervalSec
+    }
+}
+
+$batchWatch.Stop()
+
+# ============================================================
+# Summary
+# ============================================================
+
+Write-Host ""
+Write-Host "============================================================"
+Write-Host "Batch Summary"
+Write-Host "============================================================"
+Write-Host "Total      : $total"
+Write-Host "Success    : $globalSuccessCount" -ForegroundColor Green
+Write-Host "Failed     : $globalFailedCount" -ForegroundColor Red
+Write-Host "Total Time : $([math]::Round($batchWatch.Elapsed.TotalSeconds, 2)) sec"
+Write-Host "============================================================"
+Write-Host "Batch Completed." -ForegroundColor Cyan
