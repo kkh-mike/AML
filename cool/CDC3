@@ -1,240 +1,42 @@
-#requires -Version 5.1
+我有兩個表 但我想要知道差異
+可以怎麼做
 
-# ============================================================
-# Send-SwiftMX-PS51-Parallel.ps1 (Modified with Retry & Lower Threads)
-# ============================================================
 
-$ErrorActionPreference = 'Stop'
+SELECT D.ClientReferenceNo, A.Block4_UserReference MESSAGE_ID,D.Progress, A.MT_KEY REF_NO, A.MessageType TYPE, '' HIT_TAG, replace(replace(B.FullName,char(10),''),char(13),'') DETECTED_NAME, replace(replace(C.SdnName,char(10),''),char(13),'') SdnName, C.SdnType, C.EntNum, C.RC
+FROM SWIFT_MTHeader_Main A
+LEFT JOIN MESSAGEDATABASE..Swift_MTRaw D ON A.MT_KEY = D.ID
+LEFT JOIN SWIFT_ResultGroups C ON A.MT_KEY = C.SourceKey
+LEFT JOIN SWIFT_ResultNames B ON A.MT_KEY = B.SourceKey and C.nameID = B.nameid
+ WHERE D.CreatedDate  >='2026-11-07 08:23:44.8600000' AND   D.CreatedDate <'2026-11-07 10:12:17.4866667'  
 
-# ============================================================
-# Config & Definitions
-# ============================================================
 
-$header = @{
-    Accept = "application/json"
-}
+ ClientReferenceNo	MESSAGE_ID	Progress	REF_NO	TYPE	HIT_TAG	DETECTED_NAME	SdnName	SdnType	EntNum	RC
+I201912111359384300_1	1a47799ea8b94622	HOLD	98639a68-db1b-ea11-ae18-0050568a89cc	103		Al Haramain Islamic Foundation (S1/omalia)3/	Al Haramayn Islamic Foundation	GLSPEC	1951	89
+I201912111359384300_1	1a47799ea8b94622	HOLD	98639a68-db1b-ea11-ae18-0050568a89cc	103		Al Haramain Islamic Foundation (S1/omalia)3/	Al-Haramayn Islamic Foundation	GLSPEC	2319	89
+I201912111359384300_1	1a47799ea8b94622	HOLD	98639a68-db1b-ea11-ae18-0050568a89cc	103		MIKE	Al-Haramayn Islamic Foundation	SPEC	999	89
 
-$uri = "http://localhost:8087/SwiftMX/SubmitMessage"
-$country = "TW"
-$MessageFolder = Join-Path $PSScriptRoot "messages"
 
-# 降低同時執行的執行緒數量（從 5 調降為 3，減緩後端 WCF 管道壓力）
-$MaxThreads = 3
 
-# 各國 API 設定（需一併帶入 Runspace 內部使用）
-$countryConfig = @{
-    "HK" = @{ SourceId = "SwiftMX"; BankNo = "HK"; BranchNo = "0900"; Channel = "SwiftMX"; MessageTypeCode = "pacs.008.001.08" }
-    "SG" = @{ SourceId = "SwiftMX"; BankNo = "SG"; BranchNo = "0001"; Channel = "SwiftMX"; MessageTypeCode = "pacs.008.001.08" }
-    "AU" = @{ SourceId = "SwiftMX"; BankNo = "AU"; BranchNo = "0200"; Channel = "SwiftMX"; MessageTypeCode = "pacs.008.001.08" }
-    "JP" = @{ SourceId = "SwiftMX"; BankNo = "JP"; BranchNo = "0300"; Channel = "SwiftMX"; MessageTypeCode = "pacs.008.001.08" }
-    "TW" = @{ SourceId = "SwiftMX"; BankNo = "TW"; BranchNo = "0014"; Channel = "SwiftMX"; MessageTypeCode = "pacs.008.001.08" }
-}
 
-# ============================================================
-# Input Folder Check & Read Files
-# ============================================================
 
-if (-not (Test-Path -LiteralPath $MessageFolder -PathType Container)) {
-    throw "找不到電文資料夾：$MessageFolder"
-}
 
-$files = @(
-    Get-ChildItem -LiteralPath $MessageFolder -Filter "$country*.txt" -File |
-    Sort-Object Name
-)
+ SELECT D.ClientReferenceNo, A.Block4_UserReference MESSAGE_ID,D.Progress, A.MT_KEY REF_NO, A.MessageType TYPE, '' HIT_TAG, replace(replace(B.FullName,char(10),''),char(13),'') DETECTED_NAME, replace(replace(C.SdnName,char(10),''),char(13),'') SdnName, C.SdnType, C.EntNum, C.RC
+FROM SWIFT_MTHeader_Main A
+LEFT JOIN MESSAGEDATABASE..Swift_MTRaw D ON A.MT_KEY = D.ID
+LEFT JOIN SWIFT_ResultGroups C ON A.MT_KEY = C.SourceKey
+LEFT JOIN SWIFT_ResultNames B ON A.MT_KEY = B.SourceKey and C.nameID = B.nameid
+ WHERE D.CreatedDate  >='2026-11-08 08:23:44.8600000' AND   D.CreatedDate <'2026-11-08 10:12:17.4866667'  
 
-$total = $files.Count
 
-if ($total -eq 0) {
-    throw "在資料夾中找不到以 $country 開頭的 TXT 檔案：$MessageFolder"
-}
+ ClientReferenceNo	MESSAGE_ID	Progress	REF_NO	TYPE	HIT_TAG	DETECTED_NAME	SdnName	SdnType	EntNum	RC
+I201912111359384300_0	1a47799ea8b94622	HOLD	98639a68-db1b-ea11-ae18-0050568a89cc	103		Al Haramain Islamic Foundation (S1/omalia)3/	Al Haramayn Islamic Foundation	GLSPEC	1951	89
+I201912111359384300_0	1a47799ea8b94622	HOLD	98639a68-db1b-ea11-ae18-0050568a89cc	103		Al Haramain Islamic Foundation (S1/omalia)3/	Al-Haramayn Islamic Foundation	GLSPEC	2319	89
 
-Write-Host ""
-Write-Host "============================================================"
-Write-Host "Start SwiftMX Batch (PowerShell 5.1 Multi-threaded + Retry)"
-Write-Host "============================================================"
-Write-Host "Input Folder   : $MessageFolder"
-Write-Host "Total Files    : $total"
-Write-Host "Max Threads    : $MaxThreads"
-Write-Host ""
 
-# ============================================================
-# Pre-check & Prepare Task List
-# ============================================================
 
-$fileDataList = [System.Collections.Generic.List[Object]]::new()
-$referenceNumbers = @{}
 
-foreach ($file in $files) {
-    $fileNameWithoutExtension = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+ClientReferenceNo 尾碼 一個是0一個是1  他們發的電文是一樣 
+指是config有調整 要看命中狀況
 
-    if ($fileNameWithoutExtension -notmatch '^[^_]+_[^_]+_(?<ClientReferenceNo>.+)_[^_]+$') {
-        throw "檔名格式不正確，預期格式為 BankNo_CompletedDate_ClientReferenceNo_流水號.txt：$($file.Name)"
-    }
 
-    $clientReferenceNo = $Matches['ClientReferenceNo']
-    if ([string]::IsNullOrWhiteSpace($clientReferenceNo)) {
-        throw "檔名中的 ClientReferenceNo 不可為空：$($file.Name)"
-    }
-
-    $referenceNo = $clientReferenceNo + '0'
-
-    if ($referenceNumbers.ContainsKey($referenceNo)) {
-        throw "ReferenceNo 重複：$referenceNo（檔案：$($file.Name)）"
-    }
-    $referenceNumbers[$referenceNo] = $true
-
-    # 預先讀取檔案內容
-    $rawMessage = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8)
-    if ([string]::IsNullOrWhiteSpace($rawMessage)) {
-        throw "電文檔案是空的：$($file.FullName)"
-    }
-
-    $fileDataList.Add([PSCustomObject]@{
-        FileName    = $file.Name
-        ReferenceNo = $referenceNo
-        RawMessage  = $rawMessage
-    })
-}
-
-# ============================================================
-# Create Runspace Pool
-# ============================================================
-
-$runspacePool = [Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(1, $MaxThreads)
-$runspacePool.Open()
-
-$jobs = [System.Collections.Generic.List[PSCustomObject]]::new()
-$batchWatch = [System.Diagnostics.Stopwatch]::StartNew()
-
-# 每個執行緒要執行的 ScriptBlock（內含 Retry 機制）
-$scriptBlock = {
-    param(
-        $task,
-        $country,
-        $countryConfig,
-        $uri,
-        $header
-    )
-
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    $cfg = $countryConfig[$country]
-
-    $bodyObj = @{
-        SourceId        = $cfg.SourceId
-        ReferenceNo     = $task.ReferenceNo
-        BankNo          = $cfg.BankNo
-        BranchNo        = $cfg.BranchNo
-        Channel         = $cfg.Channel
-        MessageTypeCode = $cfg.MessageTypeCode
-        RawMessage      = $task.RawMessage
-    }
-
-    $bodyJson = $bodyObj | ConvertTo-Json -Depth 20 -Compress
-
-    $maxRetries = 3
-    $retryCount = 0
-    $success = $false
-    $result = $null
-    $lastError = $null
-
-    while ($retryCount -lt $maxRetries -and -not $success) {
-        try {
-            $result = Invoke-RestMethod `
-                -Method Post `
-                -Uri $uri `
-                -Headers $header `
-                -ContentType "application/json; charset=utf-8" `
-                -Body $bodyJson
-
-            $success = $true
-        }
-        catch {
-            $retryCount++
-            $lastError = $_.Exception.Message
-            if ($retryCount -lt $maxRetries) {
-                # 遇到錯誤時暫停 2 秒再重試，給後端喘息時間
-                Start-Sleep -Seconds 2
-            }
-        }
-    }
-
-    $sw.Stop()
-
-    if ($success) {
-        return [PSCustomObject]@{
-            Status       = 'SUCCESS'
-            FileName     = $task.FileName
-            ReferenceNo  = $task.ReferenceNo
-            ElapsedMs    = [math]::Round($sw.Elapsed.TotalMilliseconds, 2)
-            Response     = $result
-            ErrorMessage = $null
-        }
-    }
-    else {
-        return [PSCustomObject]@{
-            Status       = 'FAILED'
-            FileName     = $task.FileName
-            ReferenceNo  = $task.ReferenceNo
-            ElapsedMs    = [math]::Round($sw.Elapsed.TotalMilliseconds, 2)
-            Response     = $null
-            ErrorMessage = "$lastError (Tried $maxRetries times)"
-        }
-    }
-}
-
-# ============================================================
-# Submit Tasks to Runspace Pool
-# ============================================================
-
-foreach ($task in $fileDataList) {
-    $powershell = [PowerShell]::Create().AddScript($scriptBlock).AddArgument($task).AddArgument($country).AddArgument($countryConfig).AddArgument($uri).AddArgument($header)
-    $powershell.RunspacePool = $runspacePool
-
-    $jobs.Add([PSCustomObject]@{
-        Pipe   = $powershell
-        Result = $powershell.BeginInvoke()
-    })
-}
-
-# ============================================================
-# Collect Results
-# ============================================================
-
-$successCount = 0
-$failedCount = 0
-$seq = 1
-
-foreach ($job in $jobs) {
-    $res = $job.Pipe.EndInvoke($job.Result)
-    $job.Pipe.Dispose()
-
-    if ($res.Status -eq 'SUCCESS') {
-        $successCount++
-        Write-Host "[$seq/$total] [SUCCESS] File: $($res.FileName) | RefNo: $($res.ReferenceNo) | Time: $($res.ElapsedMs) ms" -ForegroundColor Green
-    }
-    else {
-        $failedCount++
-        Write-Host "[$seq/$total] [FAILED ] File: $($res.FileName) | RefNo: $($res.ReferenceNo) | Error: $($res.ErrorMessage)" -ForegroundColor Red
-    }
-    $seq++
-}
-
-$runspacePool.Close()
-$runspacePool.Dispose()
-$batchWatch.Stop()
-
-# ============================================================
-# Summary
-# ============================================================
-
-Write-Host ""
-Write-Host "============================================================"
-Write-Host "Batch Summary"
-Write-Host "============================================================"
-Write-Host "Total      : $total"
-Write-Host "Success    : $successCount" -ForegroundColor Green
-Write-Host "Failed     : $failedCount" -ForegroundColor Red
-Write-Host "Total Time : $([math]::Round($batchWatch.Elapsed.TotalSeconds, 2)) sec"
-Write-Host "============================================================"
-Write-Host "Batch Completed." -ForegroundColor Cyan
+可以怎麼找出差異
