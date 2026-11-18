@@ -1,43 +1,26 @@
-
-INFO	2026/11/13 上午 09:48:34	node01_dwmt	TRANSF_1_27_1	DBG_21216	Finished transformations for Source Qualifier [AGGTRANS]. Total errors [0] 
-INFO	2026/11/13 上午 09:50:05	node01_dwmt	TRANSF_1_12_1	SORT_40422	SORT_40422 End of output from Sorter Transformation [srt_CIF]. Processed 1714090 rows (763661976 input bytes; 1703014400 temp I/O bytes). : (Fri Nov 13 09:50:05 2026)
-DEBUG	2026/11/13 上午 09:50:05	node01_dwmt	TRANSF_1_12_1	SORT_40426	Performance Warning! Sorter Transformation [srt_CIF] required 5-pass sort with 1703014400 temp I/O bytes. The cache size was so small that it required multiple passes of intermediate disk I/O with the temp file. This severely impacted the performance. The cache size should only need to be a small fraction of input data size, in addition to the minimum size about 8MB, to achieve reasonable performance. Please try to set it to at least 52MB for 2-pass sort (1-pass temp I/O), or better 819MB for 1-pass in-memory sort.
-INFO	2026/11/13 上午 09:50:05	node01_dwmt	TRANSF_1_12_1	SORT_40423	SORT_40423 End of sort for Sorter Transformation [srt_CIF]. : (Fri Nov 13 09:50:05 2026)
-INFO	2026/11/13 上午 09:50:05	node01_dwmt	TRANSF_1_12_1	SORT_40421	SORT_40421 End of input for Transformation [SRT_TEL_HOME]. : (Fri Nov 13 09:50:05 2026)
-INFO	2026/11/13 上午 09:50:36	node01_dwmt	TRANSF_1_4_1	SORT_40422	SORT_40422 End of output from Sorter Transformation [SRT_DELI_ALL]. Processed 4794089 rows (134234492 input bytes; 243269632 temp I/O bytes). : (Fri Nov 13 09:50:36 2026)
-DEBUG	2026/11/13 上午 09:50:36	node01_dwmt	TRANSF_1_4_1	SORT_40426	Performance Warning! Sorter Transformation [SRT_DELI_ALL] required 4-pass sort with 243269632 temp I/O bytes. The cache size was so small that it required multiple passes of intermediate disk I/O with the temp file. This severely impacted the performance. The cache size should only need to be a small fraction of input data size, in addition to the minimum size about 8MB, to achieve reasonable performance. Please try to set it to at least 25MB for 2-pass sort (1-pass temp I/O), or better 169MB for 1-pass in-memory sort.
-INFO	2026/11/13 上午 09:50:36	node01_dwmt	TRANSF_1_4_1	SORT_40423	SORT_40423 End of sort for Sorter Transformation [SRT_DELI_ALL]. : (Fri Nov 13 09:50:36 2026)
-INFO	2026/11/13 上午 09:50:36	node01_dwmt	TRANSF_1_4_1	DBG_21215	DBG_21215 Finished processing detail relation : (Fri Nov 13 09:50:36 2026)
-INFO	2026/11/13 上午 09:50:36	node01_dwmt	TRANSF_1_4_1	DBG_21216	Finished transformations for Source Qualifier [SQ_PSNL_DEL]. Total errors [0] 
-INFO	2026/11/13 上午 09:50:36	node01_dwmt	TRANSF_1_5_1	SORT_40422	SORT_40422 End of output from Sorter Transformation [SRT_INI_DEL]. Processed 7247567 rows (5482256560 input bytes; 16404115456 temp I/O bytes). : (Fri Nov 13 09:50:36 2026)
-DEBUG	2026/11/13 上午 09:50:36	node01_dwmt	TRANSF_1_5_1	SORT_40426	Performance Warning! Sorter Transformation [SRT_INI_DEL] required 5-pass sort with 16404115456 temp I/O bytes. The cache size was so small that it required multiple passes of intermediate disk I/O with the temp file. This severely impacted the performance. The cache size should only need to be a small fraction of input data size, in addition to the minimum size about 8MB, to achieve reasonable performance. Please try to set it to at least 122MB for 2-pass sort (1-pass temp I/O), or better 5843MB for 1-pass in-memory sort.
-INFO	2026/11/13 上午 09:50:36	node01_dwmt	TRANSF_1_5_1	SORT_40423	SORT_40423 End of sort for Sorter Transformation [SRT_INI_DEL]. : (Fri Nov 13 09:50:36 2026)
-INFO	2026/11/13 上午 09:50:36	node01_dwmt	TRANSF_1_5_1	DBG_21215	DBG_21215 Finished processing detail relation : (Fri Nov 13 09:50:36 2026)
-INFO	2026/11/13 上午 09:50:36	node01_dwmt	TRANSF_1_5_1	DBG_21216	Finished transformations for Source Qualifier [SQ_AML_CUST_MASTER_INI_DEL]. Total errors [0] 
-INFO	2026/11/13 下午 01:08:04	node01_dwmt	TRANSF_1_12_1	SORT_40422	SORT_40422 End of output from Sorter Transformation [SRT_TEL_HOME]. Processed 1714090 rows (768414316 input bytes; 1710604288 temp I/O bytes). : (Fri Nov 13 13:08:04 2026)
-DEBUG	2026/11/13 下午 01:08:04	node01_dwmt	TRANSF_1_12_1	SORT_40426	Performance Warning! Sorter Transformation [SRT_TEL_HOME] required 5-pass sort with 1710604288 temp I/O bytes. The cache size was so small that it required multiple passes of intermediate disk I/O with the temp file. This severely impacted the performance. The cache size should only need to be a small fraction of input data size, in addition to the minimum size about 8MB, to achieve reasonable performance. Please try to set it to at least 52MB for 2-pass sort (1-pass temp I/O), or better 824MB for 1-pass in-memory sort.
-INFO	2026/11/13 下午 01:08:04	node01_dwmt	TRANSF_1_12_1	SORT_40423	SORT_40423 End of sort for Sorter Transformation [SRT_TEL_HOME]. : (Fri Nov 13 13:08:04 2026)
-INFO	2026/11/13 下午 01:08:04	node01_dwmt	TRANSF_1_12_1	SORT_40420	SORT_40420 Start of input for Transformation [srt_CUST_ID1]. : (Fri Nov 13 13:08:04 2026)
-INFO	2026/11/13 下午 01:10:01	node01_dwmt	TRANSF_1_12_1	SORT_40421	SORT_40421 End of input for Transformation [srt_CUST_ID1]. : (Fri Nov 13 13:10:01 2026)
-INFO	2026/11/13 下午 04:32:20	node01_dwmt	TRANSF_1_12_1	SORT_40422	SORT_40422 End of output from Sorter Transformation [srt_CUST_ID1]. Processed 1714090 rows (770518336 input bytes; 1716924416 temp I/O bytes). : (Fri Nov 13 16:32:20 2026)
-DEBUG	2026/11/13 下午 04:32:20	node01_dwmt	TRANSF_1_12_1	SORT_40426	Performance Warning! Sorter Transformation [srt_CUST_ID1] required 5-pass sort with 1716924416 temp I/O bytes. The cache size was so small that it required multiple passes of intermediate disk I/O with the temp file. This severely impacted the performance. The cache size should only need to be a small fraction of input data size, in addition to the minimum size about 8MB, to achieve reasonable performance. Please try to set it to at least 52MB for 2-pass sort (1-pass temp I/O), or better 826MB for 1-pass in-memory sort.
-INFO	2026/11/13 下午 04:32:20	node01_dwmt	TRANSF_1_12_1	SORT_40423	SORT_40423 End of sort for Sorter Transformation [srt_CUST_ID1]. : (Fri Nov 13 16:32:20 2026)
-INFO	2026/11/13 下午 04:32:20	node01_dwmt	TRANSF_1_12_1	SORT_40420	SORT_40420 Start of input for Transformation [SRT_MOBILE_NO]. : (Fri Nov 13 16:32:20 2026)
-INFO	2026/11/13 下午 04:34:19	node01_dwmt	TRANSF_1_12_1	SORT_40421	SORT_40421 End of input for Transformation [SRT_MOBILE_NO]. : (Fri Nov 13 16:34:19 2026)
-INFO	2026/11/13 下午 07:48:36	node01_dwmt	TRANSF_1_12_1	SORT_40422	SORT_40422 End of output from Sorter Transformation [SRT_MOBILE_NO]. Processed 1714090 rows (775270676 input bytes; 1738014720 temp I/O bytes). : (Fri Nov 13 19:48:36 2026)
-DEBUG	2026/11/13 下午 07:48:36	node01_dwmt	TRANSF_1_12_1	SORT_40426	Performance Warning! Sorter Transformation [SRT_MOBILE_NO] required 5-pass sort with 1738014720 temp I/O bytes. The cache size was so small that it required multiple passes of intermediate disk I/O with the temp file. This severely impacted the performance. The cache size should only need to be a small fraction of input data size, in addition to the minimum size about 8MB, to achieve reasonable performance. Please try to set it to at least 52MB for 2-pass sort (1-pass temp I/O), or better 831MB for 1-pass in-memory sort.
-INFO	2026/11/13 下午 07:48:36	node01_dwmt	TRANSF_1_12_1	SORT_40423	SORT_40423 End of sort for Sorter Transformation [SRT_MOBILE_NO]. : (Fri Nov 13 19:48:36 2026)
-INFO	2026/11/13 下午 07:51:09	node01_dwmt	TRANSF_1_12_1	DBG_21215	DBG_21215 Finished processing detail relation : (Fri Nov 13 19:51:09 2026)
-INFO	2026/11/13 下午 07:51:09	node01_dwmt	TRANSF_1_12_1	DBG_21215	DBG_21215 Finished processing detail relation : (Fri Nov 13 19:51:09 2026)
-INFO	2026/11/13 下午 07:51:09	node01_dwmt	TRANSF_1_12_1	DBG_21215	DBG_21215 Finished processing detail relation : (Fri Nov 13 19:51:09 2026)
-INFO	2026/11/13 下午 07:51:09	node01_dwmt	TRANSF_1_12_1	DBG_21215	DBG_21215 Finished processing detail relation : (Fri Nov 13 19:51:09 2026)
-INFO	2026/11/13 下午 07:51:09	node01_dwmt	TRANSF_1_12_1	DBG_21215	DBG_21215 Finished processing detail relation : (Fri Nov 13 19:51:09 2026)
-INFO	2026/11/13 下午 07:51:09	node01_dwmt	TRANSF_1_12_1	DBG_21215	DBG_21215 Finished processing detail relation : (Fri Nov 13 19:51:09 2026)
-INFO	2026/11/13 下午 07:51:09	node01_dwmt	TRANSF_1_37_1	SORT_40421	SORT_40421 End of input for Transformation [SRT_Distinct]. : (Fri Nov 13 19:51:09 2026)
-INFO	2026/11/13 下午 07:51:09	node01_dwmt	TRANSF_1_12_1	DBG_21216	Finished transformations for Source Qualifier [SQ_CUST_ADDR]. Total errors [0] 
-INFO	2026/11/13 下午 07:52:02	node01_dwmt	WRITER_1_*_1	WRT_8167	Start loading table [AML_CUST_MASTER_BANCS_SG] at: Fri Nov 13 19:52:02 2026
-INFO	2026/11/13 下午 07:52:04	node01_dwmt	WRITER_1_*_1	WRT_8161	
-TARGET BASED COMMIT POINT  Fri Nov 13 19:52:04 2026
-
-
-哪個站比較大cache 要改多少
+這些日誌來自 Informatica PowerCenter 的執行記錄，主要是針對 Sorter 轉換（Sorter Transformation）效能瓶頸的警告 (SORT_40426)。
+系統日誌中有多個 Sorter 執行了多次 Pass（例如 4-pass 到 5-pass sort），產生了大量的暫存檔 I/O（Temp I/O Bytes），這會嚴重拖慢整體執行效能。
+一、 哪個站（Sorter）比較大？
+從日誌中可以看出，影響最大、資料量與暫存 I/O 最高的是 SRT_INI_DEL（位於 SQ_AML_CUST_MASTER_INI_DEL 來源），其次依序為幾筆與客戶電話、資料相關的 Sorter。
+各個 Sorter 的規模與效能數據比較如下：
+| Sorter 名稱 | 處理行數 (Rows) | 輸入資料大小 | 暫存 I/O 大小 (Temp I/O) | 所需 Pass 數 | 建議 1-pass 記憶體大小 (In-memory) |
+|---|---|---|---|---|---|
+| SRT_INI_DEL | 7,247,567 | 5,482,256,560 bytes (~5.1 GB) | 16,404,115,456 bytes (~15.3 GB) | 5-pass | 5,843 MB (~5.7 GB) |
+| SRT_MOBILE_NO | 1,714,090 | 775,270,676 bytes | 1,738,014,720 bytes | 5-pass | 831 MB |
+| srt_CUST_ID1 | 1,714,090 | 770,518,336 bytes | 1,716,924,416 bytes | 5-pass | 826 MB |
+| SRT_TEL_HOME | 1,714,090 | 768,414,316 bytes | 1,710,604,288 bytes | 5-pass | 824 MB |
+| srt_CIF | 1,714,090 | 763,661,976 bytes | 1,703,014,400 bytes | 5-pass | 819 MB |
+| SRT_DELI_ALL | 4,794,089 | 134,234,492 bytes | 243,269,632 bytes | 4-pass | 169 MB |
+ * 規模最大： SRT_INI_DEL 是規模最龐大的站點，處理超過 700 萬行資料，產生了高達 15.3 GB 的暫存 I/O。
+二、 Cache 要改多少？
+日誌中已經明確給出了每個 Sorter 的最佳建議值。如果要達到最佳效能（1-pass 記憶體排序，完全不需要走磁碟暫存 I/O），建議將這些 Sorter 的 Cache Size (Sorter Cache Size) 調整至以下大小：
+ * SRT_INI_DEL：建議設為至少 5,843 MB (約 5.7 GB) 即可實現 1-pass in-memory sort。
+ * SRT_MOBILE_NO：建議設為至少 831 MB。
+ * srt_CUST_ID1：建議設為至少 826 MB。
+ * SRT_TEL_HOME / srt_CIF：建議設為至少 824 MB / 819 MB。
+ * SRT_DELI_ALL：建議設為至少 169 MB。
+三、 在 PowerCenter 中如何調整？
+ * 在 PowerCenter Designer 中打開對應的 Mapping。
+ * 雙擊該 Sorter Transformation（例如 SRT_INI_DEL），進入 Properties 屬性頁籤。
+ * 找到 Sorter Cache Size 屬性（預設通常較小或自動）。
+ * 依據上方建議的數值進行修改（注意：請確保伺服器有足夠的可用實體記憶體 RAM 來分配給這些 Cache，特別是 SRT_INI_DEL 需要較大空間）。
