@@ -1,4 +1,17 @@
-;WITH Ranked AS (
+;WITH TargetList (FlagOrder, TargetCustNo) AS (
+    SELECT *
+    FROM (VALUES
+        (1, N'F2667974280'),  -- 加強關注客戶
+        (2, N'H164340449'),   -- 告誡戶
+        (3, N'A2625245400'),  -- 衍生管制帳戶、警示戶
+        (4, N'FIXXT01PA'),    -- 無記名股票
+        (5, N'GRXXT01VN'),    -- 複雜結構
+        (6, N'OCXXN01MH'),    -- 黑名單
+        (7, N'P1647954300'),  -- PEP
+        (8, N'P1637405480')   -- 負面新聞
+    ) AS v(FlagOrder, TargetCustNo)
+),
+BaseData AS (
     SELECT
         flag.FlagOrder,
         flag.FlagName AS [抽樣項目],
@@ -23,12 +36,7 @@
             CASE WHEN (m.PEPBitwiseCode & 1) = 1 THEN N'、黑名單' ELSE N'' END,
             CASE WHEN (m.PEPBitwiseCode & 2) = 2 THEN N'、PEP' ELSE N'' END,
             CASE WHEN (m.PEPBitwiseCode & 4) = 4 THEN N'、負面新聞' ELSE N'' END
-        ), 1, 1, N'') AS [PEP註記],
-
-        ROW_NUMBER() OVER (
-            PARTITION BY flag.FlagOrder
-            ORDER BY (SELECT NULL)
-        ) AS RowNum
+        ), 1, 1, N'') AS [PEP註記]
 
     FROM dbo.Customer_Migrate_buffer f
     JOIN dbo.Cust_NP_Migrate_buffer m
@@ -63,6 +71,10 @@
                 CASE WHEN (m.PEPBitwiseCode & 4) = 4 THEN 1 ELSE 0 END)
     ) flag(FlagOrder, FlagName, IsMatched)
 
+    JOIN TargetList tl
+        ON tl.FlagOrder = flag.FlagOrder
+       AND (b.CustomerNo = tl.TargetCustNo OR f.CustomerNo = tl.TargetCustNo)
+
     WHERE flag.IsMatched = 1
 )
 SELECT
@@ -77,10 +89,5 @@ SELECT
     IsComplexStructure,
     PEPBitwiseCode,
     [PEP註記]
-FROM Ranked
-WHERE RowNum = 1
+FROM BaseData
 ORDER BY FlagOrder;
-
-
-
-                                       
