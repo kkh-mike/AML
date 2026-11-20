@@ -1,93 +1,53 @@
-;WITH TargetList (FlagOrder, TargetCustNo) AS (
-    SELECT *
-    FROM (VALUES
-        (1, N'F2667974280'),  -- 加強關注客戶
-        (2, N'H164340449'),   -- 告誡戶
-        (3, N'A2625245400'),  -- 衍生管制帳戶、警示戶
-        (4, N'FIXXT01PA'),    -- 無記名股票
-        (5, N'GRXXT01VN'),    -- 複雜結構
-        (6, N'OCXXN01MH'),    -- 黑名單
-        (7, N'P1647954300'),  -- PEP
-        (8, N'P1637405480')   -- 負面新聞
-    ) AS v(FlagOrder, TargetCustNo)
+WITH QueryA AS (
+    SELECT DISTINCT
+        LEFT(A.Block4_UserReference, LEN(A.Block4_UserReference) - 1) AS BASE_MESSAGE_ID,
+        A.Block4_UserReference AS ORIG_MESSAGE_ID,
+        A.MessageType AS TYPE,
+        replace(replace(B.FullName,char(10),''),char(13),'') AS DETECTED_NAME,
+        B.SdnName,
+        B.SdnType,
+        B.EntNum,
+        B.RC
+    FROM SWIFT_MTHeader_Main A
+    LEFT JOIN MESSAGEDATABASE..Swift_MTRaw D ON A.MT_KEY = D.ID
+    LEFT JOIN SWIFT_ResultGroups C ON A.MT_KEY = C.SourceKey
+    LEFT JOIN SWIFT_ResultNames B ON A.MT_KEY = B.SourceKey and C.nameID = B.nameid
+    WHERE D.CreatedDate >= '2026-11-19 00:28:48.7270000' AND D.CreatedDate < '2026-11-19 00:30:49.8470000'
 ),
-BaseData AS (
-    SELECT
-        flag.FlagOrder,
-        flag.FlagName AS [抽樣項目],
-
-        b.CustomerNo AS [台新客戶ID],
-        f.CustomerNo AS [新光客戶ID],
-
-        CASE cc.CUST_TYPE_CDE
-            WHEN 'N' THEN N'企業'
-            WHEN 'P' THEN N'個人'
-            ELSE cc.CUST_TYPE_CDE
-        END AS [客戶類型],
-
-        m.IsSARFiled,
-        m.SDST2400001,
-        m.Warn_Restrict_Account,
-        m.IsBearerShares,
-        m.IsComplexStructure,
-        m.PEPBitwiseCode,
-
-        STUFF(CONCAT(
-            CASE WHEN (m.PEPBitwiseCode & 1) = 1 THEN N'、黑名單' ELSE N'' END,
-            CASE WHEN (m.PEPBitwiseCode & 2) = 2 THEN N'、PEP' ELSE N'' END,
-            CASE WHEN (m.PEPBitwiseCode & 4) = 4 THEN N'、負面新聞' ELSE N'' END
-        ), 1, 1, N'') AS [PEP註記]
-
-    FROM dbo.Customer_Migrate_buffer f
-    JOIN dbo.Cust_NP_Migrate_buffer m
-        ON f.CIF_KEY = m.CIF_KEY
-    JOIN dbo.CIF_Migrate_Mapping_TEMP t
-        ON t.SOURCE_CIF_KEY = f.CIF_KEY
-    LEFT JOIN (
-        SELECT DISTINCT CIF_KEY, CustomerNo
-        FROM dbo.BSA_SUB_CUST_FACT
-    ) b
-        ON b.CIF_KEY = t.NEW_CIF_KEY
-    LEFT JOIN dbo.PB_CUSTOMER_FACT cc
-        ON cc.CIF_KEY = b.CIF_KEY
-
-    CROSS APPLY (
-        VALUES
-            (1, N'加強關注客戶',
-                CASE WHEN m.IsSARFiled = 1 THEN 1 ELSE 0 END),
-            (2, N'告誡戶',
-                CASE WHEN m.SDST2400001 = 1 THEN 1 ELSE 0 END),
-            (3, N'衍生管制帳戶、警示戶',
-                CASE WHEN m.Warn_Restrict_Account = 1 THEN 1 ELSE 0 END),
-            (4, N'無記名股票',
-                CASE WHEN m.IsBearerShares = 1 THEN 1 ELSE 0 END),
-            (5, N'複雜結構',
-                CASE WHEN m.IsComplexStructure = 1 THEN 1 ELSE 0 END),
-            (6, N'黑名單',
-                CASE WHEN (m.PEPBitwiseCode & 1) = 1 THEN 1 ELSE 0 END),
-            (7, N'PEP',
-                CASE WHEN (m.PEPBitwiseCode & 2) = 2 THEN 1 ELSE 0 END),
-            (8, N'負面新聞',
-                CASE WHEN (m.PEPBitwiseCode & 4) = 4 THEN 1 ELSE 0 END)
-    ) flag(FlagOrder, FlagName, IsMatched)
-
-    JOIN TargetList tl
-        ON tl.FlagOrder = flag.FlagOrder
-       AND (b.CustomerNo = tl.TargetCustNo OR f.CustomerNo = tl.TargetCustNo)
-
-    WHERE flag.IsMatched = 1
+QueryB AS (
+    SELECT DISTINCT
+        LEFT(A.Block4_UserReference, LEN(A.Block4_UserReference) - 1) AS BASE_MESSAGE_ID,
+        A.Block4_UserReference AS ORIG_MESSAGE_ID,
+        A.MessageType AS TYPE,
+        replace(replace(B.FullName,char(10),''),char(13),'') AS DETECTED_NAME,
+        B.SdnName,
+        B.SdnType,
+        B.EntNum,
+        B.RC
+    FROM SWIFT_MTHeader_Main A
+    LEFT JOIN MESSAGEDATABASE..Swift_MTRaw D ON A.MT_KEY = D.ID
+    LEFT JOIN SWIFT_ResultGroups C ON A.MT_KEY = C.SourceKey
+    LEFT JOIN SWIFT_ResultNames B ON A.MT_KEY = B.SourceKey and C.nameID = B.nameid
+    WHERE D.CreatedDate >= '2026-11-18 23:57:46.2170000' AND D.CreatedDate < '2026-11-18 23:59:46.2300000'
 )
-SELECT
-    [抽樣項目],
-    [台新客戶ID],
-    [新光客戶ID],
-    [客戶類型],
-    IsSARFiled,
-    SDST2400001,
-    Warn_Restrict_Account,
-    IsBearerShares,
-    IsComplexStructure,
-    PEPBitwiseCode,
-    [PEP註記]
-FROM BaseData
-ORDER BY FlagOrder;
+SELECT 
+    COALESCE(A.BASE_MESSAGE_ID, B.BASE_MESSAGE_ID) AS BASE_MESSAGE_ID,
+    A.ORIG_MESSAGE_ID AS A_MSG_ID,
+    B.ORIG_MESSAGE_ID AS B_MSG_ID,
+    A.DETECTED_NAME AS A_DETECTED_NAME,
+    B.DETECTED_NAME AS B_DETECTED_NAME,
+    A.EntNum AS A_EntNum,
+    B.EntNum AS B_EntNum,
+    CASE 
+        WHEN ISNULL(A.DETECTED_NAME, '') = ISNULL(B.DETECTED_NAME, '')
+         AND ISNULL(CAST(A.EntNum AS VARCHAR), '') = ISNULL(CAST(B.EntNum AS VARCHAR), '')
+        THEN 'SAME'
+        ELSE 'DIFF'
+    END AS COMPARE_RESULT
+FROM QueryA A
+FULL OUTER JOIN QueryB B
+    ON A.BASE_MESSAGE_ID = B.BASE_MESSAGE_ID
+   AND ISNULL(A.DETECTED_NAME, '') = ISNULL(B.DETECTED_NAME, '')
+   AND ISNULL(CAST(A.EntNum AS VARCHAR), '') = ISNULL(CAST(B.EntNum AS VARCHAR), '')
+WHERE A.BASE_MESSAGE_ID IS NULL OR B.BASE_MESSAGE_ID IS NULL -- 只看有差異的；想看全部就把這行註解掉
+ORDER BY BASE_MESSAGE_ID, COMPARE_RESULT;
