@@ -1,18 +1,86 @@
-這段文字重複了兩次「屬於黑名單」，讓前後句看起來有點像複製貼上。建議把第一句當作「來源資料說明」，第二句聚焦在「系統寫入與檢核結果」，並把「旗標／狀態一致」的結論帶出來，讀起來會更俐落。
-以下提供幾個修改版本，你可以依文件風格挑選（為了與你前兩張圖的格式保持一致，也附上對齊的寫法）：
-一、 精簡專業版（建議採用，與前兩張圖格式一致）
->  * 新光來源：客戶 ID 54314210，關聯人員 RefNo A26591929（抽樣旗標：黑名單）。
->  * 轉入台新：系統已正確寫入客戶 ID 54314210 及關聯人員 RefNo A26591929。
->  * 檢核結果：ID 轉號、關聯人員資料及「黑名單」旗標皆正確寫入，確認無誤。
-> 
-二、 自然敘述版（保留你原本的兩行句型）
-> 新光來源資料為客戶 ID 54314210，其關聯人員 RefNo 為 A26591929，抽樣旗標屬於「黑名單」。
-> 經系統確認，已正確寫入台新客戶 ID 54314210 及關聯人員 RefNo A26591929，黑名單旗標亦同步轉入無誤。
-> 
-三、 極簡條列版（適合大量測試案例快速填寫）
->  * 來源資料：新光客戶 ID 54314210 / RefNo A26591929（黑名單）
->  * 檢核結果：系統已正確寫入台新客戶 ID 54314210 及 RefNo A26591929，黑名單旗標相符。
-> 
-💡 細節補充：
-從畫面下方的系統截圖來看，A26591929 是掛在「關聯的法定代理人」底下的「參考號碼（RefNo）」。在敘述中加上「關聯人員」或「法定代理人」幾個字，能讓審閱者一眼看懂 54314210（客戶）與 A26591929（關係人）之間的層級關係，不會誤以為兩者是同一人的不同編號。
-後面如果還有 PEP、負面新聞等其他旗標要寫，都可以直接套用這套模板（把「黑名單」替換成對應的旗標名稱即可）。需要幫你把後面幾筆也一起順過嗎？
+;WITH Ranked AS (
+    SELECT
+        flag.FlagOrder,
+        flag.FlagName AS [抽樣項目],
+
+        b.CustomerNo AS [台新客戶ID],
+        f.CustomerNo AS [新光客戶ID],
+
+        CASE cc.CUST_TYPE_CDE
+            WHEN 'N' THEN N'企業'
+            WHEN 'P' THEN N'個人'
+            ELSE cc.CUST_TYPE_CDE
+        END AS [客戶類型],
+
+        m.IsSARFiled,
+        m.SDST2400001,
+        m.Warn_Restrict_Account,
+        m.IsBearerShares,
+        m.IsComplexStructure,
+        m.PEPBitwiseCode,
+
+        STUFF(CONCAT(
+            CASE WHEN (m.PEPBitwiseCode & 1) = 1 THEN N'、黑名單' ELSE N'' END,
+            CASE WHEN (m.PEPBitwiseCode & 2) = 2 THEN N'、PEP' ELSE N'' END,
+            CASE WHEN (m.PEPBitwiseCode & 4) = 4 THEN N'、負面新聞' ELSE N'' END
+        ), 1, 1, N'') AS [PEP註記],
+
+        ROW_NUMBER() OVER (
+            PARTITION BY flag.FlagOrder
+            ORDER BY (SELECT NULL)
+        ) AS RowNum
+
+    FROM dbo.Customer_Migrate_buffer f
+    JOIN dbo.Cust_NP_Migrate_buffer m
+        ON f.CIF_KEY = m.CIF_KEY
+    JOIN dbo.CIF_Migrate_Mapping_TEMP t
+        ON t.SOURCE_CIF_KEY = f.CIF_KEY
+    LEFT JOIN (
+        SELECT DISTINCT CIF_KEY, CustomerNo
+        FROM dbo.BSA_SUB_CUST_FACT
+    ) b
+        ON b.CIF_KEY = t.NEW_CIF_KEY
+    LEFT JOIN dbo.PB_CUSTOMER_FACT cc
+        ON cc.CIF_KEY = b.CIF_KEY
+
+    CROSS APPLY (
+        VALUES
+            (1, N'加強關注客戶',
+                CASE WHEN m.IsSARFiled = 1 THEN 1 ELSE 0 END),
+            (2, N'告誡戶',
+                CASE WHEN m.SDST2400001 = 1 THEN 1 ELSE 0 END),
+            (3, N'衍生管制帳戶、警示戶',
+                CASE WHEN m.Warn_Restrict_Account = 1 THEN 1 ELSE 0 END),
+            (4, N'無記名股票',
+                CASE WHEN m.IsBearerShares = 1 THEN 1 ELSE 0 END),
+            (5, N'複雜結構',
+                CASE WHEN m.IsComplexStructure = 1 THEN 1 ELSE 0 END),
+            (6, N'黑名單',
+                CASE WHEN (m.PEPBitwiseCode & 1) = 1 THEN 1 ELSE 0 END),
+            (7, N'PEP',
+                CASE WHEN (m.PEPBitwiseCode & 2) = 2 THEN 1 ELSE 0 END),
+            (8, N'負面新聞',
+                CASE WHEN (m.PEPBitwiseCode & 4) = 4 THEN 1 ELSE 0 END)
+    ) flag(FlagOrder, FlagName, IsMatched)
+
+    WHERE flag.IsMatched = 1
+)
+SELECT
+    [抽樣項目],
+    [台新客戶ID],
+    [新光客戶ID],
+    [客戶類型],
+    IsSARFiled,
+    SDST2400001,
+    Warn_Restrict_Account,
+    IsBearerShares,
+    IsComplexStructure,
+    PEPBitwiseCode,
+    [PEP註記]
+FROM Ranked
+WHERE RowNum = 1
+ORDER BY FlagOrder;
+
+
+
+                                       
